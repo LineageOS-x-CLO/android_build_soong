@@ -219,3 +219,7 @@ com\.google\.wear\..*
 # Packages used for display offload in Wear OS
 vendor\.google_clockwork\.displayoffload3
 vendor\.google_clockwork\.displayoffload3\..*
+
+###################################################
+# IFAA Manager used for Alipay and/or WeChat payment
+org\.ifaa\.android\.manager.*
