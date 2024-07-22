@@ -174,7 +174,7 @@ type ModuleContext interface {
 	InstallInVendor() bool
 	InstallForceOS() (*OsType, *ArchType)
 
-	RequiredModuleNames() []string
+	RequiredModuleNames(ctx ConfigAndErrorContext) []string
 	HostRequiredModuleNames() []string
 	TargetRequiredModuleNames() []string
 
@@ -729,8 +729,8 @@ func (m *moduleContext) ExpandOptionalSource(srcFile *string, _ string) Optional
 	return OptionalPath{}
 }
 
-func (m *moduleContext) RequiredModuleNames() []string {
-	return m.module.RequiredModuleNames()
+func (m *moduleContext) RequiredModuleNames(ctx ConfigAndErrorContext) []string {
+	return m.module.RequiredModuleNames(ctx)
 }
 
 func (m *moduleContext) HostRequiredModuleNames() []string {
