@@ -26,8 +26,6 @@ import (
 	"sort"
 	"strings"
 
-	"android/soong/bazel"
-
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
@@ -113,7 +111,7 @@ type Module interface {
 	// Get information about the properties that can contain visibility rules.
 	visibilityProperties() []visibilityProperty
 
-	RequiredModuleNames() []string
+	RequiredModuleNames(ctx ConfigAndErrorContext) []string
 	HostRequiredModuleNames() []string
 	TargetRequiredModuleNames() []string
 
@@ -422,7 +420,7 @@ type commonProperties struct {
 	Vintf_fragments []string `android:"path"`
 
 	// names of other modules to install if this module is installed
-	Required []string `android:"arch_variant"`
+	Required proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// names of other modules to install on host if this module is installed
 	Host_required []string `android:"arch_variant"`
@@ -849,9 +847,6 @@ type ModuleBase struct {
 	// archPropRoot that is filled with arch specific values by the arch mutator.
 	archProperties [][]interface{}
 
-	// Properties specific to the Blueprint to BUILD migration.
-	bazelTargetModuleProperties bazel.BazelTargetModuleProperties
-
 	// Information about all the properties on the module that contains visibility rules that need
 	// checking.
 	visibilityPropertyInfo []visibilityProperty
@@ -918,6 +913,10 @@ type ModuleBase struct {
 	// outputFiles stores the output of a module by tag and is used to set
 	// the OutputFilesProvider in GenerateBuildActions
 	outputFiles OutputFilesInfo
+
+	// complianceMetadataInfo is for different module types to dump metadata.
+	// See android.ModuleContext interface.
+	complianceMetadataInfo *ComplianceMetadataInfo
 }
 
 func (m *ModuleBase) AddJSONData(d *map[string]interface{}) {
@@ -1100,7 +1099,7 @@ func addRequiredDeps(ctx BottomUpMutatorContext) {
 	hostTargets = append(hostTargets, ctx.Config().BuildOSCommonTarget)
 
 	if ctx.Device() {
-		for _, depName := range ctx.Module().RequiredModuleNames() {
+		for _, depName := range ctx.Module().RequiredModuleNames(ctx) {
 			for _, target := range deviceTargets {
 				addDep(target, depName)
 			}
@@ -1113,7 +1112,7 @@ func addRequiredDeps(ctx BottomUpMutatorContext) {
 	}
 
 	if ctx.Host() {
-		for _, depName := range ctx.Module().RequiredModuleNames() {
+		for _, depName := range ctx.Module().RequiredModuleNames(ctx) {
 			for _, target := range hostTargets {
 				// When a host module requires another host module, don't make a
 				// dependency if they have different OSes (i.e. hostcross).
@@ -1618,8 +1617,8 @@ func (m *ModuleBase) InRecovery() bool {
 	return m.base().commonProperties.ImageVariation == RecoveryVariation
 }
 
-func (m *ModuleBase) RequiredModuleNames() []string {
-	return m.base().commonProperties.Required
+func (m *ModuleBase) RequiredModuleNames(ctx ConfigAndErrorContext) []string {
+	return m.base().commonProperties.Required.GetOrDefault(m.ConfigurableEvaluator(ctx), nil)
 }
 
 func (m *ModuleBase) HostRequiredModuleNames() []string {
@@ -1912,9 +1911,54 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			return
 		}
 
-		m.module.GenerateAndroidBuildActions(ctx)
-		if ctx.Failed() {
-			return
+		incrementalAnalysis := false
+		incrementalEnabled := false
+		var cacheKey *blueprint.BuildActionCacheKey = nil
+		var incrementalModule *blueprint.Incremental = nil
+		if ctx.bp.GetIncrementalEnabled() {
+			if im, ok := m.module.(blueprint.Incremental); ok {
+				incrementalModule = &im
+				incrementalEnabled = im.IncrementalSupported()
+				incrementalAnalysis = ctx.bp.GetIncrementalAnalysis() && incrementalEnabled
+			}
+		}
+		if incrementalEnabled {
+			hash, err := proptools.CalculateHash(m.GetProperties())
+			if err != nil {
+				ctx.ModuleErrorf("failed to calculate properties hash: %s", err)
+				return
+			}
+			cacheInput := new(blueprint.BuildActionCacheInput)
+			cacheInput.PropertiesHash = hash
+			ctx.VisitDirectDeps(func(module Module) {
+				cacheInput.ProvidersHash =
+					append(cacheInput.ProvidersHash, ctx.bp.OtherModuleProviderInitialValueHashes(module))
+			})
+			hash, err = proptools.CalculateHash(&cacheInput)
+			if err != nil {
+				ctx.ModuleErrorf("failed to calculate cache input hash: %s", err)
+				return
+			}
+			cacheKey = &blueprint.BuildActionCacheKey{
+				Id:        ctx.bp.ModuleId(),
+				InputHash: hash,
+			}
+		}
+
+		restored := false
+		if incrementalAnalysis && cacheKey != nil {
+			restored = ctx.bp.RestoreBuildActions(cacheKey, incrementalModule)
+		}
+
+		if !restored {
+			m.module.GenerateAndroidBuildActions(ctx)
+			if ctx.Failed() {
+				return
+			}
+		}
+
+		if incrementalEnabled && cacheKey != nil {
+			ctx.bp.CacheBuildActions(cacheKey, incrementalModule)
 		}
 
 		// Create the set of tagged dist files after calling GenerateAndroidBuildActions
@@ -1988,7 +2032,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			TargetDependencies: targetRequired,
 			HostDependencies:   hostRequired,
 			Data:               data,
-			Required:           m.RequiredModuleNames(),
+			Required:           m.RequiredModuleNames(ctx),
 		}
 		SetProvider(ctx, ModuleInfoJSONProvider, m.moduleInfoJSON)
 	}
@@ -2000,6 +2044,8 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if m.outputFiles.DefaultOutputFiles != nil || m.outputFiles.TaggedOutputFiles != nil {
 		SetProvider(ctx, OutputFilesProvider, m.outputFiles)
 	}
+
+	buildComplianceMetadataProvider(ctx, m)
 }
 
 func SetJarJarPrefixHandler(handler func(ModuleContext)) {
@@ -2204,7 +2250,20 @@ func (e configurationEvalutor) EvaluateConfiguration(condition proptools.Configu
 		variable := condition.Arg(1)
 		if n, ok := ctx.Config().productVariables.VendorVars[namespace]; ok {
 			if v, ok := n[variable]; ok {
-				return proptools.ConfigurableValueString(v)
+				ty := ""
+				if namespaces, ok := ctx.Config().productVariables.VendorVarTypes[namespace]; ok {
+					ty = namespaces[variable]
+				}
+				switch ty {
+				case "":
+					// strings are the default, we don't bother writing them to the soong variables json file
+					return proptools.ConfigurableValueString(v)
+				case "bool":
+					return proptools.ConfigurableValueBool(v == "true")
+				default:
+					panic("unhandled soong config variable type: " + ty)
+				}
+
 			}
 		}
 		return proptools.ConfigurableValueUndefined()
@@ -2475,34 +2534,45 @@ func outputFilesForModule(ctx PathContext, module blueprint.Module, tag string) 
 // *inter-module-communication*.
 // If mctx module is the same as the param module the output files are obtained
 // from outputFiles property of module base, to avoid both setting and
-// reading OutputFilesProvider before  GenerateBuildActions is finished. Also
-// only empty-string-tag is supported in this case.
+// reading OutputFilesProvider before GenerateBuildActions is finished.
 // If a module doesn't have the OutputFilesProvider, nil is returned.
 func outputFilesForModuleFromProvider(ctx PathContext, module blueprint.Module, tag string) (Paths, error) {
-	// TODO: support OutputFilesProvider for singletons
-	mctx, ok := ctx.(ModuleContext)
-	if !ok {
-		return nil, nil
-	}
-	if mctx.Module() != module {
-		if outputFilesProvider, ok := OtherModuleProvider(mctx, module, OutputFilesProvider); ok {
+	var outputFilesProvider OutputFilesInfo
+
+	if mctx, isMctx := ctx.(ModuleContext); isMctx {
+		if mctx.Module() != module {
+			outputFilesProvider, _ = OtherModuleProvider(mctx, module, OutputFilesProvider)
+		} else {
 			if tag == "" {
-				return outputFilesProvider.DefaultOutputFiles, nil
-			} else if taggedOutputFiles, hasTag := outputFilesProvider.TaggedOutputFiles[tag]; hasTag {
+				return mctx.Module().base().outputFiles.DefaultOutputFiles, nil
+			} else if taggedOutputFiles, hasTag := mctx.Module().base().outputFiles.TaggedOutputFiles[tag]; hasTag {
 				return taggedOutputFiles, nil
 			} else {
-				return nil, fmt.Errorf("unsupported module reference tag %q", tag)
+				return nil, fmt.Errorf("unsupported tag %q for module getting its own output files", tag)
 			}
 		}
-	} else {
+	} else if cta, isCta := ctx.(*singletonContextAdaptor); isCta {
+		providerData, _ := cta.moduleProvider(module, OutputFilesProvider)
+		outputFilesProvider, _ = providerData.(OutputFilesInfo)
+	}
+	// TODO: Add a check for skipped context
+
+	if !outputFilesProvider.isEmpty() {
 		if tag == "" {
-			return mctx.Module().base().outputFiles.DefaultOutputFiles, nil
+			return outputFilesProvider.DefaultOutputFiles, nil
+		} else if taggedOutputFiles, hasTag := outputFilesProvider.TaggedOutputFiles[tag]; hasTag {
+			return taggedOutputFiles, nil
 		} else {
-			return nil, fmt.Errorf("unsupported tag %q for module getting its own output files", tag)
+			return nil, fmt.Errorf("unsupported module reference tag %q", tag)
 		}
 	}
+
 	// TODO: Add a check for param module not having OutputFilesProvider set
 	return nil, nil
+}
+
+func (o OutputFilesInfo) isEmpty() bool {
+	return o.DefaultOutputFiles == nil && o.TaggedOutputFiles == nil
 }
 
 type OutputFilesInfo struct {

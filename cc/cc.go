@@ -361,6 +361,8 @@ type BaseProperties struct {
 	Recovery_available *bool
 
 	// Used by imageMutator, set by ImageMutatorBegin()
+	VendorVariantNeeded        bool `blueprint:"mutated"`
+	ProductVariantNeeded       bool `blueprint:"mutated"`
 	CoreVariantNeeded          bool `blueprint:"mutated"`
 	RamdiskVariantNeeded       bool `blueprint:"mutated"`
 	VendorRamdiskVariantNeeded bool `blueprint:"mutated"`
@@ -981,8 +983,8 @@ func (c *Module) HiddenFromMake() bool {
 	return c.Properties.HideFromMake
 }
 
-func (c *Module) RequiredModuleNames() []string {
-	required := android.CopyOf(c.ModuleBase.RequiredModuleNames())
+func (c *Module) RequiredModuleNames(ctx android.ConfigAndErrorContext) []string {
+	required := android.CopyOf(c.ModuleBase.RequiredModuleNames(ctx))
 	if c.ImageVariation().Variation == android.CoreVariation {
 		required = append(required, c.Properties.Target.Platform.Required...)
 		required = removeListFromList(required, c.Properties.Target.Platform.Exclude_required)
@@ -2118,6 +2120,43 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		}
 
 	}
+
+	buildComplianceMetadataInfo(ctx, c, deps)
+}
+
+func buildComplianceMetadataInfo(ctx ModuleContext, c *Module, deps PathDeps) {
+	// Dump metadata that can not be done in android/compliance-metadata.go
+	complianceMetadataInfo := ctx.ComplianceMetadataInfo()
+	complianceMetadataInfo.SetStringValue(android.ComplianceMetadataProp.IS_STATIC_LIB, strconv.FormatBool(ctx.static()))
+	complianceMetadataInfo.SetStringValue(android.ComplianceMetadataProp.BUILT_FILES, c.outputFile.String())
+
+	// Static deps
+	staticDeps := ctx.GetDirectDepsWithTag(StaticDepTag(false))
+	staticDepNames := make([]string, 0, len(staticDeps))
+	for _, dep := range staticDeps {
+		staticDepNames = append(staticDepNames, dep.Name())
+	}
+
+	staticDepPaths := make([]string, 0, len(deps.StaticLibs))
+	for _, dep := range deps.StaticLibs {
+		staticDepPaths = append(staticDepPaths, dep.String())
+	}
+	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.STATIC_DEPS, android.FirstUniqueStrings(staticDepNames))
+	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.STATIC_DEP_FILES, android.FirstUniqueStrings(staticDepPaths))
+
+	// Whole static deps
+	wholeStaticDeps := ctx.GetDirectDepsWithTag(StaticDepTag(true))
+	wholeStaticDepNames := make([]string, 0, len(wholeStaticDeps))
+	for _, dep := range wholeStaticDeps {
+		wholeStaticDepNames = append(wholeStaticDepNames, dep.Name())
+	}
+
+	wholeStaticDepPaths := make([]string, 0, len(deps.WholeStaticLibs))
+	for _, dep := range deps.WholeStaticLibs {
+		wholeStaticDepPaths = append(wholeStaticDepPaths, dep.String())
+	}
+	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.WHOLE_STATIC_DEPS, android.FirstUniqueStrings(wholeStaticDepNames))
+	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.WHOLE_STATIC_DEP_FILES, android.FirstUniqueStrings(wholeStaticDepPaths))
 }
 
 func (c *Module) maybeUnhideFromMake() {
@@ -2508,7 +2547,7 @@ func (c *Module) DepsMutator(actx android.BottomUpMutatorContext) {
 	if c.ImageVariation().Variation == android.CoreVariation && c.Device() &&
 		c.Target().NativeBridge == android.NativeBridgeDisabled {
 		actx.AddVariationDependencies(
-			[]blueprint.Variation{{Mutator: "image", Variation: VendorVariation}},
+			[]blueprint.Variation{{Mutator: "image", Variation: android.VendorVariation}},
 			llndkHeaderLibTag,
 			deps.LlndkHeaderLibs...)
 	}

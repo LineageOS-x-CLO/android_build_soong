@@ -174,7 +174,7 @@ type ModuleContext interface {
 	InstallInVendor() bool
 	InstallForceOS() (*OsType, *ArchType)
 
-	RequiredModuleNames() []string
+	RequiredModuleNames(ctx ConfigAndErrorContext) []string
 	HostRequiredModuleNames() []string
 	TargetRequiredModuleNames() []string
 
@@ -207,6 +207,11 @@ type ModuleContext interface {
 	// SetOutputFiles stores the outputFiles to outputFiles property, which is used
 	// to set the OutputFilesProvider later.
 	SetOutputFiles(outputFiles Paths, tag string)
+
+	// ComplianceMetadataInfo returns a ComplianceMetadataInfo instance for different module types to dump metadata,
+	// which usually happens in GenerateAndroidBuildActions() of a module type.
+	// See android.ModuleBase.complianceMetadataInfo
+	ComplianceMetadataInfo() *ComplianceMetadataInfo
 }
 
 type moduleContext struct {
@@ -703,6 +708,15 @@ func (m *moduleContext) SetOutputFiles(outputFiles Paths, tag string) {
 	}
 }
 
+func (m *moduleContext) ComplianceMetadataInfo() *ComplianceMetadataInfo {
+	if complianceMetadataInfo := m.module.base().complianceMetadataInfo; complianceMetadataInfo != nil {
+		return complianceMetadataInfo
+	}
+	complianceMetadataInfo := NewComplianceMetadataInfo()
+	m.module.base().complianceMetadataInfo = complianceMetadataInfo
+	return complianceMetadataInfo
+}
+
 // Returns a list of paths expanded from globs and modules referenced using ":module" syntax.  The property must
 // be tagged with `android:"path" to support automatic source module dependency resolution.
 //
@@ -729,8 +743,8 @@ func (m *moduleContext) ExpandOptionalSource(srcFile *string, _ string) Optional
 	return OptionalPath{}
 }
 
-func (m *moduleContext) RequiredModuleNames() []string {
-	return m.module.RequiredModuleNames()
+func (m *moduleContext) RequiredModuleNames(ctx ConfigAndErrorContext) []string {
+	return m.module.RequiredModuleNames(ctx)
 }
 
 func (m *moduleContext) HostRequiredModuleNames() []string {
