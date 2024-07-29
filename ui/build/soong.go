@@ -645,8 +645,9 @@ func runSoong(ctx Context, config Config) {
 		}
 
 		ninjaArgs = append(ninjaArgs, targets...)
+		ninjaCmd := config.NinjaBin()
 		cmd := Command(ctx, config, "soong bootstrap",
-			config.PrebuiltBuildTool("ninja"), ninjaArgs...)
+			ninjaCmd, ninjaArgs...)
 
 		var ninjaEnv Environment
 

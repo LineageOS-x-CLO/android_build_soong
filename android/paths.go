@@ -1604,14 +1604,13 @@ type ModuleOutPathContext interface {
 	ModuleName() string
 	ModuleDir() string
 	ModuleSubDir() string
-	SoongConfigTraceHash() string
 }
 
 func pathForModuleOut(ctx ModuleOutPathContext) OutputPath {
 	if ctx.Config().DisableSoongConfigTrace() {
 		return PathForOutput(ctx, ".intermediates", ctx.ModuleDir(), ctx.ModuleName(), ctx.ModuleSubDir())
 	} else {
-		return PathForOutput(ctx, ".intermediates", ctx.ModuleDir(), ctx.ModuleName(), ctx.ModuleSubDir(), ctx.SoongConfigTraceHash())
+		return PathForOutput(ctx, ".intermediates", ctx.ModuleDir(), ctx.ModuleName(), ctx.ModuleSubDir())
 	}
 }
 
