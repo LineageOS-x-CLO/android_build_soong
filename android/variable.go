@@ -569,6 +569,8 @@ type ProductVariables struct {
 
 	OemProperties []string `json:",omitempty"`
 
+	ArtTargetIncludeDebugBuild *bool `json:",omitempty"`
+
 	DisableSoongConfigTrace *bool `json:",omitempty"`
 }
 
