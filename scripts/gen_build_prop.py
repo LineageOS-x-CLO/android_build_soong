@@ -19,8 +19,11 @@
 import argparse
 import contextlib
 import json
+import os
 import subprocess
 import sys
+
+TEST_KEY_DIR = "build/make/target/product/security"
 
 def get_build_variant(product_config):
   if product_config["Eng"]:
@@ -73,9 +76,13 @@ def parse_args():
   config["BuildHostname"] = args.build_hostname_file.read().strip()
   config["BuildNumber"] = args.build_number_file.read().strip()
   config["BuildUsername"] = args.build_username
-  config["BuildVersionTags"] = config["BuildKeys"]
+
+  build_version_tags_list = config["BuildVersionTags"]
   if config["BuildType"] == "debug":
-    config["BuildVersionTags"] = "debug," + config["BuildVersionTags"]
+    build_version_tags_list.append("debug")
+  build_version_tags_list.append(config["BuildKeys"])
+  build_version_tags = ",".join(sorted(set(build_version_tags_list)))
+  config["BuildVersionTags"] = build_version_tags
 
   raw_date = args.date_file.read().strip()
   config["Date"] = subprocess.check_output(["date", "-d", f"@{raw_date}"], text=True).strip()
@@ -181,7 +188,7 @@ def generate_build_info(args):
 
     # Dev. branches should have DISPLAY_BUILD_NUMBER set
     if config["DisplayBuildNumber"]:
-      print(f"ro.build.display.id?={config['BuildId']} {config['BuildNumber']} {config['BuildKeys']}")
+      print(f"ro.build.display.id?={config['BuildId']}.{config['BuildNumber']} {config['BuildKeys']}")
     else:
       print(f"ro.build.display.id?={config['BuildId']} {config['BuildKeys']}")
   else:
