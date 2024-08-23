@@ -267,7 +267,6 @@ type ProductVariables struct {
 
 	VendorApiLevel *string `json:",omitempty"`
 
-	RecoverySnapshotVersion *string `json:",omitempty"`
 	RamdiskSnapshotVersion  *string `json:",omitempty"`
 
 	DeviceSecondaryArch        *string  `json:",omitempty"`
@@ -414,26 +413,13 @@ type ProductVariables struct {
 
 	PgoAdditionalProfileDirs []string `json:",omitempty"`
 
-	VndkSnapshotBuildArtifacts *bool `json:",omitempty"`
-
-	DirectedVendorSnapshot bool            `json:",omitempty"`
-	VendorSnapshotModules  map[string]bool `json:",omitempty"`
-
-	DirectedRecoverySnapshot bool            `json:",omitempty"`
-	RecoverySnapshotModules  map[string]bool `json:",omitempty"`
-
 	DirectedRamdiskSnapshot bool            `json:",omitempty"`
 	RamdiskSnapshotModules  map[string]bool `json:",omitempty"`
 
-	VendorSnapshotDirsIncluded   []string `json:",omitempty"`
-	VendorSnapshotDirsExcluded   []string `json:",omitempty"`
-	RecoverySnapshotDirsExcluded []string `json:",omitempty"`
-	RecoverySnapshotDirsIncluded []string `json:",omitempty"`
 	RamdiskSnapshotDirsExcluded  []string `json:",omitempty"`
 	RamdiskSnapshotDirsIncluded  []string `json:",omitempty"`
-	HostFakeSnapshotEnabled      bool     `json:",omitempty"`
 
-	MultitreeUpdateMeta bool `json:",omitempty"`
+        MultitreeUpdateMeta bool `json:",omitempty"`
 
 	BoardVendorSepolicyDirs      []string `json:",omitempty"`
 	BoardOdmSepolicyDirs         []string `json:",omitempty"`
