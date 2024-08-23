@@ -4093,6 +4093,13 @@ func (c *Module) BaseModuleName() string {
 	return c.ModuleBase.BaseModuleName()
 }
 
+func (c *Module) stubsSymbolFilePath() android.Path {
+	if library, ok := c.linker.(*libraryDecorator); ok {
+		return library.stubsSymbolFilePath
+	}
+	return android.OptionalPath{}.Path()
+}
+
 var Bool = proptools.Bool
 var BoolDefault = proptools.BoolDefault
 var BoolPtr = proptools.BoolPtr
