@@ -1365,10 +1365,6 @@ func (c *config) FrameworksBaseDirExists(ctx PathGlobContext) bool {
 	return ExistentPathForSource(ctx, "frameworks", "base", "Android.bp").Valid()
 }
 
-func (c *config) VndkSnapshotBuildArtifacts() bool {
-	return Bool(c.productVariables.VndkSnapshotBuildArtifacts)
-}
-
 func (c *config) HasMultilibConflict(arch ArchType) bool {
 	return c.multilibConflicts[arch]
 }
@@ -1430,10 +1426,6 @@ func (c *deviceConfig) VendorPath() string {
 		return *c.config.productVariables.VendorPath
 	}
 	return "vendor"
-}
-
-func (c *deviceConfig) RecoverySnapshotVersion() string {
-	return String(c.config.productVariables.RecoverySnapshotVersion)
 }
 
 func (c *deviceConfig) RamdiskSnapshotVersion() string {
@@ -1846,22 +1838,6 @@ func (c *deviceConfig) IsPartnerTrebleSepolicyTestEnabled() bool {
 	return c.SystemExtSepolicyPrebuiltApiDir() != "" || c.ProductSepolicyPrebuiltApiDir() != ""
 }
 
-func (c *deviceConfig) DirectedVendorSnapshot() bool {
-	return c.config.productVariables.DirectedVendorSnapshot
-}
-
-func (c *deviceConfig) VendorSnapshotModules() map[string]bool {
-	return c.config.productVariables.VendorSnapshotModules
-}
-
-func (c *deviceConfig) DirectedRecoverySnapshot() bool {
-	return c.config.productVariables.DirectedRecoverySnapshot
-}
-
-func (c *deviceConfig) RecoverySnapshotModules() map[string]bool {
-	return c.config.productVariables.RecoverySnapshotModules
-}
-
 func (c *deviceConfig) DirectedRamdiskSnapshot() bool {
 	return c.config.productVariables.DirectedRamdiskSnapshot
 }
@@ -1896,36 +1872,6 @@ func (c *deviceConfig) createDirsMapOnce(onceKey OnceKey, previous map[string]bo
 	return dirMap.(map[string]bool)
 }
 
-var vendorSnapshotDirsExcludedKey = NewOnceKey("VendorSnapshotDirsExcludedMap")
-
-func (c *deviceConfig) VendorSnapshotDirsExcludedMap() map[string]bool {
-	return c.createDirsMapOnce(vendorSnapshotDirsExcludedKey, nil,
-		c.config.productVariables.VendorSnapshotDirsExcluded)
-}
-
-var vendorSnapshotDirsIncludedKey = NewOnceKey("VendorSnapshotDirsIncludedMap")
-
-func (c *deviceConfig) VendorSnapshotDirsIncludedMap() map[string]bool {
-	excludedMap := c.VendorSnapshotDirsExcludedMap()
-	return c.createDirsMapOnce(vendorSnapshotDirsIncludedKey, excludedMap,
-		c.config.productVariables.VendorSnapshotDirsIncluded)
-}
-
-var recoverySnapshotDirsExcludedKey = NewOnceKey("RecoverySnapshotDirsExcludedMap")
-
-func (c *deviceConfig) RecoverySnapshotDirsExcludedMap() map[string]bool {
-	return c.createDirsMapOnce(recoverySnapshotDirsExcludedKey, nil,
-		c.config.productVariables.RecoverySnapshotDirsExcluded)
-}
-
-var recoverySnapshotDirsIncludedKey = NewOnceKey("RecoverySnapshotDirsIncludedMap")
-
-func (c *deviceConfig) RecoverySnapshotDirsIncludedMap() map[string]bool {
-	excludedMap := c.RecoverySnapshotDirsExcludedMap()
-	return c.createDirsMapOnce(recoverySnapshotDirsIncludedKey, excludedMap,
-		c.config.productVariables.RecoverySnapshotDirsIncluded)
-}
-
 var ramdiskSnapshotDirsExcludedKey = NewOnceKey("RamdiskSnapshotDirsExcludedMap")
 
 func (c *deviceConfig) RamdiskSnapshotDirsExcludedMap() map[string]bool {
@@ -1940,11 +1886,6 @@ func (c *deviceConfig) RamdiskSnapshotDirsIncludedMap() map[string]bool {
 	return c.createDirsMapOnce(ramdiskSnapshotDirsIncludedKey, excludedMap,
 		c.config.productVariables.RamdiskSnapshotDirsIncluded)
 }
-
-func (c *deviceConfig) HostFakeSnapshotEnabled() bool {
-	return c.config.productVariables.HostFakeSnapshotEnabled
-}
-
 func (c *deviceConfig) ShippingApiLevel() ApiLevel {
 	if c.config.productVariables.Shipping_api_level == nil {
 		return NoneApiLevel
