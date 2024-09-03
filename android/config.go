@@ -2145,11 +2145,3 @@ func (c *config) UseDebugArt() bool {
 func (c *config) DisableSoongConfigTrace() bool {
 	return Bool(c.productVariables.DisableSoongConfigTrace)
 }
-
-func (c *config) SystemPropFiles(ctx PathContext) Paths {
-	return PathsForSource(ctx, c.productVariables.SystemPropFiles)
-}
-
-func (c *config) EnableUffdGc() string {
-	return String(c.productVariables.EnableUffdGc)
-}
