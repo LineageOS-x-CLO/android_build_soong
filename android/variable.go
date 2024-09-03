@@ -267,7 +267,7 @@ type ProductVariables struct {
 
 	VendorApiLevel *string `json:",omitempty"`
 
-	RamdiskSnapshotVersion  *string `json:",omitempty"`
+	RamdiskSnapshotVersion *string `json:",omitempty"`
 
 	DeviceSecondaryArch        *string  `json:",omitempty"`
 	DeviceSecondaryArchVariant *string  `json:",omitempty"`
@@ -416,8 +416,8 @@ type ProductVariables struct {
 	DirectedRamdiskSnapshot bool            `json:",omitempty"`
 	RamdiskSnapshotModules  map[string]bool `json:",omitempty"`
 
-	RamdiskSnapshotDirsExcluded  []string `json:",omitempty"`
-	RamdiskSnapshotDirsIncluded  []string `json:",omitempty"`
+	RamdiskSnapshotDirsExcluded []string `json:",omitempty"`
+	RamdiskSnapshotDirsIncluded []string `json:",omitempty"`
 
         MultitreeUpdateMeta bool `json:",omitempty"`
 
