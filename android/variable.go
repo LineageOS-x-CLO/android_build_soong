@@ -419,7 +419,7 @@ type ProductVariables struct {
 	RamdiskSnapshotDirsExcluded []string `json:",omitempty"`
 	RamdiskSnapshotDirsIncluded []string `json:",omitempty"`
 
-        MultitreeUpdateMeta bool `json:",omitempty"`
+	MultitreeUpdateMeta bool `json:",omitempty"`
 
 	BoardVendorSepolicyDirs      []string `json:",omitempty"`
 	BoardOdmSepolicyDirs         []string `json:",omitempty"`
@@ -558,6 +558,10 @@ type ProductVariables struct {
 	ArtTargetIncludeDebugBuild *bool `json:",omitempty"`
 
 	DisableSoongConfigTrace *bool `json:",omitempty"`
+
+	SystemPropFiles []string `json:",omitempty"`
+
+	EnableUffdGc *string `json:",omitempty"`
 }
 
 type PartitionQualifiedVariablesType struct {
