@@ -505,7 +505,7 @@ func squashRecoverySrcs(m *Module) {
 
 func squashRamdiskSrcs(m *Module) {
 	if lib, ok := m.compiler.(*libraryDecorator); ok {
-		lib.baseCompiler.Properties.Srcs.AppendSimpleValue(lib.baseCompiler.Properties.Target.Recovery.Srcs)
+		lib.baseCompiler.Properties.Srcs.AppendSimpleValue(lib.baseCompiler.Properties.Target.Ramdisk.Srcs)
 
 		lib.baseCompiler.Properties.Exclude_srcs.AppendSimpleValue(lib.baseCompiler.Properties.Target.Vendor_ramdisk.Exclude_srcs)
 
