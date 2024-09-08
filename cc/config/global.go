@@ -160,9 +160,6 @@ var (
 
 		// Make paths in deps files relative.
 		"-no-canonical-prefixes",
-
-		// http://b/315250603 temporarily disabled
-		"-Wno-error=format",
 	}
 
 	commonGlobalConlyflags = []string{}
@@ -192,9 +189,6 @@ var (
 		"-Werror=sequence-point",
 		"-Werror=format-security",
 		"-nostdlibinc",
-
-		// Emit additional debug info for AutoFDO
-		"-fdebug-info-for-profiling",
 	}
 
 	commonGlobalLldflags = []string{
@@ -419,6 +413,9 @@ var (
 
 		"-Wno-unused",
 		"-Wno-deprecated",
+
+		// http://b/315250603 temporarily disabled
+		"-Wno-error=format",
 	}
 
 	// Similar to noOverrideGlobalCflags, but applies only to third-party code
