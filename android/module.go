@@ -1852,7 +1852,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 				}
 			}
 
-			m.vintfFragmentsPaths = PathsForModuleSrc(ctx, m.commonProperties.Vintf_fragments.GetOrDefault(m.ConfigurableEvaluator(ctx), nil))
+			m.vintfFragmentsPaths = PathsForModuleSrc(ctx, m.commonProperties.Vintf_fragments.GetOrDefault(ctx, nil))
 			vintfDir := PathForModuleInstall(ctx, "etc", "vintf", "manifest")
 			for _, src := range m.vintfFragmentsPaths {
 				installedVintfFragment := vintfDir.Join(ctx, src.Base())
@@ -1913,14 +1913,14 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 				return
 			}
 			cacheKey = &blueprint.BuildActionCacheKey{
-				Id:        ctx.bp.ModuleId(),
+				Id:        ctx.bp.ModuleCacheKey(),
 				InputHash: hash,
 			}
 		}
 
 		restored := false
 		if incrementalAnalysis && cacheKey != nil {
-			restored = ctx.bp.RestoreBuildActions(cacheKey, incrementalModule)
+			restored = ctx.bp.RestoreBuildActions(cacheKey)
 		}
 
 		if !restored {
@@ -2515,7 +2515,7 @@ func outputFilesForModuleFromProvider(ctx PathContext, module blueprint.Module, 
 			fromProperty = true
 		}
 	} else if cta, isCta := ctx.(*singletonContextAdaptor); isCta {
-		providerData, _ := cta.moduleProvider(module, OutputFilesProvider)
+		providerData, _ := cta.otherModuleProvider(module, OutputFilesProvider)
 		outputFiles, _ = providerData.(OutputFilesInfo)
 	} else {
 		return nil, fmt.Errorf("unsupported context %q in method outputFilesForModuleFromProvider", reflect.TypeOf(ctx))

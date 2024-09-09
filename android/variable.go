@@ -267,7 +267,7 @@ type ProductVariables struct {
 
 	VendorApiLevel *string `json:",omitempty"`
 
-	RamdiskSnapshotVersion  *string `json:",omitempty"`
+	RamdiskSnapshotVersion *string `json:",omitempty"`
 
 	DeviceSecondaryArch        *string  `json:",omitempty"`
 	DeviceSecondaryArchVariant *string  `json:",omitempty"`
@@ -416,10 +416,10 @@ type ProductVariables struct {
 	DirectedRamdiskSnapshot bool            `json:",omitempty"`
 	RamdiskSnapshotModules  map[string]bool `json:",omitempty"`
 
-	RamdiskSnapshotDirsExcluded  []string `json:",omitempty"`
-	RamdiskSnapshotDirsIncluded  []string `json:",omitempty"`
+	RamdiskSnapshotDirsExcluded []string `json:",omitempty"`
+	RamdiskSnapshotDirsIncluded []string `json:",omitempty"`
 
-        MultitreeUpdateMeta bool `json:",omitempty"`
+	MultitreeUpdateMeta bool `json:",omitempty"`
 
 	BoardVendorSepolicyDirs      []string `json:",omitempty"`
 	BoardOdmSepolicyDirs         []string `json:",omitempty"`
@@ -558,6 +558,17 @@ type ProductVariables struct {
 	ArtTargetIncludeDebugBuild *bool `json:",omitempty"`
 
 	DisableSoongConfigTrace *bool `json:",omitempty"`
+
+	SystemPropFiles    []string `json:",omitempty"`
+	SystemExtPropFiles []string `json:",omitempty"`
+	ProductPropFiles   []string `json:",omitempty"`
+
+	EnableUffdGc *string `json:",omitempty"`
+
+	BoardAvbEnable                         *bool    `json:",omitempty"`
+	BoardAvbSystemAddHashtreeFooterArgs    []string `json:",omitempty"`
+	DeviceFrameworkCompatibilityMatrixFile []string `json:",omitempty"`
+	DeviceProductCompatibilityMatrixFile   []string `json:",omitempty"`
 }
 
 type PartitionQualifiedVariablesType struct {
