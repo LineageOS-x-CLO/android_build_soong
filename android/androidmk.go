@@ -857,6 +857,7 @@ func translateAndroidModule(ctx SingletonContext, w io.Writer, moduleInfoJSONs *
 	}
 
 	data := provider.AndroidMk()
+
 	if data.Include == "" {
 		data.Include = "$(BUILD_PREBUILT)"
 	}

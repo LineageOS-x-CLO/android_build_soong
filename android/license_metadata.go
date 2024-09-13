@@ -33,7 +33,7 @@ var (
 	}, "args")
 )
 
-func buildLicenseMetadata(ctx ModuleContext, licenseMetadataFile WritablePath) {
+func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) {
 	base := ctx.Module().base()
 
 	if !base.Enabled(ctx) {
@@ -49,7 +49,7 @@ func buildLicenseMetadata(ctx ModuleContext, licenseMetadataFile WritablePath) {
 		outputFiles = PathsIfNonNil(outputFiles...)
 	}
 
-	isContainer := isContainerFromFileExtensions(base.installFiles, outputFiles)
+	isContainer := isContainerFromFileExtensions(ctx.installFiles, outputFiles)
 
 	var allDepMetadataFiles Paths
 	var allDepMetadataArgs []string
@@ -85,7 +85,7 @@ func buildLicenseMetadata(ctx ModuleContext, licenseMetadataFile WritablePath) {
 
 			allDepMetadataArgs = append(allDepMetadataArgs, info.LicenseMetadataPath.String()+depAnnotations)
 
-			if depInstallFiles := dep.base().installFiles; len(depInstallFiles) > 0 {
+			if depInstallFiles := ModuleFilesToInstall(ctx, dep); len(depInstallFiles) > 0 {
 				allDepOutputFiles = append(allDepOutputFiles, depInstallFiles.Paths()...)
 			} else if depOutputFiles, err := outputFilesForModule(ctx, dep, ""); err == nil {
 				depOutputFiles = PathsIfNonNil(depOutputFiles...)
@@ -155,7 +155,7 @@ func buildLicenseMetadata(ctx ModuleContext, licenseMetadataFile WritablePath) {
 
 	// Installed files
 	args = append(args,
-		JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(base.installFiles.Strings()), "-i "))
+		JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(ctx.installFiles.Strings()), "-i "))
 
 	if isContainer {
 		args = append(args, "--is_container")
