@@ -145,7 +145,7 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 
 	// Install map
 	args = append(args,
-		JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(ctx.licenseInstallMap), "-m "))
+		JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(base.licenseInstallMap), "-m "))
 
 	// Built files
 	if len(outputFiles) > 0 {
