@@ -222,8 +222,8 @@ type moduleContext struct {
 	module          Module
 	phonies         map[string]Paths
 
-	katiInstalls []katiInstall
-	katiSymlinks []katiInstall
+	katiInstalls katiInstalls
+	katiSymlinks katiInstalls
 
 	// For tests
 	buildParams []BuildParams
