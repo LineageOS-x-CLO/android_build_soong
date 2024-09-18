@@ -303,7 +303,7 @@ func TestDataLibs(t *testing.T) {
 	ctx := testCcWithConfig(t, config)
 	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
 	testBinary := testingModule.Module().(*Module).linker.(*testBinary)
-	outputFiles := testingModule.OutputFiles(t, "")
+	outputFiles := testingModule.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
 		t.Errorf("expected exactly one output file. output files: [%s]", outputFiles)
 		return
@@ -356,7 +356,7 @@ func TestDataLibsRelativeInstallPath(t *testing.T) {
 	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
 	module := testingModule.Module()
 	testBinary := module.(*Module).linker.(*testBinary)
-	outputFiles := testingModule.OutputFiles(t, "")
+	outputFiles := testingModule.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
 		t.Fatalf("expected exactly one output file. output files: [%s]", outputFiles)
 	}
@@ -1440,7 +1440,7 @@ func TestDataLibsPrebuiltSharedTestLibrary(t *testing.T) {
 	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
 	module := testingModule.Module()
 	testBinary := module.(*Module).linker.(*testBinary)
-	outputFiles := testingModule.OutputFiles(t, "")
+	outputFiles := testingModule.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
 		t.Errorf("expected exactly one output file. output files: [%s]", outputFiles)
 	}
@@ -3098,7 +3098,7 @@ func TestStrippedAllOutputFile(t *testing.T) {
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 	ctx := testCcWithConfig(t, config)
 	testingModule := ctx.ModuleForTests("test_lib", "android_arm_armv7-a-neon_shared")
-	outputFile := testingModule.OutputFiles(t, "stripped_all")
+	outputFile := testingModule.OutputFiles(ctx, t, "stripped_all")
 	if !strings.HasSuffix(outputFile.Strings()[0], "/stripped_all/test_lib.so") {
 		t.Errorf("Unexpected output file: %s", outputFile.Strings()[0])
 		return
