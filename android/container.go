@@ -89,6 +89,10 @@ var globallyAllowlistedDependencies = []string{
 	"framework-annotations-lib",
 	"unsupportedappusage",
 
+	// TODO(b/363016634): Remove from the allowlist when the module is converted
+	// to java_sdk_library and the java_aconfig_library modules depend on the stub.
+	"aconfig_storage_reader_java",
+
 	// framework-res provides core resources essential for building apps and system UI.
 	// This module is implicitly added as a dependency for java modules even when the
 	// dependency specifies sdk_version.
