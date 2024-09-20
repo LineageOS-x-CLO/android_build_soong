@@ -122,6 +122,16 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	InstallFile(installPath InstallPath, name string, srcPath Path, deps ...InstallPath) InstallPath
 
+	// InstallFileWithoutCheckbuild creates a rule to copy srcPath to name in the installPath directory,
+	// with the given additional dependencies, but does not add the file to the list of files to build
+	// during `m checkbuild`.
+	//
+	// The installed file will be returned by FilesToInstall(), and the PackagingSpec for the
+	// installed file will be returned by PackagingSpecs() on this module or by
+	// TransitivePackagingSpecs() on modules that depend on this module through dependency tags
+	// for which IsInstallDepNeeded returns true.
+	InstallFileWithoutCheckbuild(installPath InstallPath, name string, srcPath Path, deps ...InstallPath) InstallPath
+
 	// InstallFileWithExtraFilesZip creates a rule to copy srcPath to name in the installPath
 	// directory, and also unzip a zip file containing extra files to install into the same
 	// directory.
@@ -159,7 +169,8 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	PackageFile(installPath InstallPath, name string, srcPath Path) PackagingSpec
 
-	CheckbuildFile(srcPath Path)
+	CheckbuildFile(srcPaths ...Path)
+	UncheckedModule()
 
 	InstallInData() bool
 	InstallInTestcases() bool
@@ -228,11 +239,13 @@ type ModuleContext interface {
 type moduleContext struct {
 	bp blueprint.ModuleContext
 	baseModuleContext
-	packagingSpecs  []PackagingSpec
-	installFiles    InstallPaths
-	checkbuildFiles Paths
-	module          Module
-	phonies         map[string]Paths
+	packagingSpecs   []PackagingSpec
+	installFiles     InstallPaths
+	checkbuildFiles  Paths
+	checkbuildTarget Path
+	uncheckedModule  bool
+	module           Module
+	phonies          map[string]Paths
 	// outputFiles stores the output of a module by tag and is used to set
 	// the OutputFilesProvider in GenerateBuildActions
 	outputFiles OutputFilesInfo
@@ -501,17 +514,22 @@ func (m *moduleContext) requiresFullInstall() bool {
 
 func (m *moduleContext) InstallFile(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, nil)
+}
+
+func (m *moduleContext) InstallFileWithoutCheckbuild(installPath InstallPath, name string, srcPath Path,
+	deps ...InstallPath) InstallPath {
+	return m.installFile(installPath, name, srcPath, deps, false, false, nil)
 }
 
 func (m *moduleContext) InstallExecutable(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithExtraFilesZip(installPath InstallPath, name string, srcPath Path,
 	extraZip Path, deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, &extraFilesZip{
+	return m.installFile(installPath, name, srcPath, deps, false, true, &extraFilesZip{
 		zip: extraZip,
 		dir: installPath,
 	})
@@ -532,6 +550,7 @@ func (m *moduleContext) setAconfigPaths(paths Paths) {
 
 func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, executable bool) PackagingSpec {
 	licenseFiles := m.Module().EffectiveLicenseFiles()
+	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
 	spec := PackagingSpec{
 		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:               srcPath,
@@ -542,13 +561,15 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 		skipInstall:           m.skipInstall(),
 		aconfigPaths:          m.getAconfigPaths(),
 		archType:              m.target.Arch.ArchType,
+		overrides:             &overrides,
+		owner:                 m.ModuleName(),
 	}
 	m.packagingSpecs = append(m.packagingSpecs, spec)
 	return spec
 }
 
 func (m *moduleContext) installFile(installPath InstallPath, name string, srcPath Path, deps []InstallPath,
-	executable bool, extraZip *extraFilesZip) InstallPath {
+	executable bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
 
 	fullInstallPath := installPath.Join(m, name)
 	m.module.base().hooks.runInstallHooks(m, srcPath, fullInstallPath, false)
@@ -613,7 +634,9 @@ func (m *moduleContext) installFile(installPath InstallPath, name string, srcPat
 
 	m.packageFile(fullInstallPath, srcPath, executable)
 
-	m.checkbuildFiles = append(m.checkbuildFiles, srcPath)
+	if checkbuild {
+		m.checkbuildFiles = append(m.checkbuildFiles, srcPath)
+	}
 
 	return fullInstallPath
 }
@@ -654,9 +677,9 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		}
 
 		m.installFiles = append(m.installFiles, fullInstallPath)
-		m.checkbuildFiles = append(m.checkbuildFiles, srcPath)
 	}
 
+	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -666,6 +689,8 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		skipInstall:      m.skipInstall(),
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
+		overrides:        &overrides,
+		owner:            m.ModuleName(),
 	})
 
 	return fullInstallPath
@@ -701,6 +726,7 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
+	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -710,13 +736,21 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		skipInstall:      m.skipInstall(),
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
+		overrides:        &overrides,
+		owner:            m.ModuleName(),
 	})
 
 	return fullInstallPath
 }
 
-func (m *moduleContext) CheckbuildFile(srcPath Path) {
-	m.checkbuildFiles = append(m.checkbuildFiles, srcPath)
+// CheckbuildFile specifies the output files that should be built by checkbuild.
+func (m *moduleContext) CheckbuildFile(srcPaths ...Path) {
+	m.checkbuildFiles = append(m.checkbuildFiles, srcPaths...)
+}
+
+// UncheckedModule marks the current module has having no files that should be built by checkbuild.
+func (m *moduleContext) UncheckedModule() {
+	m.uncheckedModule = true
 }
 
 func (m *moduleContext) blueprintModuleContext() blueprint.ModuleContext {
