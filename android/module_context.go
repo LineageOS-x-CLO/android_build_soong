@@ -237,6 +237,9 @@ type moduleContext struct {
 	// apex containers.
 	licenseInstallMap []string
 
+	// The path to the generated license metadata file for the module.
+	licenseMetadataFile WritablePath
+
 	katiInstalls katiInstalls
 	katiSymlinks katiInstalls
 
@@ -688,7 +691,7 @@ func (m *moduleContext) blueprintModuleContext() blueprint.ModuleContext {
 }
 
 func (m *moduleContext) LicenseMetadataFile() Path {
-	return m.module.base().licenseMetadataFile
+	return m.licenseMetadataFile
 }
 
 func (m *moduleContext) ModuleInfoJSON() *ModuleInfoJSON {
