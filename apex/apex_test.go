@@ -267,6 +267,7 @@ func ensureNotContains(t *testing.T, result string, notExpected string) {
 }
 
 func ensureMatches(t *testing.T, result string, expectedRex string) {
+	t.Helper()
 	ok, err := regexp.MatchString(expectedRex, result)
 	if err != nil {
 		t.Fatalf("regexp failure trying to match %s against `%s` expression: %s", result, expectedRex, err)
@@ -274,6 +275,14 @@ func ensureMatches(t *testing.T, result string, expectedRex string) {
 	}
 	if !ok {
 		t.Errorf("%s does not match regular expession %s", result, expectedRex)
+	}
+}
+
+func ensureListContainsMatch(t *testing.T, result []string, expectedRex string) {
+	t.Helper()
+	p := regexp.MustCompile(expectedRex)
+	if android.IndexListPred(func(s string) bool { return p.MatchString(s) }, result) == -1 {
+		t.Errorf("%q is not found in %v", expectedRex, result)
 	}
 }
 
@@ -906,7 +915,7 @@ func TestApexWithStubs(t *testing.T) {
 		cc_library {
 			name: "mylib",
 			srcs: ["mylib.cpp"],
-			shared_libs: ["mylib2", "mylib3"],
+			shared_libs: ["mylib2", "mylib3", "my_prebuilt_platform_lib", "my_prebuilt_platform_stub_only_lib"],
 			system_shared_libs: [],
 			stl: "none",
 			apex_available: [ "myapex" ],
@@ -919,6 +928,7 @@ func TestApexWithStubs(t *testing.T) {
 			system_shared_libs: [],
 			stl: "none",
 			stubs: {
+				symbol_file: "mylib2.map.txt",
 				versions: ["1", "2", "3"],
 			},
 		}
@@ -930,6 +940,7 @@ func TestApexWithStubs(t *testing.T) {
 			system_shared_libs: [],
 			stl: "none",
 			stubs: {
+				symbol_file: "mylib3.map.txt",
 				versions: ["10", "11", "12"],
 			},
 			apex_available: [ "myapex" ],
@@ -941,6 +952,24 @@ func TestApexWithStubs(t *testing.T) {
 			system_shared_libs: [],
 			stl: "none",
 			apex_available: [ "myapex" ],
+		}
+
+		cc_prebuilt_library_shared {
+			name: "my_prebuilt_platform_lib",
+			stubs: {
+				symbol_file: "my_prebuilt_platform_lib.map.txt",
+				versions: ["1", "2", "3"],
+			},
+			srcs: ["foo.so"],
+		}
+
+		// Similar to my_prebuilt_platform_lib, but this library only provides stubs, i.e. srcs is empty
+		cc_prebuilt_library_shared {
+			name: "my_prebuilt_platform_stub_only_lib",
+			stubs: {
+				symbol_file: "my_prebuilt_platform_stub_only_lib.map.txt",
+				versions: ["1", "2", "3"],
+			}
 		}
 
 		rust_binary {
@@ -1022,6 +1051,20 @@ func TestApexWithStubs(t *testing.T) {
 
 	apexManifestRule := ctx.ModuleForTests("myapex", "android_common_myapex").Rule("apexManifestRule")
 	ensureListContains(t, names(apexManifestRule.Args["requireNativeLibs"]), "libfoo.shared_from_rust.so")
+
+	// Ensure that mylib is linking with the latest version of stubs for my_prebuilt_platform_lib
+	ensureContains(t, mylibLdFlags, "my_prebuilt_platform_lib/android_arm64_armv8-a_shared_current/my_prebuilt_platform_lib.so")
+	// ... and not linking to the non-stub (impl) variant of my_prebuilt_platform_lib
+	ensureNotContains(t, mylibLdFlags, "my_prebuilt_platform_lib/android_arm64_armv8-a_shared/my_prebuilt_platform_lib.so")
+	// Ensure that genstub for platform-provided lib is invoked with --systemapi
+	ensureContains(t, ctx.ModuleForTests("my_prebuilt_platform_lib", "android_arm64_armv8-a_shared_3").Rule("genStubSrc").Args["flags"], "--systemapi")
+
+	// Ensure that mylib is linking with the latest version of stubs for my_prebuilt_platform_lib
+	ensureContains(t, mylibLdFlags, "my_prebuilt_platform_stub_only_lib/android_arm64_armv8-a_shared_current/my_prebuilt_platform_stub_only_lib.so")
+	// ... and not linking to the non-stub (impl) variant of my_prebuilt_platform_lib
+	ensureNotContains(t, mylibLdFlags, "my_prebuilt_platform_stub_only_lib/android_arm64_armv8-a_shared/my_prebuilt_platform_stub_only_lib.so")
+	// Ensure that genstub for platform-provided lib is invoked with --systemapi
+	ensureContains(t, ctx.ModuleForTests("my_prebuilt_platform_stub_only_lib", "android_arm64_armv8-a_shared_3").Rule("genStubSrc").Args["flags"], "--systemapi")
 }
 
 func TestApexShouldNotEmbedStubVariant(t *testing.T) {
@@ -1156,6 +1199,7 @@ func TestApexWithStubsWithMinSdkVersion(t *testing.T) {
 			system_shared_libs: [],
 			stl: "none",
 			stubs: {
+				symbol_file: "mylib2.map.txt",
 				versions: ["28", "29", "30", "current"],
 			},
 			min_sdk_version: "28",
@@ -1168,6 +1212,7 @@ func TestApexWithStubsWithMinSdkVersion(t *testing.T) {
 			system_shared_libs: [],
 			stl: "none",
 			stubs: {
+				symbol_file: "mylib3.map.txt",
 				versions: ["28", "29", "30", "current"],
 			},
 			apex_available: [ "myapex" ],
@@ -10699,14 +10744,14 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 8 {
-		t.Fatalf("Expected 5 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 12 {
+		t.Fatalf("Expected 12 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
-	ensureMatches(t, copyCmds[4], "^cp -f .*/aconfig_flags.pb .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[5], "^cp -f .*/package.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[6], "^cp -f .*/flag.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[7], "^cp -f .*/flag.val .*/image.apex/etc$")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -10834,14 +10879,14 @@ func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 12 {
-		t.Fatalf("Expected 12 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 16 {
+		t.Fatalf("Expected 16 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
-	ensureMatches(t, copyCmds[8], "^cp -f .*/aconfig_flags.pb .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[9], "^cp -f .*/package.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[10], "^cp -f .*/flag.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[11], "^cp -f .*/flag.val .*/image.apex/etc$")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -11002,14 +11047,14 @@ func TestAconfigFilesRustDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 32 {
-		t.Fatalf("Expected 28 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 36 {
+		t.Fatalf("Expected 36 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
-	ensureMatches(t, copyCmds[28], "^cp -f .*/aconfig_flags.pb .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[29], "^cp -f .*/package.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[30], "^cp -f .*/flag.map .*/image.apex/etc$")
-	ensureMatches(t, copyCmds[31], "^cp -f .*/flag.val .*/image.apex/etc$")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -11939,7 +11984,7 @@ func TestPrebuiltStubNoinstall(t *testing.T) {
 		).RunTest(t)
 
 		ldRule := result.ModuleForTests("installedlib", "android_arm64_armv8-a_shared").Rule("ld")
-		android.AssertStringDoesContain(t, "", ldRule.Args["libFlags"], "android_arm64_armv8-a_shared/libfoo.so")
+		android.AssertStringDoesContain(t, "", ldRule.Args["libFlags"], "android_arm64_armv8-a_shared_current/libfoo.so")
 
 		installRules := result.InstallMakeRulesForTesting(t)
 
