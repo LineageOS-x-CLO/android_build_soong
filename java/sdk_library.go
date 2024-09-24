@@ -1595,6 +1595,11 @@ func (module *SdkLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext)
 			module.hostdexInstallFile = module.implLibraryModule.hostdexInstallFile
 		}
 
+		if installFilesInfo, ok := android.OtherModuleProvider(ctx, module.implLibraryModule, android.InstallFilesProvider); ok {
+			if installFilesInfo.CheckbuildTarget != nil {
+				ctx.CheckbuildFile(installFilesInfo.CheckbuildTarget)
+			}
+		}
 		android.SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: module.implLibraryModule.uniqueSrcFiles.Strings()})
 	}
 
@@ -3599,8 +3604,8 @@ func (s *sdkLibrarySdkMemberProperties) AddToPropertySet(ctx android.SdkMemberCo
 }
 
 // TODO(b/358613520): This can be removed when modules are no longer allowed to depend on the top-level library.
-func (s *SdkLibrary) IDEInfo(dpInfo *android.IdeInfo) {
-	s.Library.IDEInfo(dpInfo)
+func (s *SdkLibrary) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
+	s.Library.IDEInfo(ctx, dpInfo)
 	if s.implLibraryModule != nil {
 		dpInfo.Deps = append(dpInfo.Deps, s.implLibraryModule.Name())
 	} else {
