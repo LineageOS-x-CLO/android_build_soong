@@ -162,6 +162,9 @@ var androidArchFeatureMap = map[ArchType]map[string][]string{
 		"armv9-a": {
 			"dotprod",
 		},
+		"armv9-2a": {
+			"dotprod",
+		},
 	},
 	X86: {
 		"amberlake": {
