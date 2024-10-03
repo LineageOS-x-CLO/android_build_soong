@@ -535,7 +535,8 @@ type Module struct {
 	linter
 
 	// list of the xref extraction files
-	kytheFiles android.Paths
+	kytheFiles       android.Paths
+	kytheKotlinFiles android.Paths
 
 	hideApexVariantFromMake bool
 
@@ -1363,7 +1364,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 		kotlinJar := android.PathForModuleOut(ctx, "kotlin", jarName)
 		kotlinHeaderJar := android.PathForModuleOut(ctx, "kotlin_headers", jarName)
-		kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags)
+		j.kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags)
 		if ctx.Failed() {
 			return
 		}
