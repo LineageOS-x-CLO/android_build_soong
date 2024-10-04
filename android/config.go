@@ -238,6 +238,11 @@ func (c Config) ReleaseAconfigFlagDefaultPermission() string {
 	return c.config.productVariables.ReleaseAconfigFlagDefaultPermission
 }
 
+// Enable object size sanitizer
+func (c Config) ReleaseBuildObjectSizeSanitizer() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_BUILD_OBJECT_SIZE_SANITIZER")
+}
+
 // The flag indicating behavior for the tree wrt building modules or using prebuilts
 // derived from RELEASE_DEFAULT_MODULE_BUILD_FROM_SOURCE
 func (c Config) ReleaseDefaultModuleBuildFromSource() bool {
@@ -1688,6 +1693,17 @@ func (c *config) ApexTrimEnabled() bool {
 	return Bool(c.productVariables.TrimmedApex)
 }
 
+func (c *config) UseSoongSystemImage() bool {
+	return Bool(c.productVariables.UseSoongSystemImage)
+}
+
+func (c *config) SoongDefinedSystemImage() string {
+	if c.UseSoongSystemImage() {
+		return String(c.productVariables.ProductSoongDefinedSystemImage)
+	}
+	return ""
+}
+
 func (c *config) EnforceSystemCertificate() bool {
 	return Bool(c.productVariables.EnforceSystemCertificate)
 }
@@ -1883,10 +1899,6 @@ func (c *deviceConfig) BuildBrokenTrebleSyspropNeverallow() bool {
 	return c.config.productVariables.BuildBrokenTrebleSyspropNeverallow
 }
 
-func (c *deviceConfig) BuildBrokenUsesSoongPython2Modules() bool {
-	return c.config.productVariables.BuildBrokenUsesSoongPython2Modules
-}
-
 func (c *deviceConfig) BuildDebugfsRestrictionsEnabled() bool {
 	return c.config.productVariables.BuildDebugfsRestrictionsEnabled
 }
@@ -2011,6 +2023,10 @@ func (c *deviceConfig) CheckVendorSeappViolations() bool {
 func (c *config) GetBuildFlag(name string) (string, bool) {
 	val, ok := c.productVariables.BuildFlags[name]
 	return val, ok
+}
+
+func (c *config) UseOptimizedResourceShrinkingByDefault() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_USE_OPTIMIZED_RESOURCE_SHRINKING_BY_DEFAULT")
 }
 
 func (c *config) UseResourceProcessorByDefault() bool {

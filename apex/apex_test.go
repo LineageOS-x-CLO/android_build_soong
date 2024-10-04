@@ -4885,200 +4885,6 @@ type moduleErrorfTestCtx struct {
 func (ctx moduleErrorfTestCtx) ModuleErrorf(format string, args ...interface{}) {
 }
 
-// These tests verify that the prebuilt_apex/deapexer to java_import wiring allows for the
-// propagation of paths to dex implementation jars from the former to the latter.
-func TestPrebuiltExportDexImplementationJars(t *testing.T) {
-	transform := android.NullFixturePreparer
-
-	checkDexJarBuildPath := func(t *testing.T, ctx *android.TestContext, name string) {
-		t.Helper()
-		// Make sure the import has been given the correct path to the dex jar.
-		p := ctx.ModuleForTests(name, "android_common_myapex").Module().(java.UsesLibraryDependency)
-		dexJarBuildPath := p.DexJarBuildPath(moduleErrorfTestCtx{}).PathOrNil()
-		stem := android.RemoveOptionalPrebuiltPrefix(name)
-		android.AssertStringEquals(t, "DexJarBuildPath should be apex-related path.",
-			".intermediates/prebuilt_myapex.deapexer/android_common/deapexer/javalib/"+stem+".jar",
-			android.NormalizePathForTesting(dexJarBuildPath))
-	}
-
-	checkDexJarInstallPath := func(t *testing.T, ctx *android.TestContext, name string) {
-		t.Helper()
-		// Make sure the import has been given the correct path to the dex jar.
-		p := ctx.ModuleForTests(name, "android_common_myapex").Module().(java.UsesLibraryDependency)
-		dexJarBuildPath := p.DexJarInstallPath()
-		stem := android.RemoveOptionalPrebuiltPrefix(name)
-		android.AssertStringEquals(t, "DexJarInstallPath should be apex-related path.",
-			"target/product/test_device/apex/myapex/javalib/"+stem+".jar",
-			android.NormalizePathForTesting(dexJarBuildPath))
-	}
-
-	ensureNoSourceVariant := func(t *testing.T, ctx *android.TestContext, name string) {
-		t.Helper()
-		// Make sure that an apex variant is not created for the source module.
-		android.AssertArrayString(t, "Check if there is no source variant",
-			[]string{"android_common"},
-			ctx.ModuleVariantsForTests(name))
-	}
-
-	t.Run("prebuilt only", func(t *testing.T) {
-		bp := `
-		prebuilt_apex {
-			name: "myapex",
-			arch: {
-				arm64: {
-					src: "myapex-arm64.apex",
-				},
-				arm: {
-					src: "myapex-arm.apex",
-				},
-			},
-			exported_java_libs: ["libfoo", "libbar"],
-		}
-
-		java_import {
-			name: "libfoo",
-			jars: ["libfoo.jar"],
-		}
-
-		java_sdk_library_import {
-			name: "libbar",
-			public: {
-				jars: ["libbar.jar"],
-			},
-		}
-	`
-
-		// Make sure that dexpreopt can access dex implementation files from the prebuilt.
-		ctx := testDexpreoptWithApexes(t, bp, "", transform)
-
-		deapexerName := deapexerModuleName("prebuilt_myapex")
-		android.AssertStringEquals(t, "APEX module name from deapexer name", "prebuilt_myapex", apexModuleName(deapexerName))
-
-		// Make sure that the deapexer has the correct input APEX.
-		deapexer := ctx.ModuleForTests(deapexerName, "android_common")
-		rule := deapexer.Rule("deapexer")
-		if expected, actual := []string{"myapex-arm64.apex"}, android.NormalizePathsForTesting(rule.Implicits); !reflect.DeepEqual(expected, actual) {
-			t.Errorf("expected: %q, found: %q", expected, actual)
-		}
-
-		// Make sure that the prebuilt_apex has the correct input APEX.
-		prebuiltApex := ctx.ModuleForTests("myapex", "android_common_myapex")
-		rule = prebuiltApex.Rule("android/soong/android.Cp")
-		if expected, actual := "myapex-arm64.apex", android.NormalizePathForTesting(rule.Input); !reflect.DeepEqual(expected, actual) {
-			t.Errorf("expected: %q, found: %q", expected, actual)
-		}
-
-		checkDexJarBuildPath(t, ctx, "libfoo")
-		checkDexJarInstallPath(t, ctx, "libfoo")
-
-		checkDexJarBuildPath(t, ctx, "libbar")
-		checkDexJarInstallPath(t, ctx, "libbar")
-	})
-
-	t.Run("prebuilt with source preferred", func(t *testing.T) {
-
-		bp := `
-		prebuilt_apex {
-			name: "myapex",
-			arch: {
-				arm64: {
-					src: "myapex-arm64.apex",
-				},
-				arm: {
-					src: "myapex-arm.apex",
-				},
-			},
-			exported_java_libs: ["libfoo", "libbar"],
-		}
-
-		java_import {
-			name: "libfoo",
-			jars: ["libfoo.jar"],
-		}
-
-		java_library {
-			name: "libfoo",
-		}
-
-		java_sdk_library_import {
-			name: "libbar",
-			public: {
-				jars: ["libbar.jar"],
-			},
-		}
-
-		java_sdk_library {
-			name: "libbar",
-			srcs: ["foo/bar/MyClass.java"],
-			unsafe_ignore_missing_latest_api: true,
-		}
-	`
-
-		// Make sure that dexpreopt can access dex implementation files from the prebuilt.
-		ctx := testDexpreoptWithApexes(t, bp, "", transform)
-
-		checkDexJarBuildPath(t, ctx, "prebuilt_libfoo")
-		checkDexJarInstallPath(t, ctx, "prebuilt_libfoo")
-		ensureNoSourceVariant(t, ctx, "libfoo")
-
-		checkDexJarBuildPath(t, ctx, "prebuilt_libbar")
-		checkDexJarInstallPath(t, ctx, "prebuilt_libbar")
-		ensureNoSourceVariant(t, ctx, "libbar")
-	})
-
-	t.Run("prebuilt preferred with source", func(t *testing.T) {
-		bp := `
-		prebuilt_apex {
-			name: "myapex",
-			arch: {
-				arm64: {
-					src: "myapex-arm64.apex",
-				},
-				arm: {
-					src: "myapex-arm.apex",
-				},
-			},
-			exported_java_libs: ["libfoo", "libbar"],
-		}
-
-		java_import {
-			name: "libfoo",
-			prefer: true,
-			jars: ["libfoo.jar"],
-		}
-
-		java_library {
-			name: "libfoo",
-		}
-
-		java_sdk_library_import {
-			name: "libbar",
-			prefer: true,
-			public: {
-				jars: ["libbar.jar"],
-			},
-		}
-
-		java_sdk_library {
-			name: "libbar",
-			srcs: ["foo/bar/MyClass.java"],
-			unsafe_ignore_missing_latest_api: true,
-		}
-	`
-
-		// Make sure that dexpreopt can access dex implementation files from the prebuilt.
-		ctx := testDexpreoptWithApexes(t, bp, "", transform)
-
-		checkDexJarBuildPath(t, ctx, "prebuilt_libfoo")
-		checkDexJarInstallPath(t, ctx, "prebuilt_libfoo")
-		ensureNoSourceVariant(t, ctx, "libfoo")
-
-		checkDexJarBuildPath(t, ctx, "prebuilt_libbar")
-		checkDexJarInstallPath(t, ctx, "prebuilt_libbar")
-		ensureNoSourceVariant(t, ctx, "libbar")
-	})
-}
-
 func TestBootDexJarsFromSourcesAndPrebuilts(t *testing.T) {
 	preparer := android.GroupFixturePreparers(
 		java.FixtureConfigureApexBootJars("myapex:libfoo", "myapex:libbar"),
@@ -5206,16 +5012,8 @@ func TestBootDexJarsFromSourcesAndPrebuilts(t *testing.T) {
 		apex_set {
 			name: "myapex",
 			set: "myapex.apks",
-			exported_java_libs: ["myjavalib"],
 			exported_bootclasspath_fragments: ["my-bootclasspath-fragment"],
 			exported_systemserverclasspath_fragments: ["my-systemserverclasspath-fragment"],
-		}
-
-		java_import {
-			name: "myjavalib",
-			jars: ["myjavalib.jar"],
-			apex_available: ["myapex"],
-			permitted_packages: ["javalib"],
 		}
 
 		prebuilt_bootclasspath_fragment {
@@ -9570,42 +9368,6 @@ func TestAndroidMk_DexpreoptBuiltInstalledForApex(t *testing.T) {
 	ensureContains(t, androidMk, "LOCAL_REQUIRED_MODULES := foo.myapex foo-dexpreopt-arm64-apex@myapex@javalib@foo.jar@classes.odex foo-dexpreopt-arm64-apex@myapex@javalib@foo.jar@classes.vdex\n")
 }
 
-func TestAndroidMk_DexpreoptBuiltInstalledForApex_Prebuilt(t *testing.T) {
-	ctx := testApex(t, `
-		prebuilt_apex {
-			name: "myapex",
-			arch: {
-				arm64: {
-					src: "myapex-arm64.apex",
-				},
-				arm: {
-					src: "myapex-arm.apex",
-				},
-			},
-			exported_java_libs: ["foo"],
-		}
-
-		java_import {
-			name: "foo",
-			jars: ["foo.jar"],
-			apex_available: ["myapex"],
-		}
-	`,
-		dexpreopt.FixtureSetApexSystemServerJars("myapex:foo"),
-	)
-
-	prebuilt := ctx.ModuleForTests("myapex", "android_common_myapex").Module().(*Prebuilt)
-	entriesList := android.AndroidMkEntriesForTest(t, ctx, prebuilt)
-	mainModuleEntries := entriesList[0]
-	android.AssertArrayString(t,
-		"LOCAL_REQUIRED_MODULES",
-		mainModuleEntries.EntryMap["LOCAL_REQUIRED_MODULES"],
-		[]string{
-			"foo-dexpreopt-arm64-apex@myapex@javalib@foo.jar@classes.odex",
-			"foo-dexpreopt-arm64-apex@myapex@javalib@foo.jar@classes.vdex",
-		})
-}
-
 func TestAndroidMk_RequiredModules(t *testing.T) {
 	ctx := testApex(t, `
 		apex {
@@ -10218,208 +9980,6 @@ func TestUpdatableApexEnforcesAppUpdatability(t *testing.T) {
 	}
 }
 
-func TestApexBuildsAgainstApiSurfaceStubLibraries(t *testing.T) {
-	bp := `
-		apex {
-			name: "myapex",
-			key: "myapex.key",
-			native_shared_libs: ["libbaz"],
-			binaries: ["binfoo"],
-			min_sdk_version: "29",
-		}
-		apex_key {
-			name: "myapex.key",
-		}
-		cc_binary {
-			name: "binfoo",
-			shared_libs: ["libbar", "libbaz", "libqux",],
-			apex_available: ["myapex"],
-			min_sdk_version: "29",
-			recovery_available: false,
-		}
-		cc_library {
-			name: "libbar",
-			srcs: ["libbar.cc"],
-			stubs: {
-				symbol_file: "libbar.map.txt",
-				versions: [
-					"29",
-				],
-			},
-		}
-		cc_library {
-			name: "libbaz",
-			srcs: ["libbaz.cc"],
-			apex_available: ["myapex"],
-			min_sdk_version: "29",
-			stubs: {
-				symbol_file: "libbaz.map.txt",
-				versions: [
-					"29",
-				],
-			},
-		}
-		cc_api_library {
-			name: "libbar",
-			src: "libbar_stub.so",
-			min_sdk_version: "29",
-			variants: ["apex.29"],
-		}
-		cc_api_variant {
-			name: "libbar",
-			variant: "apex",
-			version: "29",
-			src: "libbar_apex_29.so",
-		}
-		cc_api_library {
-			name: "libbaz",
-			src: "libbaz_stub.so",
-			min_sdk_version: "29",
-			variants: ["apex.29"],
-		}
-		cc_api_variant {
-			name: "libbaz",
-			variant: "apex",
-			version: "29",
-			src: "libbaz_apex_29.so",
-		}
-		cc_api_library {
-			name: "libqux",
-			src: "libqux_stub.so",
-			min_sdk_version: "29",
-			variants: ["apex.29"],
-		}
-		cc_api_variant {
-			name: "libqux",
-			variant: "apex",
-			version: "29",
-			src: "libqux_apex_29.so",
-		}
-		api_imports {
-			name: "api_imports",
-			apex_shared_libs: [
-				"libbar",
-				"libbaz",
-				"libqux",
-			],
-		}
-		`
-	result := testApex(t, bp)
-
-	hasDep := func(m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		result.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
-
-	// Library defines stubs and cc_api_library should be used with cc_api_library
-	binfooApexVariant := result.ModuleForTests("binfoo", "android_arm64_armv8-a_apex29").Module()
-	libbarCoreVariant := result.ModuleForTests("libbar", "android_arm64_armv8-a_shared").Module()
-	libbarApiImportCoreVariant := result.ModuleForTests("libbar.apiimport", "android_arm64_armv8-a_shared").Module()
-
-	android.AssertBoolEquals(t, "apex variant should link against API surface stub libraries", true, hasDep(binfooApexVariant, libbarApiImportCoreVariant))
-	android.AssertBoolEquals(t, "apex variant should link against original library if exists", true, hasDep(binfooApexVariant, libbarCoreVariant))
-
-	binFooCFlags := result.ModuleForTests("binfoo", "android_arm64_armv8-a_apex29").Rule("ld").Args["libFlags"]
-	android.AssertStringDoesContain(t, "binfoo should link against APEX variant", binFooCFlags, "libbar.apex.29.apiimport.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against cc_api_library itself", binFooCFlags, "libbar.apiimport.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against original definition", binFooCFlags, "libbar.so")
-
-	// Library defined in the same APEX should be linked with original definition instead of cc_api_library
-	libbazApexVariant := result.ModuleForTests("libbaz", "android_arm64_armv8-a_shared_apex29").Module()
-	libbazApiImportCoreVariant := result.ModuleForTests("libbaz.apiimport", "android_arm64_armv8-a_shared").Module()
-	android.AssertBoolEquals(t, "apex variant should link against API surface stub libraries even from same APEX", true, hasDep(binfooApexVariant, libbazApiImportCoreVariant))
-	android.AssertBoolEquals(t, "apex variant should link against original library if exists", true, hasDep(binfooApexVariant, libbazApexVariant))
-
-	android.AssertStringDoesContain(t, "binfoo should link against APEX variant", binFooCFlags, "libbaz.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against cc_api_library itself", binFooCFlags, "libbaz.apiimport.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against original definition", binFooCFlags, "libbaz.apex.29.apiimport.so")
-
-	// cc_api_library defined without original library should be linked with cc_api_library
-	libquxApiImportApexVariant := result.ModuleForTests("libqux.apiimport", "android_arm64_armv8-a_shared").Module()
-	android.AssertBoolEquals(t, "apex variant should link against API surface stub libraries even original library definition does not exist", true, hasDep(binfooApexVariant, libquxApiImportApexVariant))
-	android.AssertStringDoesContain(t, "binfoo should link against APEX variant", binFooCFlags, "libqux.apex.29.apiimport.so")
-}
-
-func TestPlatformBinaryBuildsAgainstApiSurfaceStubLibraries(t *testing.T) {
-	bp := `
-		apex {
-			name: "myapex",
-			key: "myapex.key",
-			native_shared_libs: ["libbar"],
-			min_sdk_version: "29",
-		}
-		apex_key {
-			name: "myapex.key",
-		}
-		cc_binary {
-			name: "binfoo",
-			shared_libs: ["libbar"],
-			recovery_available: false,
-		}
-		cc_library {
-			name: "libbar",
-			srcs: ["libbar.cc"],
-			apex_available: ["myapex"],
-			min_sdk_version: "29",
-			stubs: {
-				symbol_file: "libbar.map.txt",
-				versions: [
-					"29",
-				],
-			},
-		}
-		cc_api_library {
-			name: "libbar",
-			src: "libbar_stub.so",
-			variants: ["apex.29"],
-		}
-		cc_api_variant {
-			name: "libbar",
-			variant: "apex",
-			version: "29",
-			src: "libbar_apex_29.so",
-		}
-		api_imports {
-			name: "api_imports",
-			apex_shared_libs: [
-				"libbar",
-			],
-		}
-		`
-
-	result := testApex(t, bp)
-
-	hasDep := func(m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		result.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
-
-	// Library defines stubs and cc_api_library should be used with cc_api_library
-	binfooApexVariant := result.ModuleForTests("binfoo", "android_arm64_armv8-a").Module()
-	libbarCoreVariant := result.ModuleForTests("libbar", "android_arm64_armv8-a_shared").Module()
-	libbarApiImportCoreVariant := result.ModuleForTests("libbar.apiimport", "android_arm64_armv8-a_shared").Module()
-
-	android.AssertBoolEquals(t, "apex variant should link against API surface stub libraries", true, hasDep(binfooApexVariant, libbarApiImportCoreVariant))
-	android.AssertBoolEquals(t, "apex variant should link against original library if exists", true, hasDep(binfooApexVariant, libbarCoreVariant))
-
-	binFooCFlags := result.ModuleForTests("binfoo", "android_arm64_armv8-a").Rule("ld").Args["libFlags"]
-	android.AssertStringDoesContain(t, "binfoo should link against APEX variant", binFooCFlags, "libbar.apex.29.apiimport.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against cc_api_library itself", binFooCFlags, "libbar.apiimport.so")
-	android.AssertStringDoesNotContain(t, "binfoo should not link against original definition", binFooCFlags, "libbar.so")
-}
-
 func TestTrimmedApex(t *testing.T) {
 	bp := `
 		apex {
@@ -10457,21 +10017,6 @@ func TestTrimmedApex(t *testing.T) {
 			shared_libs: ["libc"],
 			apex_available: ["myapex","mydcla"],
 			min_sdk_version: "29",
-		}
-		cc_api_library {
-			name: "libc",
-			src: "libc.so",
-			min_sdk_version: "29",
-			recovery_available: true,
-			vendor_available: true,
-			product_available: true,
-		}
-		api_imports {
-			name: "api_imports",
-			shared_libs: [
-				"libc",
-			],
-			header_libs: [],
 		}
 		`
 	ctx := testApex(t, bp)
@@ -12090,4 +11635,111 @@ func TestPrebuiltStubNoinstall(t *testing.T) {
 			},
 		)
 	})
+}
+
+func TestSdkLibraryTransitiveClassLoaderContext(t *testing.T) {
+	// This test case tests that listing the impl lib instead of the top level java_sdk_library
+	// in libs of android_app and java_library does not lead to class loader context device/host
+	// path mismatch errors.
+	android.GroupFixturePreparers(
+		prepareForApexTest,
+		android.PrepareForIntegrationTestWithAndroid,
+		PrepareForTestWithApexBuildComponents,
+		android.FixtureModifyEnv(func(env map[string]string) {
+			env["DISABLE_CONTAINER_CHECK"] = "true"
+		}),
+		withFiles(filesForSdkLibrary),
+		android.FixtureMergeMockFs(android.MockFS{
+			"system/sepolicy/apex/com.android.foo30-file_contexts": nil,
+		}),
+	).RunTestWithBp(t, `
+		apex {
+		name: "com.android.foo30",
+		key: "myapex.key",
+		updatable: true,
+		bootclasspath_fragments: [
+			"foo-bootclasspath-fragment",
+		],
+		java_libs: [
+			"bar",
+		],
+		apps: [
+			"bar-app",
+		],
+		min_sdk_version: "30",
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+		bootclasspath_fragment {
+			name: "foo-bootclasspath-fragment",
+			contents: [
+				"framework-foo",
+			],
+			apex_available: [
+				"com.android.foo30",
+			],
+			hidden_api: {
+				split_packages: ["*"]
+			},
+		}
+
+		java_sdk_library {
+			name: "framework-foo",
+			srcs: [
+				"A.java"
+			],
+			unsafe_ignore_missing_latest_api: true,
+			apex_available: [
+				"com.android.foo30",
+			],
+			compile_dex: true,
+			sdk_version: "core_current",
+			shared_library: false,
+		}
+
+		java_library {
+			name: "bar",
+			srcs: [
+				"A.java"
+			],
+			libs: [
+				"framework-foo.impl",
+			],
+			apex_available: [
+				"com.android.foo30",
+			],
+			sdk_version: "core_current",
+		}
+
+		java_library {
+			name: "baz",
+			srcs: [
+				"A.java"
+			],
+			libs: [
+				"bar",
+			],
+			sdk_version: "core_current",
+		}
+
+		android_app {
+			name: "bar-app",
+			srcs: [
+				"A.java"
+			],
+			libs: [
+				"baz",
+				"framework-foo.impl",
+			],
+			apex_available: [
+				"com.android.foo30",
+			],
+			sdk_version: "core_current",
+			min_sdk_version: "30",
+			manifest: "AndroidManifest.xml",
+		}
+       `)
 }

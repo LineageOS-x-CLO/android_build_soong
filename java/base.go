@@ -535,7 +535,8 @@ type Module struct {
 	linter
 
 	// list of the xref extraction files
-	kytheFiles android.Paths
+	kytheFiles       android.Paths
+	kytheKotlinFiles android.Paths
 
 	hideApexVariantFromMake bool
 
@@ -1363,7 +1364,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 		kotlinJar := android.PathForModuleOut(ctx, "kotlin", jarName)
 		kotlinHeaderJar := android.PathForModuleOut(ctx, "kotlin_headers", jarName)
-		kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags)
+		j.kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags)
 		if ctx.Failed() {
 			return
 		}
@@ -1782,14 +1783,14 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				classesJar:    outputFile,
 				jarName:       jarName,
 			}
-			if j.GetProfileGuided() && j.optimizeOrObfuscateEnabled() && !j.EnableProfileRewriting() {
+			if j.GetProfileGuided(ctx) && j.optimizeOrObfuscateEnabled() && !j.EnableProfileRewriting(ctx) {
 				ctx.PropertyErrorf("enable_profile_rewriting",
 					"Enable_profile_rewriting must be true when profile_guided dexpreopt and R8 optimization/obfuscation is turned on. The attached profile should be sourced from an unoptimized/unobfuscated APK.",
 				)
 			}
-			if j.EnableProfileRewriting() {
-				profile := j.GetProfile()
-				if profile == "" || !j.GetProfileGuided() {
+			if j.EnableProfileRewriting(ctx) {
+				profile := j.GetProfile(ctx)
+				if profile == "" || !j.GetProfileGuided(ctx) {
 					ctx.PropertyErrorf("enable_profile_rewriting", "Profile and Profile_guided must be set when enable_profile_rewriting is true")
 				}
 				params.artProfileInput = &profile
