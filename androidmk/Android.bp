@@ -46,6 +46,7 @@ bootstrap_go_package {
         "blueprint-parser",
         "bpfix-lib",
     ],
+    visibility: ["//visibility:public"],
 }
 
 bootstrap_go_package {

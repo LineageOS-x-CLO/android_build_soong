@@ -39,6 +39,7 @@ bootstrap_go_package {
     deps: [
         "bpfix-lib",
     ],
+    visibility: ["//visibility:public"],
 }
 
 bootstrap_go_package {
@@ -54,4 +55,5 @@ bootstrap_go_package {
         "blueprint-parser",
         "blueprint-pathtools",
     ],
+    visibility: ["//visibility:public"],
 }

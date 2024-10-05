@@ -15,6 +15,9 @@
 package android
 
 import (
+	"bytes"
+	"encoding/gob"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -55,7 +58,7 @@ type Module interface {
 
 	base() *ModuleBase
 	Disable()
-	Enabled(ctx ConfigAndErrorContext) bool
+	Enabled(ctx ConfigurableEvaluatorContext) bool
 	Target() Target
 	MultiTargets() []Target
 
@@ -106,12 +109,12 @@ type Module interface {
 	// Get information about the properties that can contain visibility rules.
 	visibilityProperties() []visibilityProperty
 
-	RequiredModuleNames(ctx ConfigAndErrorContext) []string
+	RequiredModuleNames(ctx ConfigurableEvaluatorContext) []string
 	HostRequiredModuleNames() []string
 	TargetRequiredModuleNames() []string
-	VintfFragmentModuleNames(ctx ConfigAndErrorContext) []string
+	VintfFragmentModuleNames(ctx ConfigurableEvaluatorContext) []string
 
-	ConfigurableEvaluator(ctx ConfigAndErrorContext) proptools.ConfigurableEvaluator
+	ConfigurableEvaluator(ctx ConfigurableEvaluatorContext) proptools.ConfigurableEvaluator
 }
 
 // Qualified id for a module
@@ -439,12 +442,6 @@ type commonProperties struct {
 	//
 	// Set at module initialization time by calling InitCommonOSAndroidMultiTargetsArchModule
 	CreateCommonOSVariant bool `blueprint:"mutated"`
-
-	// If set to true then this variant is the CommonOS variant that has dependencies on its
-	// OsType specific variants.
-	//
-	// Set by osMutator.
-	CommonOSVariant bool `blueprint:"mutated"`
 
 	// When set to true, this module is not installed to the full install path (ex: under
 	// out/target/product/<name>/<partition>). It can be installed only to the packaging
@@ -1218,7 +1215,7 @@ func (m *ModuleBase) ArchSpecific() bool {
 
 // True if the current variant is a CommonOS variant, false otherwise.
 func (m *ModuleBase) IsCommonOSVariant() bool {
-	return m.commonProperties.CommonOSVariant
+	return m.commonProperties.CompileOS == CommonOS
 }
 
 // supportsTarget returns true if the given Target is supported by the current module.
@@ -1336,11 +1333,19 @@ func (m *ModuleBase) PartitionTag(config DeviceConfig) string {
 	return partition
 }
 
-func (m *ModuleBase) Enabled(ctx ConfigAndErrorContext) bool {
+func (m *ModuleBase) Enabled(ctx ConfigurableEvaluatorContext) bool {
 	if m.commonProperties.ForcedDisabled {
 		return false
 	}
 	return m.commonProperties.Enabled.GetOrDefault(m.ConfigurableEvaluator(ctx), !m.Os().DefaultDisabled)
+}
+
+// Returns a copy of the enabled property, useful for passing it on to sub-modules
+func (m *ModuleBase) EnabledProperty() proptools.Configurable[bool] {
+	if m.commonProperties.ForcedDisabled {
+		return proptools.NewSimpleConfigurable(false)
+	}
+	return m.commonProperties.Enabled.Clone()
 }
 
 func (m *ModuleBase) Disable() {
@@ -1533,7 +1538,7 @@ func (m *ModuleBase) InRecovery() bool {
 	return m.base().commonProperties.ImageVariation == RecoveryVariation
 }
 
-func (m *ModuleBase) RequiredModuleNames(ctx ConfigAndErrorContext) []string {
+func (m *ModuleBase) RequiredModuleNames(ctx ConfigurableEvaluatorContext) []string {
 	return m.base().commonProperties.Required.GetOrDefault(m.ConfigurableEvaluator(ctx), nil)
 }
 
@@ -1545,7 +1550,7 @@ func (m *ModuleBase) TargetRequiredModuleNames() []string {
 	return m.base().commonProperties.Target_required
 }
 
-func (m *ModuleBase) VintfFragmentModuleNames(ctx ConfigAndErrorContext) []string {
+func (m *ModuleBase) VintfFragmentModuleNames(ctx ConfigurableEvaluatorContext) []string {
 	return m.base().commonProperties.Vintf_fragment_modules.GetOrDefault(m.ConfigurableEvaluator(ctx), nil)
 }
 
@@ -1898,61 +1903,16 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			return
 		}
 
-		incrementalAnalysis := false
-		incrementalEnabled := false
-		var cacheKey *blueprint.BuildActionCacheKey = nil
-		var incrementalModule *blueprint.Incremental = nil
-		if ctx.bp.GetIncrementalEnabled() {
-			if im, ok := m.module.(blueprint.Incremental); ok {
-				incrementalModule = &im
-				incrementalEnabled = im.IncrementalSupported()
-				incrementalAnalysis = ctx.bp.GetIncrementalAnalysis() && incrementalEnabled
-			}
-		}
-		if incrementalEnabled {
-			hash, err := proptools.CalculateHash(m.GetProperties())
-			if err != nil {
-				ctx.ModuleErrorf("failed to calculate properties hash: %s", err)
-				return
-			}
-			cacheInput := new(blueprint.BuildActionCacheInput)
-			cacheInput.PropertiesHash = hash
-			ctx.VisitDirectDeps(func(module Module) {
-				cacheInput.ProvidersHash =
-					append(cacheInput.ProvidersHash, ctx.bp.OtherModuleProviderInitialValueHashes(module))
-			})
-			hash, err = proptools.CalculateHash(&cacheInput)
-			if err != nil {
-				ctx.ModuleErrorf("failed to calculate cache input hash: %s", err)
-				return
-			}
-			cacheKey = &blueprint.BuildActionCacheKey{
-				Id:        ctx.bp.ModuleCacheKey(),
-				InputHash: hash,
-			}
+		m.module.GenerateAndroidBuildActions(ctx)
+		if ctx.Failed() {
+			return
 		}
 
-		restored := false
-		if incrementalAnalysis && cacheKey != nil {
-			restored = ctx.bp.RestoreBuildActions(cacheKey)
-		}
-
-		if !restored {
-			m.module.GenerateAndroidBuildActions(ctx)
-			if ctx.Failed() {
-				return
-			}
-
-			if x, ok := m.module.(IDEInfo); ok {
-				var result IdeInfo
-				x.IDEInfo(ctx, &result)
-				result.BaseModuleName = x.BaseModuleName()
-				SetProvider(ctx, IdeInfoProviderKey, result)
-			}
-		}
-
-		if incrementalEnabled && cacheKey != nil {
-			ctx.bp.CacheBuildActions(cacheKey, incrementalModule)
+		if x, ok := m.module.(IDEInfo); ok {
+			var result IdeInfo
+			x.IDEInfo(ctx, &result)
+			result.BaseModuleName = x.BaseModuleName()
+			SetProvider(ctx, IdeInfoProviderKey, result)
 		}
 
 		// Create the set of tagged dist files after calling GenerateAndroidBuildActions
@@ -2033,7 +1993,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			TargetDependencies: targetRequired,
 			HostDependencies:   hostRequired,
 			Data:               data,
-			Required:           m.RequiredModuleNames(ctx),
+			Required:           append(m.RequiredModuleNames(ctx), m.VintfFragmentModuleNames(ctx)...),
 		}
 		SetProvider(ctx, ModuleInfoJSONProvider, ctx.moduleInfoJSON)
 	}
@@ -2136,9 +2096,59 @@ type katiInstall struct {
 	absFrom string
 }
 
+func (p *katiInstall) GobEncode() ([]byte, error) {
+	w := new(bytes.Buffer)
+	encoder := gob.NewEncoder(w)
+	err := errors.Join(encoder.Encode(p.from), encoder.Encode(p.to),
+		encoder.Encode(p.implicitDeps), encoder.Encode(p.orderOnlyDeps),
+		encoder.Encode(p.executable), encoder.Encode(p.extraFiles),
+		encoder.Encode(p.absFrom))
+	if err != nil {
+		return nil, err
+	}
+
+	return w.Bytes(), nil
+}
+
+func (p *katiInstall) GobDecode(data []byte) error {
+	r := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(r)
+	err := errors.Join(decoder.Decode(&p.from), decoder.Decode(&p.to),
+		decoder.Decode(&p.implicitDeps), decoder.Decode(&p.orderOnlyDeps),
+		decoder.Decode(&p.executable), decoder.Decode(&p.extraFiles),
+		decoder.Decode(&p.absFrom))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type extraFilesZip struct {
 	zip Path
 	dir InstallPath
+}
+
+func (p *extraFilesZip) GobEncode() ([]byte, error) {
+	w := new(bytes.Buffer)
+	encoder := gob.NewEncoder(w)
+	err := errors.Join(encoder.Encode(p.zip), encoder.Encode(p.dir))
+	if err != nil {
+		return nil, err
+	}
+
+	return w.Bytes(), nil
+}
+
+func (p *extraFilesZip) GobDecode(data []byte) error {
+	r := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(r)
+	err := errors.Join(decoder.Decode(&p.zip), decoder.Decode(&p.dir))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type katiInstalls []katiInstall
@@ -2190,17 +2200,23 @@ func (m *ModuleBase) IsNativeBridgeSupported() bool {
 	return proptools.Bool(m.commonProperties.Native_bridge_supported)
 }
 
-type ConfigAndErrorContext interface {
+type ConfigContext interface {
+	Config() Config
+}
+
+type ConfigurableEvaluatorContext interface {
+	OtherModuleProviderContext
 	Config() Config
 	OtherModulePropertyErrorf(module Module, property string, fmt string, args ...interface{})
+	HasMutatorFinished(mutatorName string) bool
 }
 
 type configurationEvalutor struct {
-	ctx ConfigAndErrorContext
+	ctx ConfigurableEvaluatorContext
 	m   Module
 }
 
-func (m *ModuleBase) ConfigurableEvaluator(ctx ConfigAndErrorContext) proptools.ConfigurableEvaluator {
+func (m *ModuleBase) ConfigurableEvaluator(ctx ConfigurableEvaluatorContext) proptools.ConfigurableEvaluator {
 	return configurationEvalutor{
 		ctx: ctx,
 		m:   m.module,
@@ -2214,6 +2230,12 @@ func (e configurationEvalutor) PropertyErrorf(property string, fmt string, args 
 func (e configurationEvalutor) EvaluateConfiguration(condition proptools.ConfigurableCondition, property string) proptools.ConfigurableValue {
 	ctx := e.ctx
 	m := e.m
+
+	if !ctx.HasMutatorFinished("defaults") {
+		ctx.OtherModulePropertyErrorf(m, property, "Cannot evaluate configurable property before the defaults mutator has run")
+		return proptools.ConfigurableValueUndefined()
+	}
+
 	switch condition.FunctionName() {
 	case "release_flag":
 		if condition.NumArgs() != 1 {
