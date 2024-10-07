@@ -10259,14 +10259,15 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 12 {
-		t.Fatalf("Expected 12 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 14 {
+		t.Fatalf("Expected 14 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info.*/image.apex/etc/flag.info")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -10276,6 +10277,7 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_map_file", inputs, "android_common_myapex/flag.map", "myapex", "flag_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_val_file", inputs, "android_common_myapex/flag.val", "myapex", "flag_val")
+	VerifyAconfigRule(t, &mod, "create_aconfig_flag_info_file", inputs, "android_common_myapex/flag.info", "myapex", "flag_info")
 }
 
 func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
@@ -10394,14 +10396,15 @@ func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 16 {
-		t.Fatalf("Expected 16 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 18 {
+		t.Fatalf("Expected 18 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info .*/image.apex/etc/flag.info")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -10412,6 +10415,7 @@ func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_map_file", inputs, "android_common_myapex/flag.map", "myapex", "flag_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_val_file", inputs, "android_common_myapex/flag.val", "myapex", "flag_val")
+	VerifyAconfigRule(t, &mod, "create_aconfig_flag_info_file", inputs, "android_common_myapex/flag.info", "myapex", "flag_info")
 }
 
 func TestAconfigFilesRustDeps(t *testing.T) {
@@ -10562,14 +10566,15 @@ func TestAconfigFilesRustDeps(t *testing.T) {
 	mod := ctx.ModuleForTests("myapex", "android_common_myapex")
 	s := mod.Rule("apexRule").Args["copy_commands"]
 	copyCmds := regexp.MustCompile(" *&& *").Split(s, -1)
-	if len(copyCmds) != 36 {
-		t.Fatalf("Expected 36 commands, got %d in:\n%s", len(copyCmds), s)
+	if len(copyCmds) != 38 {
+		t.Fatalf("Expected 38 commands, got %d in:\n%s", len(copyCmds), s)
 	}
 
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/aconfig_flags.pb .*/image.apex/etc/aconfig_flags.pb")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/package.map .*/image.apex/etc/package.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.map .*/image.apex/etc/flag.map")
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.val .*/image.apex/etc/flag.val")
+	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info .*/image.apex/etc/flag.info")
 
 	inputs := []string{
 		"my_aconfig_declarations_foo/intermediate.pb",
@@ -10581,6 +10586,7 @@ func TestAconfigFilesRustDeps(t *testing.T) {
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_map_file", inputs, "android_common_myapex/flag.map", "myapex", "flag_map")
 	VerifyAconfigRule(t, &mod, "create_aconfig_flag_val_file", inputs, "android_common_myapex/flag.val", "myapex", "flag_val")
+	VerifyAconfigRule(t, &mod, "create_aconfig_flag_info_file", inputs, "android_common_myapex/flag.info", "myapex", "flag_info")
 }
 
 func VerifyAconfigRule(t *testing.T, mod *android.TestingModule, desc string, inputs []string, output string, container string, file_type string) {
