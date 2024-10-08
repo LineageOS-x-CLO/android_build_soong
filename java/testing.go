@@ -384,7 +384,6 @@ func registerRequiredBuildComponentsForTest(ctx android.RegistrationContext) {
 	RegisterStubsBuildComponents(ctx)
 	RegisterSystemModulesBuildComponents(ctx)
 	registerSystemserverClasspathBuildComponents(ctx)
-	registerLintBuildComponents(ctx)
 	android.RegisterApexContributionsBuildComponents(ctx)
 }
 

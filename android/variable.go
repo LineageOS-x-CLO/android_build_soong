@@ -475,9 +475,6 @@ type ProductVariables struct {
 
 	EnforceProductPartitionInterface *bool `json:",omitempty"`
 
-	EnforceInterPartitionJavaSdkLibrary *bool    `json:",omitempty"`
-	InterPartitionJavaLibraryAllowList  []string `json:",omitempty"`
-
 	BoardUsesRecoveryAsBoot *bool `json:",omitempty"`
 	BoardUsesRamdiskAsBoot  *bool `json:",omitempty"`
 
