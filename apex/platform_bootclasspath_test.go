@@ -408,6 +408,9 @@ func TestPlatformBootclasspathDependencies(t *testing.T) {
 		// The fragments.
 		`com.android.art:art-bootclasspath-fragment`,
 		`myapex:my-bootclasspath-fragment`,
+
+		// Impl lib of sdk_library for transitive srcjar generation
+		`platform:foo.impl`,
 	})
 }
 
@@ -564,6 +567,9 @@ func TestPlatformBootclasspath_AlwaysUsePrebuiltSdks(t *testing.T) {
 		// The fragments.
 		"myapex:mybootclasspath-fragment",
 		"myapex:prebuilt_mybootclasspath-fragment",
+
+		// Impl lib of sdk_library for transitive srcjar generation
+		"platform:foo.impl",
 	})
 }
 
