@@ -64,6 +64,16 @@ func RegisterAppBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("override_android_test", OverrideAndroidTestModuleFactory)
 }
 
+type AppInfo struct {
+	// Updatable is set to the value of the updatable property
+	Updatable bool
+
+	// TestHelperApp is true if the module is a android_test_helper_app
+	TestHelperApp bool
+}
+
+var AppInfoProvider = blueprint.NewProvider[*AppInfo]()
+
 // AndroidManifest.xml merging
 // package splits
 
@@ -84,7 +94,7 @@ type appProperties struct {
 	Package_splits []string
 
 	// list of native libraries that will be provided in or alongside the resulting jar
-	Jni_libs []string `android:"arch_variant"`
+	Jni_libs proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// if true, use JNI libraries that link against platform APIs even if this module sets
 	// sdk_version.
@@ -163,7 +173,7 @@ type overridableAppProperties struct {
 	RotationMinSdkVersion *string
 
 	// the package name of this app. The package name in the manifest file is used if one was not given.
-	Package_name *string
+	Package_name proptools.Configurable[string]
 
 	// the logging parent of this app.
 	Logging_parent *string
@@ -312,7 +322,7 @@ func (a *AndroidApp) DepsMutator(ctx android.BottomUpMutatorContext) {
 		} else {
 			tag = jniInstallTag
 		}
-		ctx.AddFarVariationDependencies(variation, tag, a.appProperties.Jni_libs...)
+		ctx.AddFarVariationDependencies(variation, tag, a.appProperties.Jni_libs.GetOrDefault(ctx, nil)...)
 	}
 	for _, aconfig_declaration := range a.aaptProperties.Flags_packages {
 		ctx.AddDependency(ctx.Module(), aconfigDeclarationTag, aconfig_declaration)
@@ -377,7 +387,8 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 	checkMinSdkVersionMts(ctx, a.MinSdkVersion(ctx))
 	applicationId := a.appTestHelperAppProperties.Manifest_values.ApplicationId
 	if applicationId != nil {
-		if a.overridableAppProperties.Package_name != nil {
+		packageName := a.overridableAppProperties.Package_name.Get(ctx)
+		if packageName.IsPresent() {
 			ctx.PropertyErrorf("manifest_values.applicationId", "property is not supported when property package_name is set.")
 		}
 		a.aapt.manifestValues.applicationId = *applicationId
@@ -386,7 +397,10 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
 		TestOnly: true,
 	})
-
+	android.SetProvider(ctx, AppInfoProvider, &AppInfo{
+		Updatable:     Bool(a.appProperties.Updatable),
+		TestHelperApp: true,
+	})
 }
 
 func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -394,6 +408,10 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.checkEmbedJnis(ctx)
 	a.generateAndroidBuildActions(ctx)
 	a.generateJavaUsedByApex(ctx)
+	android.SetProvider(ctx, AppInfoProvider, &AppInfo{
+		Updatable:     Bool(a.appProperties.Updatable),
+		TestHelperApp: false,
+	})
 }
 
 func (a *AndroidApp) checkAppSdkVersions(ctx android.ModuleContext) {
@@ -429,7 +447,7 @@ func (a *AndroidApp) checkAppSdkVersions(ctx android.ModuleContext) {
 func (a *AndroidApp) checkEmbedJnis(ctx android.BaseModuleContext) {
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	apkInApex := !apexInfo.IsForPlatform()
-	hasJnis := len(a.appProperties.Jni_libs) > 0
+	hasJnis := len(a.appProperties.Jni_libs.GetOrDefault(ctx, nil)) > 0
 
 	if apkInApex && hasJnis && !Bool(a.appProperties.Use_embedded_native_libs) {
 		ctx.ModuleErrorf("APK in APEX should have use_embedded_native_libs: true")
@@ -570,10 +588,11 @@ func (a *AndroidApp) aaptBuildActions(ctx android.ModuleContext) {
 	}
 
 	manifestPackageName, overridden := ctx.DeviceConfig().OverrideManifestPackageNameFor(ctx.ModuleName())
-	if overridden || a.overridableAppProperties.Package_name != nil {
+	packageNameProp := a.overridableAppProperties.Package_name.Get(ctx)
+	if overridden || packageNameProp.IsPresent() {
 		// The product override variable has a priority over the package_name property.
 		if !overridden {
-			manifestPackageName = *a.overridableAppProperties.Package_name
+			manifestPackageName = packageNameProp.Get()
 		}
 		aaptLinkFlags = append(aaptLinkFlags, generateAaptRenamePackageFlags(manifestPackageName, a.renameResourcesPackage())...)
 		a.overriddenManifestPackageName = manifestPackageName
@@ -587,7 +606,7 @@ func (a *AndroidApp) aaptBuildActions(ctx android.ModuleContext) {
 		if override := ctx.Config().Getenv("OVERRIDE_APEX_MANIFEST_DEFAULT_VERSION"); override != "" {
 			a.aapt.defaultManifestVersion = override
 		} else {
-			a.aapt.defaultManifestVersion = android.DefaultUpdatableModuleVersion
+			a.aapt.defaultManifestVersion = ctx.Config().ReleaseDefaultUpdatableModuleVersion()
 		}
 	}
 
@@ -813,11 +832,12 @@ func (a *AndroidApp) createPrivappAllowlist(ctx android.ModuleContext) android.P
 		return android.PathForModuleSrc(ctx, *a.appProperties.Privapp_allowlist)
 	}
 
-	if a.overridableAppProperties.Package_name == nil {
+	packageNameProp := a.overridableAppProperties.Package_name.Get(ctx)
+	if packageNameProp.IsEmpty() {
 		ctx.PropertyErrorf("privapp_allowlist", "package_name must be set to use privapp_allowlist")
 	}
 
-	packageName := *a.overridableAppProperties.Package_name
+	packageName := packageNameProp.Get()
 	fileName := "privapp_allowlist_" + packageName + ".xml"
 	outPath := android.PathForModuleOut(ctx, fileName).OutputPath
 	ctx.Build(pctx, android.BuildParams{
@@ -1260,10 +1280,6 @@ func (a *AndroidApp) Updatable() bool {
 	return Bool(a.appProperties.Updatable)
 }
 
-func (a *AndroidApp) SetUpdatable(val bool) {
-	a.appProperties.Updatable = &val
-}
-
 func (a *AndroidApp) getCertString(ctx android.BaseModuleContext) string {
 	certificate, overridden := ctx.DeviceConfig().OverrideCertificateFor(ctx.ModuleName())
 	if overridden {
@@ -1459,7 +1475,8 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	applicationId := a.appTestProperties.Manifest_values.ApplicationId
 	if applicationId != nil {
-		if a.overridableAppProperties.Package_name != nil {
+		packageNameProp := a.overridableAppProperties.Package_name.Get(ctx)
+		if packageNameProp.IsPresent() {
 			ctx.PropertyErrorf("manifest_values.applicationId", "property is not supported when property package_name is set.")
 		}
 		a.aapt.manifestValues.applicationId = *applicationId
@@ -1510,10 +1527,11 @@ func (a *AndroidTest) FixTestConfig(ctx android.ModuleContext, testConfig androi
 		command.FlagWithArg("--test-file-name ", a.installApkName+".apk")
 	}
 
-	if a.overridableAppProperties.Package_name != nil {
+	packageNameProp := a.overridableAppProperties.Package_name.Get(ctx)
+	if packageNameProp.IsPresent() {
 		fixNeeded = true
 		command.FlagWithInput("--manifest ", a.manifestPath).
-			FlagWithArg("--package-name ", *a.overridableAppProperties.Package_name)
+			FlagWithArg("--package-name ", packageNameProp.Get())
 	}
 
 	if a.appTestProperties.Mainline_package_name != nil {

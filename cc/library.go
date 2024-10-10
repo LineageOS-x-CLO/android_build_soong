@@ -552,7 +552,7 @@ func (library *libraryDecorator) compilerFlags(ctx ModuleContext, flags Flags, d
 	return flags
 }
 
-func loadQiifaLibraryMetadata(library *libraryDecorator, ctx android.BaseModuleContext) {
+func loadQiifaLibraryMetadata(library *libraryDecorator, ctx android.OutgoingTransitionContext) {
 	m := ctx.Module().(*Module)
 	libName := m.BaseModuleName()
 	for i := 0; i < len(config.QiifaAbiLibraryList); i++ {
@@ -563,8 +563,7 @@ func loadQiifaLibraryMetadata(library *libraryDecorator, ctx android.BaseModuleC
 	}
 }
 
-func (library *libraryDecorator) getHeaderAbiCheckerProperties(ctx android.BaseModuleContext) headerAbiCheckerProperties {
-	m := ctx.Module().(*Module)
+func (library *libraryDecorator) getHeaderAbiCheckerProperties(m *Module) headerAbiCheckerProperties {
 	variantProps := &library.Properties.Target.Platform.Header_abi_checker
 	if m.InVendor() {
 		variantProps = &library.Properties.Target.Vendor.Header_abi_checker
@@ -574,7 +573,7 @@ func (library *libraryDecorator) getHeaderAbiCheckerProperties(ctx android.BaseM
 	props := library.Properties.Header_abi_checker
 	err := proptools.AppendProperties(&props, variantProps, nil)
 	if err != nil {
-		ctx.ModuleErrorf("Cannot merge headerAbiCheckerProperties: %s", err.Error())
+		panic(fmt.Errorf("Cannot merge headerAbiCheckerProperties: %s", err.Error()))
 	}
 	return props
 }
@@ -733,14 +732,14 @@ type libraryInterface interface {
 	setShared()
 
 	// Gets the ABI properties for vendor, product, or platform variant
-	getHeaderAbiCheckerProperties(ctx android.BaseModuleContext) headerAbiCheckerProperties
+	getHeaderAbiCheckerProperties(m *Module) headerAbiCheckerProperties
 
 	// Write LOCAL_ADDITIONAL_DEPENDENCIES for ABI diff
 	androidMkWriteAdditionalDependenciesForSourceAbiDiff(w io.Writer)
 
 	availableFor(string) bool
 	isLibraryQiifaEnabled() bool
-	loadQiifaMetadata(ctx android.BaseModuleContext)
+	loadQiifaMetadata(ctx android.OutgoingTransitionContext)
 
 	getAPIListCoverageXMLPath() android.ModuleOutPath
 
@@ -1382,7 +1381,7 @@ func (library *libraryDecorator) sourceAbiDiff(ctx android.ModuleContext,
 	sourceVersion, errorMessage string) {
 
 	extraFlags := []string{"-target-version", sourceVersion}
-	headerAbiChecker := library.getHeaderAbiCheckerProperties(ctx)
+	headerAbiChecker := library.getHeaderAbiCheckerProperties(ctx.Module().(*Module))
 	if Bool(headerAbiChecker.Check_all_apis) {
 		extraFlags = append(extraFlags, "-check-all-apis")
 	} else {
@@ -1454,7 +1453,7 @@ func (library *libraryDecorator) optInAbiDiff(ctx android.ModuleContext,
 func (library *libraryDecorator) linkSAbiDumpFiles(ctx ModuleContext, deps PathDeps, objs Objects, fileName string, soFile android.Path) {
 	if library.sabi.shouldCreateSourceAbiDump() {
 		exportedIncludeDirs := library.exportedIncludeDirsForAbiCheck(ctx)
-		headerAbiChecker := library.getHeaderAbiCheckerProperties(ctx)
+		headerAbiChecker := library.getHeaderAbiCheckerProperties(ctx.Module().(*Module))
 		currSdkVersion := currRefAbiDumpSdkVersion(ctx)
 		currVendorVersion := ctx.Config().VendorApiLevel()
 
@@ -1468,7 +1467,7 @@ func (library *libraryDecorator) linkSAbiDumpFiles(ctx ModuleContext, deps PathD
 			[]string{} /* includeSymbolTags */, currSdkVersion, false /* isLlndk */)
 
 		var llndkDump, apexVariantDump android.Path
-		tags := classifySourceAbiDump(ctx)
+		tags := classifySourceAbiDump(ctx.Module().(*Module))
 		optInTags := []lsdumpTag{}
 		for _, tag := range tags {
 			if tag == llndkLsdumpTag && currVendorVersion != "" {
@@ -1757,7 +1756,7 @@ func (library *libraryDecorator) isLibraryQiifaEnabled() bool {
 	return library.isQiifaLibrary
 }
 
-func (library *libraryDecorator) loadQiifaMetadata(ctx android.BaseModuleContext) {
+func (library *libraryDecorator) loadQiifaMetadata(ctx android.OutgoingTransitionContext) {
 	loadQiifaLibraryMetadata(library, ctx)
 }
 
@@ -1893,7 +1892,7 @@ func (library *libraryDecorator) buildStubs() bool {
 }
 
 func (library *libraryDecorator) symbolFileForAbiCheck(ctx ModuleContext) *string {
-	if props := library.getHeaderAbiCheckerProperties(ctx); props.Symbol_file != nil {
+	if props := library.getHeaderAbiCheckerProperties(ctx.Module().(*Module)); props.Symbol_file != nil {
 		return props.Symbol_file
 	}
 	if library.hasStubsVariants() && library.Properties.Stubs.Symbol_file != nil {
@@ -2096,12 +2095,7 @@ func reuseStaticLibrary(ctx android.BottomUpMutatorContext, shared *Module) {
 			sharedCompiler.StaticProperties.Static.System_shared_libs == nil &&
 			sharedCompiler.SharedProperties.Shared.System_shared_libs == nil {
 
-			// TODO: namespaces?
 			ctx.AddVariationDependencies([]blueprint.Variation{{"link", "static"}}, reuseObjTag, ctx.ModuleName())
-			sharedCompiler.baseCompiler.Properties.OriginalSrcs =
-				sharedCompiler.baseCompiler.Properties.Srcs
-			sharedCompiler.baseCompiler.Properties.Srcs = proptools.NewConfigurable[[]string](nil, nil)
-			sharedCompiler.baseCompiler.Properties.Generated_sources = nil
 		}
 
 		// This dep is just to reference static variant from shared variant

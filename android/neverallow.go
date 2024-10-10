@@ -57,7 +57,6 @@ func init() {
 	AddNeverAllowRules(createUncompressDexRules()...)
 	AddNeverAllowRules(createInitFirstStageRules()...)
 	AddNeverAllowRules(createCcStubsRule())
-	AddNeverAllowRules(createJavaExcludeStaticLibsRule())
 	AddNeverAllowRules(createProhibitHeaderOnlyRule())
 	AddNeverAllowRules(createLimitNdkExportRule()...)
 }
@@ -241,14 +240,6 @@ func createInitFirstStageRules() []Rule {
 			NotModuleType("prebuilt_root").
 			Because("install_in_root is only for init_first_stage."),
 	}
-}
-
-func createJavaExcludeStaticLibsRule() Rule {
-	return NeverAllow().
-		NotIn("build/soong", "libcore", "frameworks/base/api").
-		ModuleType("java_library").
-		WithMatcher("exclude_static_libs", isSetMatcherInstance).
-		Because("exclude_static_libs property is only allowed for java modules defined in build/soong, libcore, and frameworks/base/api")
 }
 
 func createProhibitHeaderOnlyRule() Rule {
