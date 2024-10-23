@@ -550,6 +550,58 @@ func PathsRelativeToModuleSourceDir(input SourceInput) Paths {
 	return ret
 }
 
+// DirectoryPathsForModuleSrcExcludes returns a Paths{} containing the resolved references in
+// directory paths. Elements of paths are resolved as:
+//   - filepath, relative to local module directory, resolves as a filepath relative to the local
+//     source directory
+//   - other modules using the ":name" syntax. These modules must implement DirProvider.
+//
+// TODO(b/358302178): Implement DirectoryPath and change the return type.
+func DirectoryPathsForModuleSrc(ctx ModuleMissingDepsPathContext, paths []string) Paths {
+	var ret Paths
+
+	for _, path := range paths {
+		if m, t := SrcIsModuleWithTag(path); m != "" {
+			module := GetModuleFromPathDep(ctx, m, t)
+			if module == nil {
+				ctx.ModuleErrorf(`missing dependency on %q, is the property annotated with android:"path"?`, m)
+				continue
+			}
+			if t != "" {
+				ctx.ModuleErrorf("DirProvider dependency %q does not support the tag %q", module, t)
+				continue
+			}
+			mctx, ok := ctx.(OtherModuleProviderContext)
+			if !ok {
+				panic(fmt.Errorf("%s is not an OtherModuleProviderContext", ctx))
+			}
+			if dirProvider, ok := OtherModuleProvider(mctx, module, DirProvider); ok {
+				ret = append(ret, dirProvider.Dirs...)
+			} else {
+				ReportPathErrorf(ctx, "module %q does not implement DirProvider", module)
+			}
+		} else {
+			p := pathForModuleSrc(ctx, path)
+			if isDir, err := ctx.Config().fs.IsDir(p.String()); err != nil {
+				ReportPathErrorf(ctx, "%s: %s", p, err.Error())
+			} else if !isDir {
+				ReportPathErrorf(ctx, "module directory path %q is not a directory", p)
+			} else {
+				ret = append(ret, p)
+			}
+		}
+	}
+
+	seen := make(map[Path]bool, len(ret))
+	for _, path := range ret {
+		if seen[path] {
+			ReportPathErrorf(ctx, "duplicated path %q", path)
+		}
+		seen[path] = true
+	}
+	return ret
+}
+
 // OutputPaths is a slice of OutputPath objects, with helpers to operate on the collection.
 type OutputPaths []OutputPath
 
@@ -1363,21 +1415,21 @@ type OutputPath struct {
 }
 
 type outputPathGob struct {
-	basePath
+	BasePath basePath
 	OutDir   string
 	FullPath string
 }
 
 func (p *OutputPath) ToGob() *outputPathGob {
 	return &outputPathGob{
-		basePath: p.basePath,
+		BasePath: p.basePath,
 		OutDir:   p.outDir,
 		FullPath: p.fullPath,
 	}
 }
 
 func (p *OutputPath) FromGob(data *outputPathGob) {
-	p.basePath = data.basePath
+	p.basePath = data.BasePath
 	p.outDir = data.OutDir
 	p.fullPath = data.FullPath
 }
@@ -1792,7 +1844,7 @@ type InstallPath struct {
 }
 
 type installPathGob struct {
-	basePath
+	BasePath     basePath
 	SoongOutDir  string
 	PartitionDir string
 	Partition    string
@@ -1802,7 +1854,7 @@ type installPathGob struct {
 
 func (p *InstallPath) ToGob() *installPathGob {
 	return &installPathGob{
-		basePath:     p.basePath,
+		BasePath:     p.basePath,
 		SoongOutDir:  p.soongOutDir,
 		PartitionDir: p.partitionDir,
 		Partition:    p.partition,
@@ -1812,7 +1864,7 @@ func (p *InstallPath) ToGob() *installPathGob {
 }
 
 func (p *InstallPath) FromGob(data *installPathGob) {
-	p.basePath = data.basePath
+	p.basePath = data.BasePath
 	p.soongOutDir = data.SoongOutDir
 	p.partitionDir = data.PartitionDir
 	p.partition = data.Partition

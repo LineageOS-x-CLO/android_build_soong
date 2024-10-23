@@ -113,6 +113,10 @@ type Module interface {
 	VintfFragmentModuleNames(ctx ConfigurableEvaluatorContext) []string
 
 	ConfigurableEvaluator(ctx ConfigurableEvaluatorContext) proptools.ConfigurableEvaluator
+
+	// The usage of this method is experimental and should not be used outside of fsgen package.
+	// This will be removed once product packaging migration to Soong is complete.
+	DecodeMultilib(ctx ConfigContext) (string, string)
 }
 
 // Qualified id for a module
@@ -605,10 +609,9 @@ type hostCrossProperties struct {
 type Multilib string
 
 const (
-	MultilibBoth        Multilib = "both"
-	MultilibFirst       Multilib = "first"
-	MultilibCommon      Multilib = "common"
-	MultilibCommonFirst Multilib = "common_first"
+	MultilibBoth   Multilib = "both"
+	MultilibFirst  Multilib = "first"
+	MultilibCommon Multilib = "common"
 )
 
 type HostOrDeviceSupported int
@@ -1067,6 +1070,11 @@ func addVintfFragmentDeps(ctx BottomUpMutatorContext) {
 
 	modPartition := mod.PartitionTag(deviceConfig)
 	for _, vintf := range vintfModules {
+		if vintf == nil {
+			// TODO(b/372091092): Remove this. Having it gives us missing dependency errors instead
+			// of nil pointer dereference errors, but we should resolve the missing dependencies.
+			continue
+		}
 		if vintfModule, ok := vintf.(*vintfFragmentModule); ok {
 			vintfPartition := vintfModule.PartitionTag(deviceConfig)
 			if modPartition != vintfPartition {
@@ -2272,6 +2280,10 @@ func (m *ModuleBase) IsNativeBridgeSupported() bool {
 	return proptools.Bool(m.commonProperties.Native_bridge_supported)
 }
 
+func (m *ModuleBase) DecodeMultilib(ctx ConfigContext) (string, string) {
+	return decodeMultilib(ctx, m)
+}
+
 type ConfigContext interface {
 	Config() Config
 }
@@ -2342,6 +2354,8 @@ func (e configurationEvalutor) EvaluateConfiguration(condition proptools.Configu
 		case "use_debug_art":
 			// TODO(b/234351700): Remove once ART does not have separated debug APEX
 			return proptools.ConfigurableValueBool(ctx.Config().UseDebugArt())
+		case "selinux_ignore_neverallows":
+			return proptools.ConfigurableValueBool(ctx.Config().SelinuxIgnoreNeverallows())
 		default:
 			// TODO(b/323382414): Might add these on a case-by-case basis
 			ctx.OtherModulePropertyErrorf(m, property, fmt.Sprintf("TODO(b/323382414): Product variable %q is not yet supported in selects", variable))
