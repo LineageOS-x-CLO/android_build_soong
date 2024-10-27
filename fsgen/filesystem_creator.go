@@ -124,10 +124,19 @@ func createFsGenState(ctx android.LoadHookContext) *FsGenState {
 					"public.libraries.android.txt": defaultDepCandidateProps(ctx.Config()),
 					"update_engine_sideload":       defaultDepCandidateProps(ctx.Config()),
 				},
-				"vendor":     newMultilibDeps(),
-				"odm":        newMultilibDeps(),
-				"product":    newMultilibDeps(),
-				"system_ext": newMultilibDeps(),
+				"vendor":  newMultilibDeps(),
+				"odm":     newMultilibDeps(),
+				"product": newMultilibDeps(),
+				"system_ext": &map[string]*depCandidateProps{
+					// VNDK apexes are automatically included.
+					// This hardcoded list will need to be updated if `PRODUCT_EXTRA_VNDK_VERSIONS` is updated.
+					// https://cs.android.com/android/_/android/platform/build/+/adba533072b00c53ac0f198c550a3cbd7a00e4cd:core/main.mk;l=984;bpv=1;bpt=0;drc=174db7b179592cf07cbfd2adb0119486fda911e7
+					"com.android.vndk.v30": defaultDepCandidateProps(ctx.Config()),
+					"com.android.vndk.v31": defaultDepCandidateProps(ctx.Config()),
+					"com.android.vndk.v32": defaultDepCandidateProps(ctx.Config()),
+					"com.android.vndk.v33": defaultDepCandidateProps(ctx.Config()),
+					"com.android.vndk.v34": defaultDepCandidateProps(ctx.Config()),
+				},
 			},
 			soongGeneratedPartitions: generatedPartitions,
 			fsDepsMutex:              sync.Mutex{},
@@ -201,14 +210,6 @@ func fullyQualifiedModuleName(moduleName, namespace string) string {
 	return fmt.Sprintf("//%s:%s", namespace, moduleName)
 }
 
-// Returns the sorted unique list of module names with namespace, if the module specifies one.
-func fullyQualifiedModuleNames(modules multilibDeps) (ret []string) {
-	for moduleName, moduleProp := range *modules {
-		ret = append(ret, fullyQualifiedModuleName(moduleName, moduleProp.Namespace))
-	}
-	return android.SortedUniqueStrings(ret)
-}
-
 func getBitness(archTypes []android.ArchType) (ret []string) {
 	for _, archType := range archTypes {
 		if archType.Multilib == "" {
@@ -226,41 +227,53 @@ func setDepsMutator(mctx android.BottomUpMutatorContext) {
 	soongGeneratedPartitionMap := getAllSoongGeneratedPartitionNames(mctx.Config(), fsGenState.soongGeneratedPartitions)
 	m := mctx.Module()
 	if partition, ok := soongGeneratedPartitionMap[m.Name()]; ok {
-		depsStruct := packagingPropsStruct{}
-		for depName, depProps := range *fsDeps[partition] {
-			bitness := getBitness(depProps.Arch)
-			fullyQualifiedDepName := fullyQualifiedModuleName(depName, depProps.Namespace)
-			if android.InList("32", bitness) && android.InList("64", bitness) {
-				// If both 32 and 64 bit variants are enabled for this module
-				switch depProps.Multilib {
-				case string(android.MultilibBoth):
-					depsStruct.Multilib.Both.Deps = append(depsStruct.Multilib.Both.Deps, fullyQualifiedDepName)
-				case string(android.MultilibCommon), string(android.MultilibFirst):
-					depsStruct.Deps = append(depsStruct.Deps, fullyQualifiedDepName)
-				case "32":
-					depsStruct.Multilib.Lib32.Deps = append(depsStruct.Multilib.Lib32.Deps, fullyQualifiedDepName)
-				case "64", "darwin_universal":
-					depsStruct.Multilib.Lib64.Deps = append(depsStruct.Multilib.Lib64.Deps, fullyQualifiedDepName)
-				case "prefer32", "first_prefer32":
-					depsStruct.Multilib.Prefer32.Deps = append(depsStruct.Multilib.Prefer32.Deps, fullyQualifiedDepName)
-				default:
-					depsStruct.Multilib.Both.Deps = append(depsStruct.Multilib.Both.Deps, fullyQualifiedDepName)
-				}
-			} else if android.InList("64", bitness) {
-				// If only 64 bit variant is enabled
-				depsStruct.Multilib.Lib64.Deps = append(depsStruct.Multilib.Lib64.Deps, fullyQualifiedDepName)
-			} else if android.InList("32", bitness) {
-				// If only 32 bit variant is enabled
-				depsStruct.Multilib.Lib32.Deps = append(depsStruct.Multilib.Lib32.Deps, fullyQualifiedDepName)
-			} else {
-				// If only common variant is enabled
-				depsStruct.Multilib.Common.Deps = append(depsStruct.Multilib.Common.Deps, fullyQualifiedDepName)
-			}
-		}
-		if err := proptools.AppendMatchingProperties(m.GetProperties(), &depsStruct, nil); err != nil {
+		depsStruct := generateDepStruct(*fsDeps[partition])
+		if err := proptools.AppendMatchingProperties(m.GetProperties(), depsStruct, nil); err != nil {
 			mctx.ModuleErrorf(err.Error())
 		}
 	}
+}
+
+func generateDepStruct(deps map[string]*depCandidateProps) *packagingPropsStruct {
+	depsStruct := packagingPropsStruct{}
+	for depName, depProps := range deps {
+		bitness := getBitness(depProps.Arch)
+		fullyQualifiedDepName := fullyQualifiedModuleName(depName, depProps.Namespace)
+		if android.InList("32", bitness) && android.InList("64", bitness) {
+			// If both 32 and 64 bit variants are enabled for this module
+			switch depProps.Multilib {
+			case string(android.MultilibBoth):
+				depsStruct.Multilib.Both.Deps = append(depsStruct.Multilib.Both.Deps, fullyQualifiedDepName)
+			case string(android.MultilibCommon), string(android.MultilibFirst):
+				depsStruct.Deps = append(depsStruct.Deps, fullyQualifiedDepName)
+			case "32":
+				depsStruct.Multilib.Lib32.Deps = append(depsStruct.Multilib.Lib32.Deps, fullyQualifiedDepName)
+			case "64", "darwin_universal":
+				depsStruct.Multilib.Lib64.Deps = append(depsStruct.Multilib.Lib64.Deps, fullyQualifiedDepName)
+			case "prefer32", "first_prefer32":
+				depsStruct.Multilib.Prefer32.Deps = append(depsStruct.Multilib.Prefer32.Deps, fullyQualifiedDepName)
+			default:
+				depsStruct.Multilib.Both.Deps = append(depsStruct.Multilib.Both.Deps, fullyQualifiedDepName)
+			}
+		} else if android.InList("64", bitness) {
+			// If only 64 bit variant is enabled
+			depsStruct.Multilib.Lib64.Deps = append(depsStruct.Multilib.Lib64.Deps, fullyQualifiedDepName)
+		} else if android.InList("32", bitness) {
+			// If only 32 bit variant is enabled
+			depsStruct.Multilib.Lib32.Deps = append(depsStruct.Multilib.Lib32.Deps, fullyQualifiedDepName)
+		} else {
+			// If only common variant is enabled
+			depsStruct.Multilib.Common.Deps = append(depsStruct.Multilib.Common.Deps, fullyQualifiedDepName)
+		}
+	}
+	depsStruct.Deps = android.SortedUniqueStrings(depsStruct.Deps)
+	depsStruct.Multilib.Lib32.Deps = android.SortedUniqueStrings(depsStruct.Multilib.Lib32.Deps)
+	depsStruct.Multilib.Lib64.Deps = android.SortedUniqueStrings(depsStruct.Multilib.Lib64.Deps)
+	depsStruct.Multilib.Prefer32.Deps = android.SortedUniqueStrings(depsStruct.Multilib.Prefer32.Deps)
+	depsStruct.Multilib.Both.Deps = android.SortedUniqueStrings(depsStruct.Multilib.Both.Deps)
+	depsStruct.Multilib.Common.Deps = android.SortedUniqueStrings(depsStruct.Multilib.Common.Deps)
+
+	return &depsStruct
 }
 
 type filesystemCreatorProps struct {
@@ -331,10 +344,18 @@ func (f *filesystemCreator) createDeviceModule(ctx android.LoadHookContext) {
 	ctx.CreateModule(filesystem.AndroidDeviceFactory, baseProps, partitionProps)
 }
 
-var (
-	// https://source.corp.google.com/h/googleplex-android/platform/build/+/639d79f5012a6542ab1f733b0697db45761ab0f3:core/packaging/flags.mk;l=21;drc=5ba8a8b77507f93aa48cc61c5ba3f31a4d0cbf37;bpv=1;bpt=0
-	partitionsWithAconfig = []string{"system", "product", "vendor"}
-)
+func partitionSpecificFsProps(fsProps *filesystem.FilesystemProperties, partitionType string) {
+	switch partitionType {
+	case "system":
+		fsProps.Build_logtags = proptools.BoolPtr(true)
+		// https://source.corp.google.com/h/googleplex-android/platform/build//639d79f5012a6542ab1f733b0697db45761ab0f3:core/packaging/flags.mk;l=21;drc=5ba8a8b77507f93aa48cc61c5ba3f31a4d0cbf37;bpv=1;bpt=0
+		fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(true)
+	case "product":
+		fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(true)
+	case "vendor":
+		fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(true)
+	}
+}
 
 // Creates a soong module to build the given partition. Returns false if we can't support building
 // it.
@@ -406,8 +427,6 @@ func generateFsProps(ctx android.EarlyModuleContext, partitionType string) (*fil
 
 	fsProps.Base_dir = proptools.StringPtr(partitionType)
 
-	fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(android.InList(partitionType, partitionsWithAconfig))
-
 	fsProps.Is_auto_generated = proptools.BoolPtr(true)
 
 	// Identical to that of the generic_system_image
@@ -420,6 +439,9 @@ func generateFsProps(ctx android.EarlyModuleContext, partitionType string) (*fil
 		"framework/*/*",     // framework/{arch}
 		"framework/oat/*/*", // framework/oat/{arch}
 	}
+	fsProps.Fsverity.Libs = []string{":framework-res{.export-package.apk}"}
+
+	partitionSpecificFsProps(fsProps, partitionType)
 
 	// system_image properties that are not set:
 	// - filesystemProperties.Avb_hash_algorithm
@@ -431,7 +453,6 @@ func generateFsProps(ctx android.EarlyModuleContext, partitionType string) (*fil
 	// - filesystemProperties.Mount_point
 	// - filesystemProperties.Include_make_built_files
 	// - filesystemProperties.Build_logtags
-	// - filesystemProperties.Fsverity.Libs
 	// - systemImageProperties.Linker_config_src
 
 	return fsProps, true
@@ -492,9 +513,14 @@ func (f *filesystemCreator) GenerateAndroidBuildActions(ctx android.ModuleContex
 	}
 	f.HideFromMake()
 
-	content := generateBpContent(ctx, "system")
-	generatedBp := android.PathForOutput(ctx, "soong_generated_product_config.bp")
-	android.WriteFileRule(ctx, generatedBp, content)
+	var content strings.Builder
+	generatedBp := android.PathForModuleOut(ctx, "soong_generated_product_config.bp")
+	for _, partition := range ctx.Config().Get(fsGenStateOnceKey).(*FsGenState).soongGeneratedPartitions {
+		content.WriteString(generateBpContent(ctx, partition))
+		content.WriteString("\n")
+	}
+	android.WriteFileRule(ctx, generatedBp, content.String())
+
 	ctx.Phony("product_config_to_bp", generatedBp)
 
 	var diffTestFiles []android.Path
@@ -512,28 +538,29 @@ func (f *filesystemCreator) GenerateAndroidBuildActions(ctx android.ModuleContex
 }
 
 func generateBpContent(ctx android.EarlyModuleContext, partitionType string) string {
-	// Currently only system partition is supported
-	if partitionType != "system" {
+	fsProps, fsTypeSupported := generateFsProps(ctx, partitionType)
+	if !fsTypeSupported {
 		return ""
 	}
 
 	baseProps := generateBaseProps(proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), partitionType)))
-	fsProps, _ := generateFsProps(ctx, partitionType)
-
-	deps := ctx.Config().Get(fsGenStateOnceKey).(*FsGenState).fsDeps
-	depProps := &android.PackagingProperties{
-		Deps: android.NewSimpleConfigurable(fullyQualifiedModuleNames(deps[partitionType])),
-	}
+	deps := ctx.Config().Get(fsGenStateOnceKey).(*FsGenState).fsDeps[partitionType]
+	depProps := generateDepStruct(*deps)
 
 	result, err := proptools.RepackProperties([]interface{}{baseProps, fsProps, depProps})
 	if err != nil {
 		ctx.ModuleErrorf(err.Error())
 	}
 
+	moduleType := "android_filesystem"
+	if partitionType == "system" {
+		moduleType = "android_system_image"
+	}
+
 	file := &parser.File{
 		Defs: []parser.Definition{
 			&parser.Module{
-				Type: "module",
+				Type: moduleType,
 				Map:  *result,
 			},
 		},
