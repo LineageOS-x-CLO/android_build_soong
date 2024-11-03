@@ -20,8 +20,6 @@ import (
 	"sort"
 	"strings"
 
-	"android/soong/testing"
-
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
@@ -505,7 +503,6 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			ctx.PropertyErrorf(property, "%q of type %q is not supported", dep.Name(), ctx.OtherModuleType(dep))
 		}
 	})
-	android.SetProvider(ctx, testing.TestModuleProviderKey, testing.TestModuleProviderData{})
 }
 
 func (s *ShTest) InstallInData() bool {
