@@ -11324,7 +11324,7 @@ func TestAconfifDeclarationsValidation(t *testing.T) {
 		}
 		filegroup {
 			name: "qux-filegroup",
-			srcs: [
+			device_common_srcs: [
 				":qux-lib{.generated_srcjars}",
 			],
 		}

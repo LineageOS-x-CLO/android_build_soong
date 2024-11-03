@@ -1528,6 +1528,10 @@ func (c *deviceConfig) RamdiskSnapshotVersion() string {
 	return String(c.config.productVariables.RamdiskSnapshotVersion)
 }
 
+func (c *deviceConfig) BuildingVendorImage() bool {
+	return proptools.Bool(c.config.productVariables.BuildingVendorImage)
+}
+
 func (c *deviceConfig) CurrentApiLevelForVendorModules() string {
 	return StringDefault(c.config.productVariables.DeviceCurrentApiLevelForVendorModules, "current")
 }
@@ -1556,6 +1560,10 @@ func (c *deviceConfig) ProductPath() string {
 		return *c.config.productVariables.ProductPath
 	}
 	return "product"
+}
+
+func (c *deviceConfig) BuildingProductImage() bool {
+	return proptools.Bool(c.config.productVariables.BuildingProductImage)
 }
 
 func (c *deviceConfig) SystemExtPath() string {
