@@ -29,6 +29,7 @@ import (
 	"android/soong/cc/config"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/pathtools"
 	"github.com/google/blueprint/proptools"
 )
@@ -1034,7 +1035,7 @@ func (library *libraryDecorator) linkStatic(ctx ModuleContext,
 			Objects:                      library.objects,
 			WholeStaticLibsFromPrebuilts: library.wholeStaticLibsFromPrebuilts,
 
-			TransitiveStaticLibrariesForOrdering: android.NewDepSetBuilder[android.Path](android.TOPOLOGICAL).
+			TransitiveStaticLibrariesForOrdering: depset.NewBuilder[android.Path](depset.TOPOLOGICAL).
 				Direct(outputFile).
 				Transitive(deps.TranstiveStaticLibrariesForOrdering).
 				Build(),
@@ -1199,7 +1200,7 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 	library.coverageOutputFile = transformCoverageFilesToZip(ctx, objs, library.getLibName(ctx))
 	library.linkSAbiDumpFiles(ctx, deps, objs, fileName, unstrippedOutputFile)
 
-	var transitiveStaticLibrariesForOrdering *android.DepSet[android.Path]
+	var transitiveStaticLibrariesForOrdering depset.DepSet[android.Path]
 	if static := ctx.GetDirectDepsWithTag(staticVariantTag); len(static) > 0 {
 		s, _ := android.OtherModuleProvider(ctx, static[0], StaticLibraryInfoProvider)
 		transitiveStaticLibrariesForOrdering = s.TransitiveStaticLibrariesForOrdering
@@ -1479,7 +1480,7 @@ func (library *libraryDecorator) linkSAbiDumpFiles(ctx ModuleContext, deps PathD
 						headerAbiChecker.Exclude_symbol_tags,
 						currVendorVersion)
 				}
-				addLsdumpPath(string(tag) + ":" + llndkDump.String())
+				addLsdumpPath(ctx.Config(), string(tag)+":"+llndkDump.String())
 			} else if tag == apexLsdumpTag {
 				if apexVariantDump == nil {
 					apexVariantDump = library.linkApexSAbiDumpFiles(ctx,
@@ -1488,12 +1489,12 @@ func (library *libraryDecorator) linkSAbiDumpFiles(ctx ModuleContext, deps PathD
 						headerAbiChecker.Exclude_symbol_tags,
 						currSdkVersion)
 				}
-				addLsdumpPath(string(tag) + ":" + apexVariantDump.String())
+				addLsdumpPath(ctx.Config(), string(tag)+":"+apexVariantDump.String())
 			} else {
 				if tag.dirName() == "" {
 					optInTags = append(optInTags, tag)
 				}
-				addLsdumpPath(string(tag) + ":" + implDump.String())
+				addLsdumpPath(ctx.Config(), string(tag)+":"+implDump.String())
 			}
 		}
 

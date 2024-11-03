@@ -47,6 +47,7 @@ var prepareForTestWithArtApex = android.GroupFixturePreparers(
 )
 
 func TestBootclasspathFragments_FragmentDependency(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		// Configure some libraries in the art bootclasspath_fragment and platform_bootclasspath.
@@ -177,6 +178,7 @@ func TestBootclasspathFragments_FragmentDependency(t *testing.T) {
 }
 
 func TestBootclasspathFragmentInArtApex(t *testing.T) {
+	t.Parallel()
 	commonPreparer := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithArtApex,
@@ -297,6 +299,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	}
 
 	t.Run("boot image files from source", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -328,6 +331,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("boot image files from source of override apex", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -348,6 +352,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("generate boot image profile even if dexpreopt is disabled", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -368,6 +373,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("boot image disable generate profile", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -386,6 +392,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("boot image files with preferred prebuilt", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -430,6 +437,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("source with inconsistency between config and contents", func(t *testing.T) {
+		t.Parallel()
 		android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -443,6 +451,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("prebuilt with inconsistency between config and contents", func(t *testing.T) {
+		t.Parallel()
 		android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -456,6 +465,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("preferred prebuilt with inconsistency between config and contents", func(t *testing.T) {
+		t.Parallel()
 		android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -472,6 +482,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 	})
 
 	t.Run("source preferred and prebuilt with inconsistency between config and contents", func(t *testing.T) {
+		t.Parallel()
 		android.GroupFixturePreparers(
 			commonPreparer,
 
@@ -490,6 +501,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 }
 
 func TestBootclasspathFragmentInPrebuiltArtApex(t *testing.T) {
+	t.Parallel()
 	preparers := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithArtApex,
@@ -570,6 +582,7 @@ func TestBootclasspathFragmentInPrebuiltArtApex(t *testing.T) {
 	`
 
 	t.Run("disabled alternative APEX", func(t *testing.T) {
+		t.Parallel()
 		result := preparers.RunTestWithBp(t, fmt.Sprintf(bp, "enabled: false,"))
 
 		java.CheckModuleDependencies(t, result.TestContext, "com.android.art", "android_common_com.android.art", []string{
@@ -613,6 +626,7 @@ func checkCopiesToPredefinedLocationForArt(t *testing.T, config android.Config, 
 }
 
 func TestBootclasspathFragmentContentsNoName(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithMyapex,
@@ -721,6 +735,7 @@ func getDexJarPath(result *android.TestResult, name string) string {
 // TestBootclasspathFragment_HiddenAPIList checks to make sure that the correct parameters are
 // passed to the hiddenapi list tool.
 func TestBootclasspathFragment_HiddenAPIList(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithArtApex,
@@ -875,6 +890,7 @@ func TestBootclasspathFragment_HiddenAPIList(t *testing.T) {
 // additional_stubs: ["android-non-updatable"] causes the source android-non-updatable modules to be
 // added to the hiddenapi list tool.
 func TestBootclasspathFragment_AndroidNonUpdatable_FromSource(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithArtApex,
@@ -1047,6 +1063,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromSource(t *testing.T) {
 }
 
 func TestBootclasspathFragment_AndroidNonUpdatable_FromText(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithArtApex,
@@ -1213,6 +1230,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromText(t *testing.T) {
 // setting additional_stubs: ["android-non-updatable"] causes the prebuilt android-non-updatable
 // modules to be added to the hiddenapi list tool.
 func TestBootclasspathFragment_AndroidNonUpdatable_AlwaysUsePrebuiltSdks(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		java.PrepareForTestWithDexpreopt,
@@ -1372,6 +1390,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_AlwaysUsePrebuiltSdks(t *test
 }
 
 func TestBootclasspathFragmentProtoContainsMinSdkVersion(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithBootclasspathFragment,
 		prepareForTestWithMyapex,

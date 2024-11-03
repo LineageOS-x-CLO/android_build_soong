@@ -21,9 +21,15 @@ import (
 )
 
 var (
-	lsdumpPaths     []string
 	lsdumpPathsLock sync.Mutex
+	lsdumpKey       = android.NewOnceKey("lsdump")
 )
+
+func lsdumpPaths(config android.Config) *[]string {
+	return config.Once(lsdumpKey, func() any {
+		return &[]string{}
+	}).(*[]string)
+}
 
 type lsdumpTag string
 
@@ -297,8 +303,9 @@ func (s *sabiTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, varia
 
 // Add an entry to the global list of lsdump. The list is exported to a Make variable by
 // `cc.makeVarsProvider`.
-func addLsdumpPath(lsdumpPath string) {
+func addLsdumpPath(config android.Config, lsdumpPath string) {
+	lsdumpPaths := lsdumpPaths(config)
 	lsdumpPathsLock.Lock()
 	defer lsdumpPathsLock.Unlock()
-	lsdumpPaths = append(lsdumpPaths, lsdumpPath)
+	*lsdumpPaths = append(*lsdumpPaths, lsdumpPath)
 }
