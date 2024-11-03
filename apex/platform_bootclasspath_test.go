@@ -36,6 +36,7 @@ var prepareForTestWithPlatformBootclasspath = android.GroupFixturePreparers(
 )
 
 func TestPlatformBootclasspath_Fragments(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		prepareForTestWithMyapex,
@@ -178,6 +179,7 @@ func TestPlatformBootclasspath_Fragments(t *testing.T) {
 //
 // TODO: Remove once all prebuilts use the filtered_... properties.
 func TestPlatformBootclasspath_LegacyPrebuiltFragment(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		java.FixtureConfigureApexBootJars("myapex:foo"),
@@ -243,6 +245,7 @@ func TestPlatformBootclasspath_LegacyPrebuiltFragment(t *testing.T) {
 }
 
 func TestPlatformBootclasspathDependencies(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		prepareForTestWithArtApex,
@@ -417,6 +420,7 @@ func TestPlatformBootclasspathDependencies(t *testing.T) {
 // TestPlatformBootclasspath_AlwaysUsePrebuiltSdks verifies that the build does not fail when
 // AlwaysUsePrebuiltSdk() returns true.
 func TestPlatformBootclasspath_AlwaysUsePrebuiltSdks(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		prepareForTestWithMyapex,
@@ -593,6 +597,7 @@ func CheckModuleDependencies(t *testing.T, ctx *android.TestContext, name, varia
 // platform_bootclasspath's classpaths.proto config, if the apex does not generate its own config
 // by setting generate_classpaths_proto property to false.
 func TestPlatformBootclasspath_IncludesRemainingApexJars(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		prepareForTestWithMyapex,
@@ -652,6 +657,7 @@ func TestPlatformBootclasspath_IncludesRemainingApexJars(t *testing.T) {
 }
 
 func TestBootJarNotInApex(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		PrepareForTestWithApexBuildComponents,
@@ -698,6 +704,7 @@ func TestBootJarNotInApex(t *testing.T) {
 }
 
 func TestBootFragmentNotInApex(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		PrepareForTestWithApexBuildComponents,
@@ -741,6 +748,7 @@ func TestBootFragmentNotInApex(t *testing.T) {
 }
 
 func TestNonBootJarInFragment(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
 		PrepareForTestWithApexBuildComponents,
@@ -799,6 +807,7 @@ func TestNonBootJarInFragment(t *testing.T) {
 
 // Skip bcp_fragment content validation of source apexes if prebuilts are active.
 func TestNonBootJarInPrebuilts(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		description               string
 		selectedApexContributions string
@@ -921,6 +930,7 @@ apex_contributions {
 
 // Source and prebuilt apex provide different set of boot jars
 func TestNonBootJarMissingInPrebuiltFragment(t *testing.T) {
+	t.Parallel()
 	bp := `
 		apex {
 			name: "myapex",
