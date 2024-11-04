@@ -20,8 +20,6 @@ import (
 	"sort"
 	"strings"
 
-	"android/soong/testing"
-
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
@@ -121,6 +119,16 @@ type TestProperties struct {
 	// list of files or filegroup modules that provide data that should be installed alongside
 	// the test.
 	Data []string `android:"path,arch_variant"`
+
+	// same as data, but adds dependencies using the device's os variation and the common
+	// architecture's variation. Can be used to add a module built for device to the data of a
+	// host test.
+	Device_common_data []string `android:"path_device_common"`
+
+	// same as data, but adds dependencies using the device's os variation and the device's first
+	// architecture's variation. Can be used to add a module built for device to the data of a
+	// host test.
+	Device_first_data []string `android:"path_device_first"`
 
 	// Add RootTargetPreparer to auto generated test config. This guarantees the test to run
 	// with root permission.
@@ -495,7 +503,6 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			ctx.PropertyErrorf(property, "%q of type %q is not supported", dep.Name(), ctx.OtherModuleType(dep))
 		}
 	})
-	android.SetProvider(ctx, testing.TestModuleProviderKey, testing.TestModuleProviderData{})
 }
 
 func (s *ShTest) InstallInData() bool {
