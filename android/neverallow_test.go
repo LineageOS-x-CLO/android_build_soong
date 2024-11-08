@@ -359,6 +359,20 @@ var neverallowTests = []struct {
 			`is_auto_generated property is only allowed for filesystem modules in build/soong/fsgen directory`,
 		},
 	},
+	// Test for the rule restricting use of prebuilt_* module
+	{
+		name: `"prebuilt_usr_srec" defined in Android.bp file`,
+		fs: map[string][]byte{
+			"a/b/Android.bp": []byte(`
+				prebuilt_usr_srec {
+					name: "foo",
+				}
+			`),
+		},
+		expectedErrors: []string{
+			`module type not allowed to be defined in bp file`,
+		},
+	},
 }
 
 var prepareForNeverAllowTest = GroupFixturePreparers(
@@ -368,6 +382,7 @@ var prepareForNeverAllowTest = GroupFixturePreparers(
 		ctx.RegisterModuleType("java_library_host", newMockJavaLibraryModule)
 		ctx.RegisterModuleType("java_device_for_host", newMockJavaLibraryModule)
 		ctx.RegisterModuleType("filesystem", newMockFilesystemModule)
+		ctx.RegisterModuleType("prebuilt_usr_srec", newMockPrebuiltUsrSrecModule)
 	}),
 )
 
@@ -466,4 +481,17 @@ func newMockJavaLibraryModule() Module {
 }
 
 func (p *mockJavaLibraryModule) GenerateAndroidBuildActions(ModuleContext) {
+}
+
+type mockPrebuiltUsrSrecModule struct {
+	ModuleBase
+}
+
+func (p *mockPrebuiltUsrSrecModule) GenerateAndroidBuildActions(ModuleContext) {
+}
+
+func newMockPrebuiltUsrSrecModule() Module {
+	m := &mockPrebuiltUsrSrecModule{}
+	InitAndroidModule(m)
+	return m
 }
