@@ -9432,7 +9432,7 @@ func TestPrebuiltStubLibDep(t *testing.T) {
 
 					type modAndMkEntries struct {
 						mod       *cc.Module
-						mkEntries android.AndroidMkEntries
+						mkEntries android.AndroidMkInfo
 					}
 					entries := []*modAndMkEntries{}
 
@@ -9446,7 +9446,10 @@ func TestPrebuiltStubLibDep(t *testing.T) {
 							if !mod.Enabled(android.PanickingConfigAndErrorContext(ctx)) || mod.IsHideFromMake() {
 								continue
 							}
-							for _, ent := range android.AndroidMkEntriesForTest(t, ctx, mod) {
+							info := android.AndroidMkInfoForTest(t, ctx, mod)
+							ents := []android.AndroidMkInfo{info.PrimaryInfo}
+							ents = append(ents, info.ExtraInfo...)
+							for _, ent := range ents {
 								if ent.Disabled {
 									continue
 								}
