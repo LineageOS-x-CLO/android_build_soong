@@ -19,6 +19,7 @@ import (
 	"github.com/google/blueprint/depset"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -551,9 +552,22 @@ func (m *moduleContext) setAconfigPaths(paths Paths) {
 	m.aconfigFilePaths = paths
 }
 
+func (m *moduleContext) getOwnerAndOverrides() (string, []string) {
+	owner := m.ModuleName()
+	overrides := slices.Clone(m.Module().base().commonProperties.Overrides)
+	if b, ok := m.Module().(OverridableModule); ok {
+		if b.GetOverriddenBy() != "" {
+			// overriding variant of base module
+			overrides = append(overrides, m.ModuleName()) // com.android.foo
+			owner = m.Module().Name()                     // com.company.android.foo
+		}
+	}
+	return owner, overrides
+}
+
 func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, executable bool) PackagingSpec {
 	licenseFiles := m.Module().EffectiveLicenseFiles()
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	spec := PackagingSpec{
 		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:               srcPath,
@@ -565,7 +579,7 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 		aconfigPaths:          m.getAconfigPaths(),
 		archType:              m.target.Arch.ArchType,
 		overrides:             &overrides,
-		owner:                 m.ModuleName(),
+		owner:                 owner,
 	}
 	m.packagingSpecs = append(m.packagingSpecs, spec)
 	return spec
@@ -682,7 +696,7 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -693,7 +707,7 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
 		overrides:        &overrides,
-		owner:            m.ModuleName(),
+		owner:            owner,
 	})
 
 	return fullInstallPath
@@ -729,7 +743,7 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -740,7 +754,7 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
 		overrides:        &overrides,
-		owner:            m.ModuleName(),
+		owner:            owner,
 	})
 
 	return fullInstallPath
