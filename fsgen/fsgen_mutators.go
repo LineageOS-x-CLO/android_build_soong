@@ -15,10 +15,11 @@
 package fsgen
 
 import (
-	"android/soong/android"
 	"fmt"
 	"slices"
 	"sync"
+
+	"android/soong/android"
 
 	"github.com/google/blueprint/proptools"
 )
@@ -115,7 +116,6 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"dex_bootjars":                              defaultDepCandidateProps(ctx.Config()),
 					"framework_compatibility_matrix.device.xml": defaultDepCandidateProps(ctx.Config()),
 					"init.environ.rc-soong":                     defaultDepCandidateProps(ctx.Config()),
-					"libclang_rt.asan":                          defaultDepCandidateProps(ctx.Config()),
 					"libcompiler_rt":                            defaultDepCandidateProps(ctx.Config()),
 					"libdmabufheap":                             defaultDepCandidateProps(ctx.Config()),
 					"libgsi":                                    defaultDepCandidateProps(ctx.Config()),
@@ -147,7 +147,6 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 				},
 				"system_dlkm": {},
 			},
-			soongGeneratedPartitions:  generatedPartitions(ctx),
 			fsDepsMutex:               sync.Mutex{},
 			moduleToInstallationProps: map[string]installationProperties{},
 			generatedPrebuiltEtcModuleNames: generatedPrebuiltEtcModuleNames,
