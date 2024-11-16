@@ -164,6 +164,15 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	InstallAbsoluteSymlink(installPath InstallPath, name string, absPath string) InstallPath
 
+	// InstallTestData creates rules to install test data (e.g. data files used during a test) into
+	// the installPath directory.
+	//
+	// The installed files can be accessed by InstallFilesInfo.InstallFiles, and the PackagingSpec
+	// for the installed files can be accessed by InstallFilesInfo.PackagingSpecs on this module
+	// or by InstallFilesInfo.TransitivePackagingSpecs on modules that depend on this module through
+	// dependency tags for which IsInstallDepNeeded returns true.
+	InstallTestData(installPath InstallPath, data []DataPath) InstallPaths
+
 	// PackageFile creates a PackagingSpec as if InstallFile was called, but without creating
 	// the rule to copy the file.  This is useful to define how a module would be packaged
 	// without installing it into the global installation directories.
@@ -276,6 +285,8 @@ type moduleContext struct {
 	vintfFragmentsPaths          Paths
 	installedInitRcPaths         InstallPaths
 	installedVintfFragmentsPaths InstallPaths
+
+	testData []DataPath
 
 	// For tests
 	buildParams []BuildParams
@@ -533,22 +544,22 @@ func (m *moduleContext) requiresFullInstall() bool {
 
 func (m *moduleContext) InstallFile(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithoutCheckbuild(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, false, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, false, nil)
 }
 
 func (m *moduleContext) InstallExecutable(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, true, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, true, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithExtraFilesZip(installPath InstallPath, name string, srcPath Path,
 	extraZip Path, deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, &extraFilesZip{
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, &extraFilesZip{
 		zip: extraZip,
 		dir: installPath,
 	})
@@ -601,10 +612,12 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 }
 
 func (m *moduleContext) installFile(installPath InstallPath, name string, srcPath Path, deps []InstallPath,
-	executable bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
+	executable bool, hooks bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
 
 	fullInstallPath := installPath.Join(m, name)
-	m.module.base().hooks.runInstallHooks(m, srcPath, fullInstallPath, false)
+	if hooks {
+		m.module.base().hooks.runInstallHooks(m, srcPath, fullInstallPath, false)
+	}
 
 	if m.requiresFullInstall() {
 		deps = append(deps, InstallPaths(m.TransitiveInstallFiles.ToList())...)
@@ -773,6 +786,19 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 	})
 
 	return fullInstallPath
+}
+
+func (m *moduleContext) InstallTestData(installPath InstallPath, data []DataPath) InstallPaths {
+	m.testData = append(m.testData, data...)
+
+	ret := make(InstallPaths, 0, len(data))
+	for _, d := range data {
+		relPath := d.ToRelativeInstallPath()
+		installed := m.installFile(installPath, relPath, d.SrcPath, nil, false, false, true, nil)
+		ret = append(ret, installed)
+	}
+
+	return ret
 }
 
 // CheckbuildFile specifies the output files that should be built by checkbuild.
