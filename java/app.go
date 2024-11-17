@@ -68,6 +68,9 @@ type AppInfo struct {
 
 	// TestHelperApp is true if the module is a android_test_helper_app
 	TestHelperApp bool
+
+	// EmbeddedJNILibs is the list of paths to JNI libraries that were embedded in the APK.
+	EmbeddedJNILibs android.Paths
 }
 
 var AppInfoProvider = blueprint.NewProvider[*AppInfo]()
@@ -406,9 +409,18 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.checkEmbedJnis(ctx)
 	a.generateAndroidBuildActions(ctx)
 	a.generateJavaUsedByApex(ctx)
+
+	var embeddedJniLibs []android.Path
+
+	if a.embeddedJniLibs {
+		for _, jni := range a.jniLibs {
+			embeddedJniLibs = append(embeddedJniLibs, jni.path)
+		}
+	}
 	android.SetProvider(ctx, AppInfoProvider, &AppInfo{
-		Updatable:     Bool(a.appProperties.Updatable),
-		TestHelperApp: false,
+		Updatable:       Bool(a.appProperties.Updatable),
+		TestHelperApp:   false,
+		EmbeddedJNILibs: embeddedJniLibs,
 	})
 }
 
@@ -1124,12 +1136,12 @@ func collectAppDeps(ctx android.ModuleContext, app appDepsInterface,
 			app.SdkVersion(ctx).Kind != android.SdkCorePlatform && !app.RequiresStableAPIs(ctx)
 	}
 	jniLib, prebuiltJniPackages := collectJniDeps(ctx, shouldCollectRecursiveNativeDeps,
-		checkNativeSdkVersion, func(dep cc.LinkableInterface) bool {
-			return !dep.IsNdk(ctx.Config()) && !dep.IsStubs()
-		})
+		checkNativeSdkVersion, func(dep cc.LinkableInterface) bool { return !dep.IsNdk(ctx.Config()) && !dep.IsStubs() })
 
 	var certificates []Certificate
 
+	var directImplementationDeps android.Paths
+	var transitiveImplementationDeps []depset.DepSet[android.Path]
 	ctx.VisitDirectDeps(func(module android.Module) {
 		otherName := ctx.OtherModuleName(module)
 		tag := ctx.OtherModuleDependencyTag(module)
@@ -1141,7 +1153,18 @@ func collectAppDeps(ctx android.ModuleContext, app appDepsInterface,
 				ctx.ModuleErrorf("certificate dependency %q must be an android_app_certificate module", otherName)
 			}
 		}
+
+		if IsJniDepTag(tag) {
+			directImplementationDeps = append(directImplementationDeps, android.OutputFileForModule(ctx, module, ""))
+			if info, ok := android.OtherModuleProvider(ctx, module, cc.ImplementationDepInfoProvider); ok {
+				transitiveImplementationDeps = append(transitiveImplementationDeps, info.ImplementationDeps)
+			}
+		}
 	})
+	android.SetProvider(ctx, cc.ImplementationDepInfoProvider, &cc.ImplementationDepInfo{
+		ImplementationDeps: depset.New(depset.PREORDER, directImplementationDeps, transitiveImplementationDeps),
+	})
+
 	return jniLib, prebuiltJniPackages, certificates
 }
 
@@ -1392,7 +1415,7 @@ func AndroidAppFactory() android.Module {
 			Filter_product *string
 			Aaptflags      []string
 			Manifest       *string
-			Resource_dirs  []string
+			Resource_dirs  proptools.Configurable[[]string]
 			Flags_packages []string
 		}{
 			Name:           proptools.StringPtr(rroPackageName),
@@ -1496,8 +1519,9 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_common_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_prefer32_data)...)
+
 	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
-		InstalledFiles:          a.data,
+		TestcaseRelDataFiles:    testcaseRel(a.data),
 		OutputFile:              a.OutputFile(),
 		TestConfig:              a.testConfig,
 		HostRequiredModuleNames: a.HostRequiredModuleNames(),
@@ -1505,12 +1529,22 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		IsHost:                  false,
 		LocalCertificate:        a.certificate.AndroidMkString(),
 		IsUnitTest:              Bool(a.testProperties.Test_options.Unit_test),
+		MkInclude:               "$(BUILD_SYSTEM)/soong_app_prebuilt.mk",
+		MkAppClass:              "APPS",
 	})
 	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
 		TestOnly:       true,
 		TopLevelTarget: true,
 	})
 
+}
+
+func testcaseRel(paths android.Paths) []string {
+	relPaths := []string{}
+	for _, p := range paths {
+		relPaths = append(relPaths, p.Rel())
+	}
+	return relPaths
 }
 
 func (a *AndroidTest) FixTestConfig(ctx android.ModuleContext, testConfig android.Path) android.Path {

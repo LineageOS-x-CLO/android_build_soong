@@ -1211,6 +1211,7 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 		SharedLibrary:                        unstrippedOutputFile,
 		TransitiveStaticLibrariesForOrdering: transitiveStaticLibrariesForOrdering,
 		Target:                               ctx.Target(),
+		IsStubs:                              library.buildStubs(),
 	})
 
 	addStubDependencyProviders(ctx)
