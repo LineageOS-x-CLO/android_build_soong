@@ -17,6 +17,7 @@ package fsgen
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"android/soong/android"
@@ -82,7 +83,7 @@ func defaultDepCandidateProps(config android.Config) *depCandidateProps {
 }
 
 func generatedPartitions(ctx android.LoadHookContext) []string {
-	generatedPartitions := []string{"system"}
+	generatedPartitions := []string{"system", "ramdisk"}
 	if ctx.DeviceConfig().SystemExtPath() == "system_ext" {
 		generatedPartitions = append(generatedPartitions, "system_ext")
 	}
@@ -173,9 +174,10 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"fs_config_files_odm_dlkm": defaultDepCandidateProps(ctx.Config()),
 					"odm_dlkm-build.prop":      defaultDepCandidateProps(ctx.Config()),
 				},
+				"ramdisk": {},
 			},
-			fsDepsMutex:               sync.Mutex{},
-			moduleToInstallationProps: map[string]installationProperties{},
+			fsDepsMutex:                     sync.Mutex{},
+			moduleToInstallationProps:       map[string]installationProperties{},
 			generatedPrebuiltEtcModuleNames: generatedPrebuiltEtcModuleNames,
 		}
 	}).(*FsGenState)
@@ -208,29 +210,31 @@ func appendDepIfAppropriate(mctx android.BottomUpMutatorContext, deps *multilibD
 }
 
 func collectDepsMutator(mctx android.BottomUpMutatorContext) {
+	m := mctx.Module()
+	if m.Target().Os.Class != android.Device {
+		return
+	}
 	fsGenState := mctx.Config().Get(fsGenStateOnceKey).(*FsGenState)
 
-	m := mctx.Module()
-	if m.Target().Os.Class == android.Device && slices.Contains(fsGenState.depCandidates, mctx.ModuleName()) {
+	fsGenState.fsDepsMutex.Lock()
+	defer fsGenState.fsDepsMutex.Unlock()
+
+	if slices.Contains(fsGenState.depCandidates, mctx.ModuleName()) {
 		installPartition := m.PartitionTag(mctx.DeviceConfig())
-		fsGenState.fsDepsMutex.Lock()
 		// Only add the module as dependency when:
 		// - its enabled
 		// - its namespace is included in PRODUCT_SOONG_NAMESPACES
 		if m.Enabled(mctx) && m.ExportedToMake() {
 			appendDepIfAppropriate(mctx, fsGenState.fsDeps[installPartition], installPartition)
 		}
-		fsGenState.fsDepsMutex.Unlock()
 	}
 	// store the map of module to (required,overrides) even if the module is not in PRODUCT_PACKAGES.
 	// the module might be installed transitively.
-	if m.Target().Os.Class == android.Device && m.Enabled(mctx) && m.ExportedToMake() {
-		fsGenState.fsDepsMutex.Lock()
+	if m.Enabled(mctx) && m.ExportedToMake() {
 		fsGenState.moduleToInstallationProps[m.Name()] = installationProperties{
 			Required:  m.RequiredModuleNames(mctx),
 			Overrides: m.Overrides(),
 		}
-		fsGenState.fsDepsMutex.Unlock()
 	}
 }
 
@@ -326,6 +330,15 @@ func removeOverriddenDeps(mctx android.BottomUpMutatorContext) {
 }
 
 var HighPriorityDeps = []string{}
+
+func isHighPriorityDep(depName string) bool {
+	for _, highPriorityDeps := range HighPriorityDeps {
+		if strings.HasPrefix(depName, highPriorityDeps) {
+			return true
+		}
+	}
+	return false
+}
 
 func generateDepStruct(deps map[string]*depCandidateProps, highPriorityDeps []string) *packagingPropsStruct {
 	depsStruct := packagingPropsStruct{}
