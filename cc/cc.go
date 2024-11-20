@@ -53,6 +53,13 @@ type CcObjectInfo struct {
 
 var CcObjectInfoProvider = blueprint.NewProvider[CcObjectInfo]()
 
+type LinkableInfo struct {
+	// StaticExecutable returns true if this is a binary module with "static_executable: true".
+	StaticExecutable bool
+}
+
+var LinkableInfoKey = blueprint.NewProvider[LinkableInfo]()
+
 func init() {
 	RegisterCCBuildComponents(android.InitRegistrationContext)
 
@@ -2118,6 +2125,10 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		android.SetProvider(ctx, CcObjectInfoProvider, ccObjectInfo)
 	}
 
+	android.SetProvider(ctx, LinkableInfoKey, LinkableInfo{
+		StaticExecutable: c.StaticExecutable(),
+	})
+
 	c.setOutputFiles(ctx)
 
 	if c.makeVarsInfo != nil {
@@ -3367,8 +3378,6 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 }
 
 func ShouldUseStubForApex(ctx android.ModuleContext, dep android.Module) bool {
-	depName := ctx.OtherModuleName(dep)
-
 	inVendorOrProduct := false
 	bootstrap := false
 	if linkable, ok := ctx.Module().(LinkableInterface); !ok {
@@ -3398,9 +3407,8 @@ func ShouldUseStubForApex(ctx android.ModuleContext, dep android.Module) bool {
 
 		useStubs = isNotInPlatform && !bootstrap
 	} else {
-		// If building for APEX, use stubs when the parent is in any APEX that
-		// the child is not in.
-		useStubs = !android.DirectlyInAllApexes(apexInfo, depName)
+		// If building for APEX, always use stubs (can be bypassed by depending on <dep>#impl)
+		useStubs = true
 	}
 
 	return useStubs

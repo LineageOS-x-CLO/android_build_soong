@@ -112,13 +112,13 @@ func generatedPartitions(ctx android.LoadHookContext) []string {
 	return generatedPartitions
 }
 
-func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNames []string) *FsGenState {
+func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNames []string, avbpubkeyGenerated bool) *FsGenState {
 	return ctx.Config().Once(fsGenStateOnceKey, func() interface{} {
 		partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
 		candidates := android.FirstUniqueStrings(android.Concat(partitionVars.ProductPackages, partitionVars.ProductPackagesDebug))
 		candidates = android.Concat(candidates, generatedPrebuiltEtcModuleNames)
 
-		return &FsGenState{
+		fsGenState := FsGenState{
 			depCandidates: candidates,
 			fsDeps: map[string]*multilibDeps{
 				// These additional deps are added according to the cuttlefish system image bp.
@@ -180,6 +180,12 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 			moduleToInstallationProps:       map[string]installationProperties{},
 			generatedPrebuiltEtcModuleNames: generatedPrebuiltEtcModuleNames,
 		}
+
+		if avbpubkeyGenerated {
+			(*fsGenState.fsDeps["product"])["system_other_avbpubkey"] = defaultDepCandidateProps(ctx.Config())
+		}
+
+		return &fsGenState
 	}).(*FsGenState)
 }
 
