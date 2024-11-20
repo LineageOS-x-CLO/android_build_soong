@@ -662,6 +662,7 @@ type PartitionVariables struct {
 	CopyImagesForTargetFilesZip    bool   `json:",omitempty"`
 
 	// Boot image stuff
+	BuildingRamdiskImage            bool   `json:",omitempty"`
 	ProductBuildBootImage           bool   `json:",omitempty"`
 	ProductBuildInitBootImage       bool   `json:",omitempty"`
 	BoardUsesRecoveryAsBoot         bool   `json:",omitempty"`
@@ -670,6 +671,7 @@ type PartitionVariables struct {
 	BoardBootimagePartitionSize     string `json:",omitempty"`
 	BoardInitBootimagePartitionSize string `json:",omitempty"`
 	BoardBootHeaderVersion          string `json:",omitempty"`
+	TargetKernelPath                string `json:",omitempty"`
 
 	// Avb (android verified boot) stuff
 	BoardAvbEnable          bool                                `json:",omitempty"`
