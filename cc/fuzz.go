@@ -329,6 +329,7 @@ func (fuzzBin *fuzzBinary) install(ctx ModuleContext, file android.Path) {
 
 func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPackagedModule, pctx android.PackageContext) fuzz.FuzzPackagedModule {
 	fuzzPackagedModule.Corpus = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Corpus)
+	fuzzPackagedModule.Corpus = append(fuzzPackagedModule.Corpus, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_corpus)...)
 	intermediateDir := android.PathForModuleOut(ctx, "corpus")
 
 	// Create one rule per file to avoid MAX_ARG_STRLEN hardlimit.
