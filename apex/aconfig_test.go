@@ -60,6 +60,7 @@ func TestValidationAcrossContainersExportedPass(t *testing.T) {
 					apex_available: [
 						"myapex",
 					],
+					compile_dex: true,
 				}
 				aconfig_declarations {
 					name: "my_aconfig_declarations_foo",
@@ -335,6 +336,7 @@ func TestValidationAcrossContainersNotExportedFail(t *testing.T) {
 					apex_available: [
 						"myapex",
 					],
+					compile_dex: true,
 				}
 				aconfig_declarations {
 					name: "my_aconfig_declarations_foo",
@@ -751,6 +753,7 @@ func TestValidationNotPropagateAcrossShared(t *testing.T) {
 					apex_available: [
 						"myapex",
 					],
+					compile_dex: true,
 				}
 				java_library {
 					name: "my_java_library_foo",
