@@ -186,6 +186,7 @@ var PrepareForTestWithJacocoInstrumentation = android.GroupFixturePreparers(
 			host_supported: true,
 			srcs: ["Test.java"],
 			sdk_version: "current",
+			compile_dex: true,
 		}
 	`)),
 )

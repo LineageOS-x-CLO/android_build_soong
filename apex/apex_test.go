@@ -495,6 +495,7 @@ func TestBasicApex(t *testing.T) {
 				"//apex_available:platform",
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		dex_import {
@@ -664,6 +665,7 @@ func TestDefaults(t *testing.T) {
 			sdk_version: "none",
 			system_modules: "none",
 			apex_available: [ "myapex" ],
+			compile_dex: true,
 		}
 
 		android_app {
@@ -2035,6 +2037,7 @@ func TestApexMinSdkVersion_SupportsCodeNames_JavaLibs(t *testing.T) {
 			apex_available: [ "myapex" ],
 			sdk_version: "current",
 			min_sdk_version: "S", // should be okay
+			compile_dex: true,
 		}
 	`,
 		android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
@@ -2584,6 +2587,7 @@ func TestApexMinSdkVersion_ErrorIfIncompatibleVersion(t *testing.T) {
 				"myapex",
 			],
 			min_sdk_version: "30",
+			compile_dex: true,
 		}
 	`)
 
@@ -2611,6 +2615,7 @@ func TestApexMinSdkVersion_ErrorIfIncompatibleVersion(t *testing.T) {
 			// Compile against core API surface
 			sdk_version: "core_current",
 			min_sdk_version: "30",
+			compile_dex: true,
 		}
 	`)
 
@@ -2658,6 +2663,7 @@ func TestApexMinSdkVersion_Okay(t *testing.T) {
 			],
 			apex_available: ["myapex"],
 			min_sdk_version: "29",
+			compile_dex: true,
 		}
 
 		java_library {
@@ -2737,6 +2743,7 @@ func TestJavaStableSdkVersion(t *testing.T) {
 					srcs: ["foo/bar/MyClass.java"],
 					sdk_version: "test_current",
 					apex_available: ["myapex"],
+					compile_dex: true,
 				}
 			`,
 		},
@@ -2761,6 +2768,7 @@ func TestJavaStableSdkVersion(t *testing.T) {
 					sdk_version: "current",
 					apex_available: ["myapex"],
 					min_sdk_version: "29",
+					compile_dex: true,
 				}
 			`,
 		},
@@ -2784,6 +2792,7 @@ func TestJavaStableSdkVersion(t *testing.T) {
 					srcs: ["foo/bar/MyClass.java"],
 					sdk_version: "test_current",
 					apex_available: ["myapex"],
+					compile_dex: true,
 				}
 			`,
 		},
@@ -2807,6 +2816,7 @@ func TestJavaStableSdkVersion(t *testing.T) {
 					srcs: ["foo/bar/MyClass.java"],
 					sdk_version: "core_platform",
 					apex_available: ["myapex"],
+					compile_dex: true,
 				}
 			`,
 			preparer: java.FixtureUseLegacyCorePlatformApi("myjar-uses-legacy"),
@@ -2835,6 +2845,7 @@ func TestJavaStableSdkVersion(t *testing.T) {
 					sdk_version: "current",
 					apex_available: ["myapex"],
 					static_libs: ["transitive-jar"],
+					compile_dex: true,
 				}
 				java_library {
 					name: "transitive-jar",
@@ -5907,6 +5918,7 @@ func TestErrorsIfDepsAreNotEnabled(t *testing.T) {
 			system_modules: "none",
 			enabled: false,
 			apex_available: ["myapex"],
+			compile_dex: true,
 		}
 	`)
 }
@@ -7517,6 +7529,7 @@ func TestJavaSDKLibrary_WithinApex(t *testing.T) {
 			apex_available: ["myapex"],
 			sdk_version: "none",
 			system_modules: "none",
+			compile_dex: true,
 		}
 
 		java_library {
@@ -7526,6 +7539,7 @@ func TestJavaSDKLibrary_WithinApex(t *testing.T) {
 			apex_available: ["myapex"],
 			sdk_version: "none",
 			system_modules: "none",
+			compile_dex: true,
 		}
 
 		prebuilt_apis {
@@ -7635,6 +7649,7 @@ func TestJavaSDKLibrary_ImportPreferred(t *testing.T) {
 			apex_available: ["myapex"],
 			sdk_version: "none",
 			system_modules: "none",
+			compile_dex: true,
 		}
 `),
 			"source/a.java":          nil,
@@ -7656,6 +7671,7 @@ func TestJavaSDKLibrary_ImportPreferred(t *testing.T) {
 			public: {
 				enabled: true,
 			},
+			compile_dex: true,
 		}
 `),
 			"prebuilt/a.jar": nil,
@@ -7672,6 +7688,7 @@ func TestJavaSDKLibrary_ImportPreferred(t *testing.T) {
 			public: {
 				jars: ["a.jar"],
 			},
+			compile_dex: true,
 		}
 `),
 		}), withFiles(filesForSdkLibrary),
@@ -7750,6 +7767,7 @@ func TestCompatConfig(t *testing.T) {
 			sdk_version: "none",
 			system_modules: "none",
 			apex_available: [ "myapex" ],
+			compile_dex: true,
 		}
 
 		// Make sure that a preferred prebuilt does not affect the apex contents.
@@ -7989,6 +8007,7 @@ func TestSymlinksFromApexToSystem(t *testing.T) {
 				"//apex_available:platform",
 			],
 			min_sdk_version: "33",
+			compile_dex: true,
 		}
 
 		java_library {
@@ -8596,6 +8615,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					apex_available: ["myapex"],
 					sdk_version: "none",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				java_library {
 					name: "nonbcp_lib2",
@@ -8604,6 +8624,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					permitted_packages: ["a.b"],
 					sdk_version: "none",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				apex {
 					name: "myapex",
@@ -8629,6 +8650,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					permitted_packages: ["foo.bar"],
 					sdk_version: "none",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				java_library {
 					name: "bcp_lib2",
@@ -8637,6 +8659,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					permitted_packages: ["foo.bar", "bar.baz"],
 					sdk_version: "none",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				apex {
 					name: "myapex",
@@ -8667,6 +8690,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					sdk_version: "none",
 					min_sdk_version: "29",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				java_library {
 					name: "bcp_lib_unrestricted",
@@ -8676,6 +8700,7 @@ func TestApexPermittedPackagesRules(t *testing.T) {
 					sdk_version: "none",
 					min_sdk_version: "29",
 					system_modules: "none",
+					compile_dex: true,
 				}
 				apex {
 					name: "myapex",
@@ -9819,6 +9844,7 @@ func TestApexStrictUpdtabilityLint(t *testing.T) {
 			},
 			sdk_version: "current",
 			min_sdk_version: "29",
+			compile_dex: true,
 		}
 		`
 	fs := android.MockFS{
@@ -10250,6 +10276,7 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		java_library {
@@ -10261,6 +10288,7 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		aconfig_declarations {
@@ -10347,6 +10375,7 @@ func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		cc_library {
@@ -10673,6 +10702,7 @@ func TestAconfigFilesOnlyMatchCurrentApex(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		java_library {
@@ -10684,6 +10714,7 @@ func TestAconfigFilesOnlyMatchCurrentApex(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		aconfig_declarations {
@@ -10758,6 +10789,7 @@ func TestAconfigFilesRemoveDuplicates(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		java_library {
@@ -10769,6 +10801,7 @@ func TestAconfigFilesRemoveDuplicates(t *testing.T) {
 			apex_available: [
 				"myapex",
 			],
+			compile_dex: true,
 		}
 
 		aconfig_declarations {
@@ -11451,6 +11484,7 @@ func TestApexMinSdkVersionOverride(t *testing.T) {
 			apex_available: ["com.android.apex30"],
 			min_sdk_version: "30",
 			sdk_version: "current",
+			compile_dex: true,
 		}
 
 		override_apex {
@@ -11742,6 +11776,7 @@ func TestSdkLibraryTransitiveClassLoaderContext(t *testing.T) {
 				"com.android.foo30",
 			],
 			sdk_version: "core_current",
+			compile_dex: true,
 		}
 
 		java_library {
