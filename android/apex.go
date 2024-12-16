@@ -61,14 +61,6 @@ type ApexInfo struct {
 	// that are merged together.
 	InApexVariants []string
 
-	// List of APEX Soong module names that this module is part of. Note that the list includes
-	// different variations of the same APEX. For example, if module `foo` is included in the
-	// apex `com.android.foo`, and also if there is an override_apex module
-	// `com.mycompany.android.foo` overriding `com.android.foo`, then this list contains both
-	// `com.android.foo` and `com.mycompany.android.foo`.  If the APEX Soong module is a
-	// prebuilt, the name here doesn't have the `prebuilt_` prefix.
-	InApexModules []string
-
 	// True if this is for a prebuilt_apex.
 	//
 	// If true then this will customize the apex processing to make it suitable for handling
@@ -99,7 +91,6 @@ func (i ApexInfo) AddJSONData(d *map[string]interface{}) {
 	(*d)["Apex"] = map[string]interface{}{
 		"ApexVariationName": i.ApexVariationName,
 		"MinSdkVersion":     i.MinSdkVersion,
-		"InApexModules":     i.InApexModules,
 		"InApexVariants":    i.InApexVariants,
 		"ForPrebuiltApex":   i.ForPrebuiltApex,
 	}
@@ -128,15 +119,6 @@ func (i ApexInfo) IsForPlatform() bool {
 func (i ApexInfo) InApexVariant(apexVariant string) bool {
 	for _, a := range i.InApexVariants {
 		if a == apexVariant {
-			return true
-		}
-	}
-	return false
-}
-
-func (i ApexInfo) InApexModule(apexModuleName string) bool {
-	for _, a := range i.InApexModules {
-		if a == apexModuleName {
 			return true
 		}
 	}
@@ -260,9 +242,6 @@ type ApexProperties struct {
 	// Default is ["//apex_available:platform"].
 	Apex_available []string
 
-	// See ApexModule.InAnyApex()
-	InAnyApex bool `blueprint:"mutated"`
-
 	// See ApexModule.NotAvailableForPlatform()
 	NotAvailableForPlatform bool `blueprint:"mutated"`
 
@@ -349,30 +328,22 @@ func (m *ApexModuleBase) ApexAvailable() []string {
 func (m *ApexModuleBase) BuildForApex(apex ApexInfo) {
 	m.apexInfosLock.Lock()
 	defer m.apexInfosLock.Unlock()
-	for i, v := range m.apexInfos {
-		if v.ApexVariationName == apex.ApexVariationName {
-			if len(apex.InApexModules) != 1 {
-				panic(fmt.Errorf("Newly created apexInfo must be for a single APEX"))
-			}
-			// Even when the ApexVariantNames are the same, the given ApexInfo might
-			// actually be for different APEX. This can happen when an APEX is
-			// overridden via override_apex. For example, there can be two apexes
-			// `com.android.foo` (from the `apex` module type) and
-			// `com.mycompany.android.foo` (from the `override_apex` module type), both
-			// of which has the same ApexVariantName `com.android.foo`. Add the apex
-			// name to the list so that it's not lost.
-			if !InList(apex.InApexModules[0], v.InApexModules) {
-				m.apexInfos[i].InApexModules = append(m.apexInfos[i].InApexModules, apex.InApexModules[0])
-			}
-			return
-		}
+	if slices.ContainsFunc(m.apexInfos, func(existing ApexInfo) bool {
+		return existing.ApexVariationName == apex.ApexVariationName
+	}) {
+		return
 	}
 	m.apexInfos = append(m.apexInfos, apex)
 }
 
 // Implements ApexModule
 func (m *ApexModuleBase) InAnyApex() bool {
-	return m.ApexProperties.InAnyApex
+	for _, apex_name := range m.ApexProperties.Apex_available {
+		if apex_name != AvailableToPlatform {
+			return true
+		}
+	}
+	return false
 }
 
 // Implements ApexModule
@@ -534,7 +505,6 @@ func mergeApexVariations(apexInfos []ApexInfo) (merged []ApexInfo, aliases [][2]
 		if index, exists := seen[mergedName]; exists {
 			// Variants having the same mergedName are deduped
 			merged[index].InApexVariants = append(merged[index].InApexVariants, variantName)
-			merged[index].InApexModules = append(merged[index].InApexModules, apexInfo.InApexModules...)
 			merged[index].Updatable = merged[index].Updatable || apexInfo.Updatable
 			// Platform APIs is allowed for this module only when all APEXes containing
 			// the module are with `use_platform_apis: true`.
@@ -544,7 +514,6 @@ func mergeApexVariations(apexInfos []ApexInfo) (merged []ApexInfo, aliases [][2]
 			seen[mergedName] = len(merged)
 			apexInfo.ApexVariationName = mergedName
 			apexInfo.InApexVariants = CopyOf(apexInfo.InApexVariants)
-			apexInfo.InApexModules = CopyOf(apexInfo.InApexModules)
 			apexInfo.TestApexes = CopyOf(apexInfo.TestApexes)
 			merged = append(merged, apexInfo)
 		}
@@ -631,8 +600,6 @@ func MutateApexTransition(ctx BaseModuleContext, variation string) {
 	if !module.UniqueApexVariations() && !base.ApexProperties.UniqueApexVariationsForDeps {
 		apexInfos, _ = mergeApexVariations(apexInfos)
 	}
-
-	base.ApexProperties.InAnyApex = true
 
 	if platformVariation && !ctx.Host() && !module.AvailableFor(AvailableToPlatform) && module.NotAvailableForPlatform() {
 		// Do not install the module for platform, but still allow it to output

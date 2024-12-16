@@ -326,6 +326,8 @@ type JavaInfo struct {
 	// AconfigIntermediateCacheOutputPaths is a path to the cache files collected from the
 	// java_aconfig_library modules that are statically linked to this module.
 	AconfigIntermediateCacheOutputPaths android.Paths
+
+	SdkVersion android.SdkSpec
 }
 
 var JavaInfoProvider = blueprint.NewProvider[*JavaInfo]()
@@ -2311,14 +2313,17 @@ func (al *ApiLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		case libTag:
 			if provider, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
 				classPaths = append(classPaths, provider.HeaderJars...)
+				al.aconfigProtoFiles = append(al.aconfigProtoFiles, provider.AconfigIntermediateCacheOutputPaths...)
 			}
 		case bootClasspathTag:
 			if provider, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
 				bootclassPaths = append(bootclassPaths, provider.HeaderJars...)
+				al.aconfigProtoFiles = append(al.aconfigProtoFiles, provider.AconfigIntermediateCacheOutputPaths...)
 			}
 		case staticLibTag:
 			if provider, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
 				staticLibs = append(staticLibs, provider.HeaderJars...)
+				al.aconfigProtoFiles = append(al.aconfigProtoFiles, provider.AconfigIntermediateCacheOutputPaths...)
 			}
 		case systemModulesTag:
 			if sm, ok := android.OtherModuleProvider(ctx, dep, SystemModulesProvider); ok {
