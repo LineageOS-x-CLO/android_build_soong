@@ -17,7 +17,6 @@ package sh
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -47,6 +46,7 @@ func registerShBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("sh_binary_host", ShBinaryHostFactory)
 	ctx.RegisterModuleType("sh_test", ShTestFactory)
 	ctx.RegisterModuleType("sh_test_host", ShTestHostFactory)
+	ctx.RegisterModuleType("sh_defaults", ShDefaultsFactory)
 }
 
 // Test fixture preparer that will register most sh build components.
@@ -165,10 +165,14 @@ type TestProperties struct {
 
 	// Test options.
 	Test_options android.CommonTestOptions
+
+	// a list of extra test configuration files that should be installed with the module.
+	Extra_test_configs []string `android:"path,arch_variant"`
 }
 
 type ShBinary struct {
 	android.ModuleBase
+	android.DefaultableModuleBase
 
 	properties shBinaryProperties
 
@@ -186,8 +190,9 @@ type ShTest struct {
 
 	installDir android.InstallPath
 
-	data       android.Paths
-	testConfig android.Path
+	data             []android.DataPath
+	testConfig       android.Path
+	extraTestConfigs android.Paths
 
 	dataModules map[string]android.Path
 }
@@ -199,7 +204,7 @@ func (s *ShBinary) HostToolPath() android.OptionalPath {
 func (s *ShBinary) DepsMutator(ctx android.BottomUpMutatorContext) {
 }
 
-func (s *ShBinary) OutputFile() android.OutputPath {
+func (s *ShBinary) OutputFile() android.Path {
 	return s.outputFilePath
 }
 
@@ -410,10 +415,23 @@ func (s *ShTest) addToDataModules(ctx android.ModuleContext, relPath string, pat
 		return
 	}
 	s.dataModules[relPath] = path
+	s.data = append(s.data, android.DataPath{SrcPath: path})
 }
 
 func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	s.ShBinary.generateAndroidBuildActions(ctx)
+
+	expandedData := android.PathsForModuleSrc(ctx, s.testProperties.Data)
+	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, s.testProperties.Device_common_data)...)
+	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, s.testProperties.Device_first_data)...)
+	// Emulate the data property for java_data dependencies.
+	for _, javaData := range ctx.GetDirectDepsWithTag(shTestJavaDataTag) {
+		expandedData = append(expandedData, android.OutputFilesForModule(ctx, javaData, "")...)
+	}
+	for _, d := range expandedData {
+		s.data = append(s.data, android.DataPath{SrcPath: d})
+	}
+
 	testDir := "nativetest"
 	if ctx.Target().Arch.ArchType.Multilib == "lib64" {
 		testDir = "nativetest64"
@@ -430,15 +448,6 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	} else {
 		s.installDir = android.PathForModuleInstall(ctx, testDir, s.Name())
 	}
-	s.installedFile = ctx.InstallExecutable(s.installDir, s.outputFilePath.Base(), s.outputFilePath)
-
-	expandedData := android.PathsForModuleSrc(ctx, s.testProperties.Data)
-
-	// Emulate the data property for java_data dependencies.
-	for _, javaData := range ctx.GetDirectDepsWithTag(shTestJavaDataTag) {
-		expandedData = append(expandedData, android.OutputFilesForModule(ctx, javaData, "")...)
-	}
-	s.data = expandedData
 
 	var configs []tradefed.Config
 	if Bool(s.testProperties.Require_root) {
@@ -467,6 +476,7 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		HostTemplate:           "${ShellTestConfigTemplate}",
 	})
 
+	s.extraTestConfigs = android.PathsForModuleSrc(ctx, s.testProperties.Extra_test_configs)
 	s.dataModules = make(map[string]android.Path)
 	ctx.VisitDirectDeps(func(dep android.Module) {
 		depTag := ctx.OtherModuleDependencyTag(dep)
@@ -487,7 +497,7 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 				if _, exist := s.dataModules[relPath]; exist {
 					return
 				}
-				relocatedLib := android.PathForModuleOut(ctx, "relocated", relPath)
+				relocatedLib := android.PathForModuleOut(ctx, "relocated").Join(ctx, relPath)
 				ctx.Build(pctx, android.BuildParams{
 					Rule:   android.Cp,
 					Input:  cc.OutputFile().Path(),
@@ -503,6 +513,30 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			ctx.PropertyErrorf(property, "%q of type %q is not supported", dep.Name(), ctx.OtherModuleType(dep))
 		}
 	})
+
+	installedData := ctx.InstallTestData(s.installDir, s.data)
+	s.installedFile = ctx.InstallExecutable(s.installDir, s.outputFilePath.Base(), s.outputFilePath, installedData...)
+
+	mkEntries := s.AndroidMkEntries()[0]
+	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
+		TestcaseRelDataFiles: addArch(ctx.Arch().ArchType.String(), installedData.Paths()),
+		OutputFile:           s.outputFilePath,
+		TestConfig:           s.testConfig,
+		TestSuites:           s.testProperties.Test_suites,
+		IsHost:               false,
+		IsUnitTest:           Bool(s.testProperties.Test_options.Unit_test),
+		MkInclude:            mkEntries.Include,
+		MkAppClass:           mkEntries.Class,
+		InstallDir:           s.installDir,
+	})
+}
+
+func addArch(archType string, paths android.Paths) []string {
+	archRelPaths := []string{}
+	for _, p := range paths {
+		archRelPaths = append(archRelPaths, fmt.Sprintf("%s/%s", archType, p.Rel()))
+	}
+	return archRelPaths
 }
 
 func (s *ShTest) InstallInData() bool {
@@ -522,28 +556,13 @@ func (s *ShTest) AndroidMkEntries() []android.AndroidMkEntries {
 				if s.testConfig != nil {
 					entries.SetPath("LOCAL_FULL_TEST_CONFIG", s.testConfig)
 				}
-				for _, d := range s.data {
-					rel := d.Rel()
-					path := d.String()
-					if !strings.HasSuffix(path, rel) {
-						panic(fmt.Errorf("path %q does not end with %q", path, rel))
-					}
-					path = strings.TrimSuffix(path, rel)
-					entries.AddStrings("LOCAL_TEST_DATA", path+":"+rel)
-				}
-				relPaths := make([]string, 0)
-				for relPath, _ := range s.dataModules {
-					relPaths = append(relPaths, relPath)
-				}
-				sort.Strings(relPaths)
-				for _, relPath := range relPaths {
-					dir := strings.TrimSuffix(s.dataModules[relPath].String(), relPath)
-					entries.AddStrings("LOCAL_TEST_DATA", dir+":"+relPath)
-				}
 				if s.testProperties.Data_bins != nil {
 					entries.AddStrings("LOCAL_TEST_DATA_BINS", s.testProperties.Data_bins...)
 				}
 				entries.SetBoolIfTrue("LOCAL_COMPATIBILITY_PER_TESTCASE_DIRECTORY", Bool(s.testProperties.Per_testcase_directory))
+				if len(s.extraTestConfigs) > 0 {
+					entries.AddStrings("LOCAL_EXTRA_FULL_TEST_CONFIGS", s.extraTestConfigs.Strings()...)
+				}
 
 				s.testProperties.Test_options.SetAndroidMkEntries(entries)
 			},
@@ -561,6 +580,7 @@ func ShBinaryFactory() android.Module {
 	module := &ShBinary{}
 	initShBinaryModule(module)
 	android.InitAndroidArchModule(module, android.HostAndDeviceSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
 	return module
 }
 
@@ -570,6 +590,7 @@ func ShBinaryHostFactory() android.Module {
 	module := &ShBinary{}
 	initShBinaryModule(module)
 	android.InitAndroidArchModule(module, android.HostSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
 	return module
 }
 
@@ -580,6 +601,7 @@ func ShTestFactory() android.Module {
 	module.AddProperties(&module.testProperties)
 
 	android.InitAndroidArchModule(module, android.HostAndDeviceSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
 	return module
 }
 
@@ -594,6 +616,21 @@ func ShTestHostFactory() android.Module {
 	}
 
 	android.InitAndroidArchModule(module, android.HostSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
+	return module
+}
+
+type ShDefaults struct {
+	android.ModuleBase
+	android.DefaultsModuleBase
+}
+
+func ShDefaultsFactory() android.Module {
+	module := &ShDefaults{}
+
+	module.AddProperties(&shBinaryProperties{}, &TestProperties{})
+	android.InitDefaultsModule(module)
+
 	return module
 }
 

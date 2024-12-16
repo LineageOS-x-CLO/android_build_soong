@@ -16,12 +16,13 @@ package android
 
 import (
 	"fmt"
-	"github.com/google/blueprint/depset"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -163,6 +164,15 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	InstallAbsoluteSymlink(installPath InstallPath, name string, absPath string) InstallPath
 
+	// InstallTestData creates rules to install test data (e.g. data files used during a test) into
+	// the installPath directory.
+	//
+	// The installed files can be accessed by InstallFilesInfo.InstallFiles, and the PackagingSpec
+	// for the installed files can be accessed by InstallFilesInfo.PackagingSpecs on this module
+	// or by InstallFilesInfo.TransitivePackagingSpecs on modules that depend on this module through
+	// dependency tags for which IsInstallDepNeeded returns true.
+	InstallTestData(installPath InstallPath, data []DataPath) InstallPaths
+
 	// PackageFile creates a PackagingSpec as if InstallFile was called, but without creating
 	// the rule to copy the file.  This is useful to define how a module would be packaged
 	// without installing it into the global installation directories.
@@ -186,6 +196,9 @@ type ModuleContext interface {
 	InstallInOdm() bool
 	InstallInProduct() bool
 	InstallInVendor() bool
+	InstallInSystemDlkm() bool
+	InstallInVendorDlkm() bool
+	InstallInOdmDlkm() bool
 	InstallForceOS() (*OsType, *ArchType)
 
 	RequiredModuleNames(ctx ConfigurableEvaluatorContext) []string
@@ -272,6 +285,8 @@ type moduleContext struct {
 	vintfFragmentsPaths          Paths
 	installedInitRcPaths         InstallPaths
 	installedVintfFragmentsPaths InstallPaths
+
+	testData []DataPath
 
 	// For tests
 	buildParams []BuildParams
@@ -424,9 +439,11 @@ func (m *moduleContext) GetMissingDependencies() []string {
 	return missingDeps
 }
 
-func (m *moduleContext) GetDirectDepWithTag(name string, tag blueprint.DependencyTag) blueprint.Module {
-	module, _ := m.getDirectDepInternal(name, tag)
-	return module
+func (m *moduleContext) GetDirectDepWithTag(name string, tag blueprint.DependencyTag) Module {
+	if module, _ := m.getDirectDepInternal(name, tag); module != nil {
+		return module.(Module)
+	}
+	return nil
 }
 
 func (m *moduleContext) ModuleSubDir() string {
@@ -481,12 +498,20 @@ func (m *moduleContext) InstallInVendor() bool {
 	return m.module.InstallInVendor()
 }
 
+func (m *moduleContext) InstallInSystemDlkm() bool {
+	return m.module.InstallInSystemDlkm()
+}
+
+func (m *moduleContext) InstallInVendorDlkm() bool {
+	return m.module.InstallInVendorDlkm()
+}
+
+func (m *moduleContext) InstallInOdmDlkm() bool {
+	return m.module.InstallInOdmDlkm()
+}
+
 func (m *moduleContext) skipInstall() bool {
 	if m.module.base().commonProperties.SkipInstall {
-		return true
-	}
-
-	if m.module.base().commonProperties.HideFromMake {
 		return true
 	}
 
@@ -508,6 +533,10 @@ func (m *moduleContext) requiresFullInstall() bool {
 		return false
 	}
 
+	if m.module.base().commonProperties.HideFromMake {
+		return false
+	}
+
 	if proptools.Bool(m.module.base().commonProperties.No_full_install) {
 		return false
 	}
@@ -517,22 +546,22 @@ func (m *moduleContext) requiresFullInstall() bool {
 
 func (m *moduleContext) InstallFile(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithoutCheckbuild(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, false, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, false, nil)
 }
 
 func (m *moduleContext) InstallExecutable(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, true, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, true, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithExtraFilesZip(installPath InstallPath, name string, srcPath Path,
 	extraZip Path, deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, &extraFilesZip{
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, &extraFilesZip{
 		zip: extraZip,
 		dir: installPath,
 	})
@@ -551,9 +580,22 @@ func (m *moduleContext) setAconfigPaths(paths Paths) {
 	m.aconfigFilePaths = paths
 }
 
+func (m *moduleContext) getOwnerAndOverrides() (string, []string) {
+	owner := m.ModuleName()
+	overrides := slices.Clone(m.Module().base().commonProperties.Overrides)
+	if b, ok := m.Module().(OverridableModule); ok {
+		if b.GetOverriddenBy() != "" {
+			// overriding variant of base module
+			overrides = append(overrides, m.ModuleName()) // com.android.foo
+			owner = m.Module().Name()                     // com.company.android.foo
+		}
+	}
+	return owner, overrides
+}
+
 func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, executable bool) PackagingSpec {
 	licenseFiles := m.Module().EffectiveLicenseFiles()
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	spec := PackagingSpec{
 		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:               srcPath,
@@ -565,17 +607,19 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 		aconfigPaths:          m.getAconfigPaths(),
 		archType:              m.target.Arch.ArchType,
 		overrides:             &overrides,
-		owner:                 m.ModuleName(),
+		owner:                 owner,
 	}
 	m.packagingSpecs = append(m.packagingSpecs, spec)
 	return spec
 }
 
 func (m *moduleContext) installFile(installPath InstallPath, name string, srcPath Path, deps []InstallPath,
-	executable bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
+	executable bool, hooks bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
 
 	fullInstallPath := installPath.Join(m, name)
-	m.module.base().hooks.runInstallHooks(m, srcPath, fullInstallPath, false)
+	if hooks {
+		m.module.base().hooks.runInstallHooks(m, srcPath, fullInstallPath, false)
+	}
 
 	if m.requiresFullInstall() {
 		deps = append(deps, InstallPaths(m.TransitiveInstallFiles.ToList())...)
@@ -682,7 +726,7 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -693,7 +737,7 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
 		overrides:        &overrides,
-		owner:            m.ModuleName(),
+		owner:            owner,
 	})
 
 	return fullInstallPath
@@ -729,7 +773,7 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
-	overrides := CopyOf(m.Module().base().commonProperties.Overrides)
+	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
 		relPathInPackage: Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:          nil,
@@ -740,10 +784,23 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 		aconfigPaths:     m.getAconfigPaths(),
 		archType:         m.target.Arch.ArchType,
 		overrides:        &overrides,
-		owner:            m.ModuleName(),
+		owner:            owner,
 	})
 
 	return fullInstallPath
+}
+
+func (m *moduleContext) InstallTestData(installPath InstallPath, data []DataPath) InstallPaths {
+	m.testData = append(m.testData, data...)
+
+	ret := make(InstallPaths, 0, len(data))
+	for _, d := range data {
+		relPath := d.ToRelativeInstallPath()
+		installed := m.installFile(installPath, relPath, d.SrcPath, nil, false, false, true, nil)
+		ret = append(ret, installed)
+	}
+
+	return ret
 }
 
 // CheckbuildFile specifies the output files that should be built by checkbuild.
@@ -774,6 +831,11 @@ func (m *moduleContext) ModuleInfoJSON() *ModuleInfoJSON {
 }
 
 func (m *moduleContext) SetOutputFiles(outputFiles Paths, tag string) {
+	for _, outputFile := range outputFiles {
+		if outputFile == nil {
+			panic("outputfiles cannot be nil")
+		}
+	}
 	if tag == "" {
 		if len(m.outputFiles.DefaultOutputFiles) > 0 {
 			m.ModuleErrorf("Module %s default OutputFiles cannot be overwritten", m.ModuleName())

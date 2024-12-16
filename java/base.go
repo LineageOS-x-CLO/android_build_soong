@@ -67,19 +67,19 @@ type CommonProperties struct {
 	Exclude_java_resource_dirs []string `android:"arch_variant"`
 
 	// list of files to use as Java resources
-	Java_resources []string `android:"path,arch_variant"`
+	Java_resources proptools.Configurable[[]string] `android:"path,arch_variant"`
 
 	// list of files that should be excluded from java_resources and java_resource_dirs
 	Exclude_java_resources []string `android:"path,arch_variant"`
 
 	// Same as java_resources, but modules added here will use the device variant. Can be useful
 	// for making a host test that tests the contents of a device built app.
-	Device_common_java_resources []string `android:"path_device_common"`
+	Device_common_java_resources proptools.Configurable[[]string] `android:"path_device_common"`
 
 	// Same as java_resources, but modules added here will use the device's os variant and the
 	// device's first architecture variant. Can be useful for making a host test that tests the
 	// contents of a native device built app.
-	Device_first_java_resources []string `android:"path_device_first"`
+	Device_first_java_resources proptools.Configurable[[]string] `android:"path_device_first"`
 
 	// list of module-specific flags that will be used for javac compiles
 	Javacflags []string `android:"arch_variant"`
@@ -707,10 +707,10 @@ func (j *Module) provideHiddenAPIPropertyInfo(ctx android.ModuleContext) {
 
 // helper method for java modules to set OutputFilesProvider
 func setOutputFiles(ctx android.ModuleContext, m Module) {
-	ctx.SetOutputFiles(append(android.Paths{m.outputFile}, m.extraOutputFiles...), "")
-	ctx.SetOutputFiles(android.Paths{m.outputFile}, android.DefaultDistTag)
-	ctx.SetOutputFiles(android.Paths{m.implementationAndResourcesJar}, ".jar")
-	ctx.SetOutputFiles(android.Paths{m.headerJarFile}, ".hjar")
+	ctx.SetOutputFiles(append(android.PathsIfNonNil(m.outputFile), m.extraOutputFiles...), "")
+	ctx.SetOutputFiles(android.PathsIfNonNil(m.outputFile), android.DefaultDistTag)
+	ctx.SetOutputFiles(android.PathsIfNonNil(m.implementationAndResourcesJar), ".jar")
+	ctx.SetOutputFiles(android.PathsIfNonNil(m.headerJarFile), ".hjar")
 	if m.dexer.proguardDictionary.Valid() {
 		ctx.SetOutputFiles(android.Paths{m.dexer.proguardDictionary.Path()}, ".proguard_map")
 	}
@@ -759,7 +759,8 @@ func (j *Module) shouldInstrumentInApex(ctx android.BaseModuleContext) bool {
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	isJacocoAgent := ctx.ModuleName() == "jacocoagent"
 
-	if j.DirectlyInAnyApex() && !isJacocoAgent && !apexInfo.IsForPlatform() {
+	compileDex := Bool(j.dexProperties.Compile_dex) || Bool(j.properties.Installable)
+	if compileDex && !isJacocoAgent && !apexInfo.IsForPlatform() {
 		if !inList(ctx.ModuleName(), config.InstrumentFrameworkModules) {
 			return true
 		} else if ctx.Config().IsEnvTrue("EMMA_INSTRUMENT_FRAMEWORK") {
@@ -1488,9 +1489,9 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	dirArgs, dirDeps := ResourceDirsToJarArgs(ctx, j.properties.Java_resource_dirs,
 		j.properties.Exclude_java_resource_dirs, j.properties.Exclude_java_resources)
-	fileArgs, fileDeps := ResourceFilesToJarArgs(ctx, j.properties.Java_resources, j.properties.Exclude_java_resources)
-	fileArgs2, fileDeps2 := ResourceFilesToJarArgs(ctx, j.properties.Device_common_java_resources, nil)
-	fileArgs3, fileDeps3 := ResourceFilesToJarArgs(ctx, j.properties.Device_first_java_resources, nil)
+	fileArgs, fileDeps := ResourceFilesToJarArgs(ctx, j.properties.Java_resources.GetOrDefault(ctx, nil), j.properties.Exclude_java_resources)
+	fileArgs2, fileDeps2 := ResourceFilesToJarArgs(ctx, j.properties.Device_common_java_resources.GetOrDefault(ctx, nil), nil)
+	fileArgs3, fileDeps3 := ResourceFilesToJarArgs(ctx, j.properties.Device_first_java_resources.GetOrDefault(ctx, nil), nil)
 	fileArgs = slices.Concat(fileArgs, fileArgs2, fileArgs3)
 	fileDeps = slices.Concat(fileDeps, fileDeps2, fileDeps3)
 	extraArgs, extraDeps := resourcePathsToJarArgs(j.extraResources), j.extraResources
@@ -1728,7 +1729,12 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	completeStaticLibsImplementationJarsToCombine := completeStaticLibsImplementationJars
 
-	if j.shouldInstrument(ctx) {
+	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
+
+	// Enable dex compilation for the APEX variants, unless it is disabled explicitly
+	compileDex := Bool(j.dexProperties.Compile_dex) || Bool(j.properties.Installable)
+
+	if j.shouldInstrument(ctx) && (!ctx.Device() || compileDex) {
 		instrumentedOutputFile := j.instrument(ctx, flags, outputFile, jarName, specs)
 		completeStaticLibsImplementationJarsToCombine = depset.New(depset.PREORDER, android.Paths{instrumentedOutputFile}, nil)
 		outputFile = instrumentedOutputFile
@@ -1757,19 +1763,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	j.implementationAndResourcesJar = outputFile
 
-	// Enable dex compilation for the APEX variants, unless it is disabled explicitly
-	compileDex := j.dexProperties.Compile_dex
-	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
-	if j.DirectlyInAnyApex() && !apexInfo.IsForPlatform() {
-		if compileDex == nil {
-			compileDex = proptools.BoolPtr(true)
-		}
-		if j.deviceProperties.Hostdex == nil {
-			j.deviceProperties.Hostdex = proptools.BoolPtr(true)
-		}
-	}
-
-	if ctx.Device() && (Bool(j.properties.Installable) || Bool(compileDex)) {
+	if ctx.Device() && compileDex {
 		if j.hasCode(ctx) {
 			if j.shouldInstrumentStatic(ctx) {
 				j.dexer.extraProguardFlagsFiles = append(j.dexer.extraProguardFlagsFiles,
@@ -2321,7 +2315,10 @@ func (m *Module) getSdkLinkType(ctx android.BaseModuleContext, name string) (ret
 		"stable.core.platform.api.stubs",
 		"stub-annotations", "private-stub-annotations-jar",
 		"core-lambda-stubs",
-		"core-generated-annotation-stubs":
+		"core-generated-annotation-stubs",
+		// jacocoagent only uses core APIs, but has to specify a non-core sdk_version so it can use
+		// a prebuilt SDK to avoid circular dependencies when it statically included in the bootclasspath.
+		"jacocoagent":
 		return javaCore, true
 	case android.SdkPublic.DefaultJavaLibraryName():
 		return javaSdk, true
