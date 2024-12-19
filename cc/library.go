@@ -738,7 +738,7 @@ type libraryInterface interface {
 	// Write LOCAL_ADDITIONAL_DEPENDENCIES for ABI diff
 	androidMkWriteAdditionalDependenciesForSourceAbiDiff(w io.Writer)
 
-	availableFor(string) bool
+        apexAvailable() []string
 	isLibraryQiifaEnabled() bool
 	loadQiifaMetadata(ctx android.OutgoingTransitionContext)
 
@@ -1984,17 +1984,15 @@ func (library *libraryDecorator) isLatestStubVersion() bool {
 	return library.MutatedProperties.IsLatestVersion
 }
 
-func (library *libraryDecorator) availableFor(what string) bool {
+func (library *libraryDecorator) apexAvailable() []string {
 	var list []string
 	if library.static() {
 		list = library.StaticProperties.Static.Apex_available
 	} else if library.shared() {
 		list = library.SharedProperties.Shared.Apex_available
 	}
-	if len(list) == 0 {
-		return false
-	}
-	return android.CheckAvailableForApex(what, list)
+
+	return list
 }
 
 func (library *libraryDecorator) installable() *bool {
