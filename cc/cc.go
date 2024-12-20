@@ -519,6 +519,7 @@ type VendorProperties struct {
 type ModuleContextIntf interface {
 	static() bool
 	staticBinary() bool
+	staticLibrary() bool
 	testBinary() bool
 	testLibrary() bool
 	header() bool
@@ -1521,6 +1522,10 @@ func (ctx *moduleContextImpl) static() bool {
 
 func (ctx *moduleContextImpl) staticBinary() bool {
 	return ctx.mod.staticBinary()
+}
+
+func (ctx *moduleContextImpl) staticLibrary() bool {
+	return ctx.mod.staticLibrary()
 }
 
 func (ctx *moduleContextImpl) testBinary() bool {
@@ -3564,6 +3569,15 @@ func (c *Module) static() bool {
 	return false
 }
 
+func (c *Module) staticLibrary() bool {
+	if static, ok := c.linker.(interface {
+		staticLibrary() bool
+	}); ok {
+		return static.staticLibrary()
+	}
+	return false
+}
+
 func (c *Module) staticBinary() bool {
 	if static, ok := c.linker.(interface {
 		staticBinary() bool
@@ -3689,13 +3703,18 @@ func (c *Module) IsInstallableToApex() bool {
 }
 
 func (c *Module) AvailableFor(what string) bool {
+	return android.CheckAvailableForApex(what, c.ApexAvailableFor())
+}
+
+func (c *Module) ApexAvailableFor() []string {
+	list := c.ApexModuleBase.ApexAvailable()
 	if linker, ok := c.linker.(interface {
-		availableFor(string) bool
+		apexAvailable() []string
 	}); ok {
-		return c.ApexModuleBase.AvailableFor(what) || linker.availableFor(what)
-	} else {
-		return c.ApexModuleBase.AvailableFor(what)
+		list = append(list, linker.apexAvailable()...)
 	}
+
+	return android.FirstUniqueStrings(list)
 }
 
 func (c *Module) EverInstallable() bool {
@@ -3753,35 +3772,7 @@ func (c *Module) AndroidMkWriteAdditionalDependenciesForSourceAbiDiff(w io.Write
 var _ android.ApexModule = (*Module)(nil)
 
 // Implements android.ApexModule
-func (c *Module) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Module) bool {
-	depTag := ctx.OtherModuleDependencyTag(dep)
-	libDepTag, isLibDepTag := depTag.(libraryDependencyTag)
-
-	if cc, ok := dep.(*Module); ok {
-		if cc.HasStubsVariants() {
-			if isLibDepTag && libDepTag.shared() {
-				// dynamic dep to a stubs lib crosses APEX boundary
-				return false
-			}
-			if IsRuntimeDepTag(depTag) {
-				// runtime dep to a stubs lib also crosses APEX boundary
-				return false
-			}
-		}
-		if cc.IsLlndk() {
-			return false
-		}
-		if isLibDepTag && c.static() && libDepTag.shared() {
-			// shared_lib dependency from a static lib is considered as crossing
-			// the APEX boundary because the dependency doesn't actually is
-			// linked; the dependency is used only during the compilation phase.
-			return false
-		}
-
-		if isLibDepTag && libDepTag.excludeInApex {
-			return false
-		}
-	}
+func (c *Module) OutgoingDepIsInSameApex(depTag blueprint.DependencyTag) bool {
 	if depTag == stubImplDepTag {
 		// We don't track from an implementation library to its stubs.
 		return false
@@ -3792,6 +3783,40 @@ func (c *Module) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Modu
 		// APEX.
 		return false
 	}
+
+	libDepTag, isLibDepTag := depTag.(libraryDependencyTag)
+	if isLibDepTag && c.static() && libDepTag.shared() {
+		// shared_lib dependency from a static lib is considered as crossing
+		// the APEX boundary because the dependency doesn't actually is
+		// linked; the dependency is used only during the compilation phase.
+		return false
+	}
+
+	if isLibDepTag && libDepTag.excludeInApex {
+		return false
+	}
+
+	return true
+}
+
+func (c *Module) IncomingDepIsInSameApex(depTag blueprint.DependencyTag) bool {
+	if c.HasStubsVariants() {
+		if IsSharedDepTag(depTag) {
+			// dynamic dep to a stubs lib crosses APEX boundary
+			return false
+		}
+		if IsRuntimeDepTag(depTag) {
+			// runtime dep to a stubs lib also crosses APEX boundary
+			return false
+		}
+		if IsHeaderDepTag(depTag) {
+			return false
+		}
+	}
+	if c.IsLlndk() {
+		return false
+	}
+
 	return true
 }
 
