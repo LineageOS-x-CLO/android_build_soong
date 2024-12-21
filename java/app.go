@@ -1263,7 +1263,10 @@ func collectJniDeps(ctx android.ModuleContext,
 
 func (a *AndroidApp) WalkPayloadDeps(ctx android.BaseModuleContext, do android.PayloadDepsCallback) {
 	ctx.WalkDeps(func(child, parent android.Module) bool {
-		isExternal := !a.DepIsInSameApex(ctx, child)
+		// TODO(ccross): Should this use android.DepIsInSameApex?  Right now it is applying the android app
+		// heuristics to every transitive dependency, when it should probably be using the heuristics of the
+		// immediate parent.
+		isExternal := !a.OutgoingDepIsInSameApex(ctx.OtherModuleDependencyTag(child))
 		if am, ok := child.(android.ApexModule); ok {
 			if !do(ctx, parent, am, isExternal) {
 				return false
@@ -1279,7 +1282,7 @@ func (a *AndroidApp) buildAppDependencyInfo(ctx android.ModuleContext) {
 	}
 
 	depsInfo := android.DepNameToDepInfoMap{}
-	a.WalkPayloadDeps(ctx, func(ctx android.BaseModuleContext, from blueprint.Module, to android.ApexModule, externalDep bool) bool {
+	a.WalkPayloadDeps(ctx, func(ctx android.BaseModuleContext, from android.Module, to android.ApexModule, externalDep bool) bool {
 		depName := to.Name()
 
 		// Skip dependencies that are only available to APEXes; they are developed with updatability
@@ -1340,11 +1343,11 @@ func (a *AndroidApp) getCertString(ctx android.BaseModuleContext) string {
 	return a.overridableAppProperties.Certificate.GetOrDefault(ctx, "")
 }
 
-func (a *AndroidApp) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Module) bool {
-	if IsJniDepTag(ctx.OtherModuleDependencyTag(dep)) {
+func (a *AndroidApp) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
+	if IsJniDepTag(tag) {
 		return true
 	}
-	return a.Library.DepIsInSameApex(ctx, dep)
+	return a.Library.OutgoingDepIsInSameApex(tag)
 }
 
 func (a *AndroidApp) Privileged() bool {
