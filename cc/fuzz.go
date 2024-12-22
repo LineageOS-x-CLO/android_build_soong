@@ -343,6 +343,8 @@ func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPa
 	fuzzPackagedModule.CorpusIntermediateDir = intermediateDir
 
 	fuzzPackagedModule.Data = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Data)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_data)...)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_first_data)...)
 	intermediateDir = android.PathForModuleOut(ctx, "data")
 
 	// Create one rule per file to avoid MAX_ARG_STRLEN hardlimit.
