@@ -189,8 +189,6 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	if len(deviceTargets) > 1 {
 		makeVarsToolchain(ctx, "2ND_", deviceTargets[1])
 	}
-
-	makeLlndkVars(ctx)
 }
 
 func sdclangMakeVars(ctx android.MakeVarsContext) {
