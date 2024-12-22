@@ -15,11 +15,11 @@
 package android
 
 import (
-	"github.com/google/blueprint/depset"
 	"sort"
 	"strings"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -57,8 +57,8 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 	var allDepOutputFiles Paths
 	var allDepMetadataDepSets []depset.DepSet[Path]
 
-	ctx.VisitDirectDeps(func(dep Module) {
-		if !dep.Enabled(ctx) {
+	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
+		if !OtherModuleProviderOrDefault(ctx, dep, CommonModuleInfoKey).Enabled {
 			return
 		}
 
@@ -74,7 +74,7 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 
 		if info, ok := OtherModuleProvider(ctx, dep, LicenseMetadataProvider); ok {
 			allDepMetadataFiles = append(allDepMetadataFiles, info.LicenseMetadataPath)
-			if isContainer || isInstallDepNeeded(dep, ctx.OtherModuleDependencyTag(dep)) {
+			if isContainer || isInstallDepNeeded(ctx, dep) {
 				allDepMetadataDepSets = append(allDepMetadataDepSets, info.LicenseMetadataDepSet)
 			}
 
