@@ -599,12 +599,14 @@ func (f *filesystemCreator) createVendorBuildProp(ctx android.LoadHookContext) {
 		Stem           *string
 		Product_config *string
 		Android_info   *string
+		Licenses       []string
 	}{
 		Name:           proptools.StringPtr(generatedModuleName(ctx.Config(), "vendor-build.prop")),
 		Vendor:         proptools.BoolPtr(true),
 		Stem:           proptools.StringPtr("build.prop"),
 		Product_config: proptools.StringPtr(":product_config"),
 		Android_info:   proptools.StringPtr(":" + androidInfoProp.Name()),
+		Licenses:       []string{"Android-Apache-2.0"},
 	}
 	vendorBuildProp := ctx.CreateModule(
 		android.BuildPropFactory,
@@ -763,8 +765,9 @@ func generateFsProps(ctx android.EarlyModuleContext, partitionType string) (*fil
 	}
 
 	fsProps.Is_auto_generated = proptools.BoolPtr(true)
-	// TODO(b/381120092): Verify mount_point for system partition
-	fsProps.Mount_point = proptools.StringPtr(partitionType)
+	if partitionType != "system" {
+		fsProps.Mount_point = proptools.StringPtr(partitionType)
+	}
 
 	partitionSpecificFsProps(ctx, fsProps, partitionVars, partitionType)
 

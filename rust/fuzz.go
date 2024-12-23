@@ -122,7 +122,7 @@ func (fuzzer *fuzzDecorator) compile(ctx ModuleContext, flags Flags, deps PathDe
 	return out
 }
 
-func (fuzzer *fuzzDecorator) stdLinkage(ctx *depsContext) RustLinkage {
+func (fuzzer *fuzzDecorator) stdLinkage(device bool) RustLinkage {
 	return RlibLinkage
 }
 
@@ -137,7 +137,7 @@ func (fuzz *fuzzDecorator) install(ctx ModuleContext) {
 		"fuzz", ctx.Target().Arch.ArchType.String(), ctx.ModuleName())
 	fuzz.binaryDecorator.baseCompiler.install(ctx)
 
-	fuzz.fuzzPackagedModule = cc.PackageFuzzModule(ctx, fuzz.fuzzPackagedModule, pctx)
+	fuzz.fuzzPackagedModule = cc.PackageFuzzModule(ctx, fuzz.fuzzPackagedModule)
 
 	installBase := "fuzz"
 
