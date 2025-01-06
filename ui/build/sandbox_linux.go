@@ -34,14 +34,14 @@ type Sandbox struct {
 var (
 	noSandbox    = Sandbox{}
 	basicSandbox = Sandbox{
-		Enabled: false,
+		Enabled: true,
 	}
 
 	dumpvarsSandbox = basicSandbox
 	katiSandbox     = basicSandbox
 	soongSandbox    = basicSandbox
 	ninjaSandbox    = Sandbox{
-		Enabled:              false,
+		Enabled:              true,
 		DisableWhenUsingGoma: true,
 
 		AllowBuildBrokenUsesNetwork: true,
