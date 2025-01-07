@@ -407,6 +407,18 @@ func NewConfig(ctx Context, args ...string) Config {
 		"llvm-binutils-stable/llvm-symbolizer")
 	ret.environ.Set("ASAN_SYMBOLIZER_PATH", ret.sandboxPath(wd, absPath(ctx, symbolizerPath)))
 
+	sdclangConfigAOSP := os.Getenv("SDCLANG_CONFIG_AOSP")
+	ret.environ.Set("SDCLANG_CONFIG_AOSP", ret.sandboxPath(wd, absPath(ctx, sdclangConfigAOSP)))
+
+	sdclangConfig := os.Getenv("SDCLANG_CONFIG")
+	ret.environ.Set("SDCLANG_CONFIG", ret.sandboxPath(wd, absPath(ctx, sdclangConfig)))
+
+	sdclangAEConfig := os.Getenv("SDCLANG_AE_CONFIG")
+	ret.environ.Set("SDCLANG_AE_CONFIG", ret.sandboxPath(wd, absPath(ctx, sdclangAEConfig)))
+
+	qiifaBuildConfig := os.Getenv("QIIFA_BUILD_CONFIG")
+	ret.environ.Set("QIIFA_BUILD_CONFIG", ret.sandboxPath(wd, absPath(ctx, qiifaBuildConfig)))
+
 	// Precondition: the current directory is the top of the source tree
 	checkTopDir(ctx)
 
