@@ -1475,12 +1475,13 @@ func (m *ModuleBase) EffectiveLicenseFiles() Paths {
 func (m *ModuleBase) computeInstallDeps(ctx ModuleContext) ([]depset.DepSet[InstallPath], []depset.DepSet[PackagingSpec]) {
 	var installDeps []depset.DepSet[InstallPath]
 	var packagingSpecs []depset.DepSet[PackagingSpec]
-	ctx.VisitDirectDeps(func(dep Module) {
-		if isInstallDepNeeded(dep, ctx.OtherModuleDependencyTag(dep)) {
+	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
+		if isInstallDepNeeded(ctx, dep) {
 			// Installation is still handled by Make, so anything hidden from Make is not
 			// installable.
 			info := OtherModuleProviderOrDefault(ctx, dep, InstallFilesProvider)
-			if !dep.IsHideFromMake() && !dep.IsSkipInstall() {
+			commonInfo := OtherModuleProviderOrDefault(ctx, dep, CommonModuleInfoKey)
+			if !commonInfo.HideFromMake && !commonInfo.SkipInstall {
 				installDeps = append(installDeps, info.TransitiveInstallFiles)
 			}
 			// Add packaging deps even when the dependency is not installed so that uninstallable
@@ -1494,13 +1495,13 @@ func (m *ModuleBase) computeInstallDeps(ctx ModuleContext) ([]depset.DepSet[Inst
 
 // isInstallDepNeeded returns true if installing the output files of the current module
 // should also install the output files of the given dependency and dependency tag.
-func isInstallDepNeeded(dep Module, tag blueprint.DependencyTag) bool {
+func isInstallDepNeeded(ctx ModuleContext, dep ModuleProxy) bool {
 	// Don't add a dependency from the platform to a library provided by an apex.
-	if dep.base().commonProperties.UninstallableApexPlatformVariant {
+	if OtherModuleProviderOrDefault(ctx, dep, CommonModuleInfoKey).UninstallableApexPlatformVariant {
 		return false
 	}
 	// Only install modules if the dependency tag is an InstallDepNeeded tag.
-	return IsInstallDepNeededTag(tag)
+	return IsInstallDepNeededTag(ctx.OtherModuleDependencyTag(dep))
 }
 
 func (m *ModuleBase) NoAddressSanitizer() bool {
@@ -1871,6 +1872,15 @@ type CommonModuleInfo struct {
 	SkipAndroidMkProcessing bool
 	BaseModuleName          string
 	CanHaveApexVariants     bool
+	MinSdkVersion           string
+	NotAvailableForPlatform bool
+	// UninstallableApexPlatformVariant is set by MakeUninstallable called by the apex
+	// mutator.  MakeUninstallable also sets HideFromMake.  UninstallableApexPlatformVariant
+	// is used to avoid adding install or packaging dependencies into libraries provided
+	// by apexes.
+	UninstallableApexPlatformVariant bool
+	HideFromMake                     bool
+	SkipInstall                      bool
 }
 
 var CommonModuleInfoKey = blueprint.NewProvider[CommonModuleInfo]()
@@ -2130,18 +2140,34 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	buildComplianceMetadataProvider(ctx, m)
 
 	commonData := CommonModuleInfo{
-		ReplacedByPrebuilt:      m.commonProperties.ReplacedByPrebuilt,
-		CompileTarget:           m.commonProperties.CompileTarget,
-		SkipAndroidMkProcessing: shouldSkipAndroidMkProcessing(ctx, m),
-		BaseModuleName:          m.BaseModuleName(),
+		ReplacedByPrebuilt:               m.commonProperties.ReplacedByPrebuilt,
+		CompileTarget:                    m.commonProperties.CompileTarget,
+		SkipAndroidMkProcessing:          shouldSkipAndroidMkProcessing(ctx, m),
+		BaseModuleName:                   m.BaseModuleName(),
+		UninstallableApexPlatformVariant: m.commonProperties.UninstallableApexPlatformVariant,
+		HideFromMake:                     m.commonProperties.HideFromMake,
+		SkipInstall:                      m.commonProperties.SkipInstall,
 	}
+	if mm, ok := m.module.(interface {
+		MinSdkVersion(ctx EarlyModuleContext) ApiLevel
+	}); ok {
+		ver := mm.MinSdkVersion(ctx)
+		if !ver.IsNone() {
+			commonData.MinSdkVersion = ver.String()
+		}
+	} else if mm, ok := m.module.(interface{ MinSdkVersion() string }); ok {
+		commonData.MinSdkVersion = mm.MinSdkVersion()
+	}
+
 	if m.commonProperties.ForcedDisabled {
 		commonData.Enabled = false
 	} else {
 		commonData.Enabled = m.commonProperties.Enabled.GetOrDefault(m.ConfigurableEvaluator(ctx), !m.Os().DefaultDisabled)
 	}
-	am, ok := m.module.(ApexModule)
-	commonData.CanHaveApexVariants = ok && am.CanHaveApexVariants()
+	if am, ok := m.module.(ApexModule); ok {
+		commonData.CanHaveApexVariants = am.CanHaveApexVariants()
+		commonData.NotAvailableForPlatform = am.NotAvailableForPlatform()
+	}
 	SetProvider(ctx, CommonModuleInfoKey, commonData)
 	if p, ok := m.module.(PrebuiltInterface); ok && p.Prebuilt() != nil {
 		SetProvider(ctx, PrebuiltModuleProviderKey, PrebuiltModuleProviderData{})
@@ -2716,6 +2742,7 @@ func outputFilesForModule(ctx PathContext, module Module, tag string) (Paths, er
 
 	if octx, ok := ctx.(OutputFilesProviderModuleContext); ok {
 		if octx.EqualModules(octx.Module(), module) {
+			// It is the current module, we can access the srcs through interface
 			if sourceFileProducer, ok := module.(SourceFileProducer); ok {
 				return sourceFileProducer.Srcs(), nil
 			}

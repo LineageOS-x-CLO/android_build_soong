@@ -295,7 +295,7 @@ func (fuzzBin *fuzzBinary) install(ctx ModuleContext, file android.Path) {
 		installBase, ctx.Target().Arch.ArchType.String(), ctx.ModuleName())
 	fuzzBin.binaryDecorator.baseInstaller.install(ctx, file)
 
-	fuzzBin.fuzzPackagedModule = PackageFuzzModule(ctx, fuzzBin.fuzzPackagedModule, pctx)
+	fuzzBin.fuzzPackagedModule = PackageFuzzModule(ctx, fuzzBin.fuzzPackagedModule)
 
 	// Grab the list of required shared libraries.
 	fuzzBin.sharedLibraries, _ = CollectAllSharedDependencies(ctx)
@@ -327,7 +327,7 @@ func (fuzzBin *fuzzBinary) install(ctx ModuleContext, file android.Path) {
 	}
 }
 
-func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPackagedModule, pctx android.PackageContext) fuzz.FuzzPackagedModule {
+func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPackagedModule) fuzz.FuzzPackagedModule {
 	fuzzPackagedModule.Corpus = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Corpus)
 	fuzzPackagedModule.Corpus = append(fuzzPackagedModule.Corpus, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_corpus)...)
 	intermediateDir := android.PathForModuleOut(ctx, "corpus")
@@ -343,6 +343,8 @@ func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPa
 	fuzzPackagedModule.CorpusIntermediateDir = intermediateDir
 
 	fuzzPackagedModule.Data = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Data)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_data)...)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_first_data)...)
 	intermediateDir = android.PathForModuleOut(ctx, "data")
 
 	// Create one rule per file to avoid MAX_ARG_STRLEN hardlimit.
@@ -640,7 +642,7 @@ func CollectAllSharedDependencies(ctx android.ModuleContext) (android.RuleBuilde
 	ctx.WalkDeps(func(child, parent android.Module) bool {
 
 		// If this is a Rust module which is not rust_ffi_shared, we still want to bundle any transitive
-		// shared dependencies (even for rust_ffi_rlib or rust_ffi_static)
+		// shared dependencies (even for rust_ffi_static)
 		if rustmod, ok := child.(LinkableInterface); ok && rustmod.RustLibraryInterface() && !rustmod.Shared() {
 			if recursed[ctx.OtherModuleName(child)] {
 				return false

@@ -237,7 +237,7 @@ func RustTestHostFactory() android.Module {
 	return module.Init()
 }
 
-func (test *testDecorator) stdLinkage(ctx *depsContext) RustLinkage {
+func (test *testDecorator) stdLinkage(device bool) RustLinkage {
 	return RlibLinkage
 }
 

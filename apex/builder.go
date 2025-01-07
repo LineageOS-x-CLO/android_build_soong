@@ -70,7 +70,7 @@ func init() {
 	pctx.HostBinToolVariable("extract_apks", "extract_apks")
 	pctx.HostBinToolVariable("make_f2fs", "make_f2fs")
 	pctx.HostBinToolVariable("sload_f2fs", "sload_f2fs")
-	pctx.HostBinToolVariable("make_erofs", "make_erofs")
+	pctx.HostBinToolVariable("make_erofs", "mkfs.erofs")
 	pctx.HostBinToolVariable("apex_compression_tool", "apex_compression_tool")
 	pctx.HostBinToolVariable("dexdeps", "dexdeps")
 	pctx.HostBinToolVariable("apex_sepolicy_tests", "apex_sepolicy_tests")
@@ -275,6 +275,12 @@ func (a *apexBundle) buildAconfigFiles(ctx android.ModuleContext) []apexFile {
 		})
 		files = append(files, newApexFile(ctx, apexAconfigFile, "aconfig_flags", "etc", etc, nil))
 
+		// To enable fingerprint, we need to have v2 storage files. The default version is 1.
+		storageFilesVersion := 1
+		if ctx.Config().ReleaseFingerprintAconfigPackages() {
+			storageFilesVersion = 2
+		}
+
 		for _, info := range createStorageInfo {
 			outputFile := android.PathForModuleOut(ctx, info.Output_file)
 			ctx.Build(pctx, android.BuildParams{
@@ -286,6 +292,7 @@ func (a *apexBundle) buildAconfigFiles(ctx android.ModuleContext) []apexFile {
 					"container":   ctx.ModuleName(),
 					"file_type":   info.File_type,
 					"cache_files": android.JoinPathsWithPrefix(aconfigFiles, "--cache "),
+					"version":     strconv.Itoa(storageFilesVersion),
 				},
 			})
 			files = append(files, newApexFile(ctx, outputFile, info.File_type, "etc", etc, nil))
@@ -337,8 +344,8 @@ func (a *apexBundle) buildManifest(ctx android.ModuleContext, provideNativeLibs,
 		if err != nil {
 			ctx.ModuleErrorf("expected RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION to be an int, but got %s", defaultVersion)
 		}
-		if defaultVersionInt%10 != 0 {
-			ctx.ModuleErrorf("expected RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION to end in a zero, but got %s", defaultVersion)
+		if defaultVersionInt%10 != 0 && defaultVersionInt%10 != 9 {
+			ctx.ModuleErrorf("expected RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION to end in a zero or a nine, but got %s", defaultVersion)
 		}
 		variantVersion := []rune(*a.properties.Variant_version)
 		if len(variantVersion) != 1 || variantVersion[0] < '0' || variantVersion[0] > '9' {
@@ -544,7 +551,7 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 
 	imageDir := android.PathForModuleOut(ctx, "image"+suffix)
 
-	installSymbolFiles := (!ctx.Config().KatiEnabled() || a.ExportedToMake()) && a.installable()
+	installSymbolFiles := (ctx.Config().KatiEnabled() && a.ExportedToMake()) && a.installable()
 
 	// set of dependency module:location mappings
 	installMapSet := make(map[string]bool)
@@ -1037,7 +1044,7 @@ func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
 	}
 
 	depInfos := android.DepNameToDepInfoMap{}
-	a.WalkPayloadDeps(ctx, func(ctx android.BaseModuleContext, from blueprint.Module, to android.ApexModule, externalDep bool) bool {
+	a.WalkPayloadDepsProxy(ctx, func(ctx android.BaseModuleContext, from, to android.ModuleProxy, externalDep bool) bool {
 		if from.Name() == to.Name() {
 			// This can happen for cc.reuseObjTag. We are not interested in tracking this.
 			// As soon as the dependency graph crosses the APEX boundary, don't go further.
@@ -1046,7 +1053,7 @@ func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
 
 		// Skip dependencies that are only available to APEXes; they are developed with updatability
 		// in mind and don't need manual approval.
-		if to.(android.ApexModule).NotAvailableForPlatform() {
+		if android.OtherModuleProviderOrDefault(ctx, to, android.CommonModuleInfoKey).NotAvailableForPlatform {
 			return !externalDep
 		}
 
@@ -1064,16 +1071,8 @@ func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
 			depInfos[to.Name()] = info
 		} else {
 			toMinSdkVersion := "(no version)"
-			if m, ok := to.(interface {
-				MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel
-			}); ok {
-				if v := m.MinSdkVersion(ctx); !v.IsNone() {
-					toMinSdkVersion = v.String()
-				}
-			} else if m, ok := to.(interface{ MinSdkVersion() string }); ok {
-				// TODO(b/175678607) eliminate the use of MinSdkVersion returning
-				// string
-				if v := m.MinSdkVersion(); v != "" {
+			if info, ok := android.OtherModuleProvider(ctx, to, android.CommonModuleInfoKey); ok {
+				if v := info.MinSdkVersion; v != "" {
 					toMinSdkVersion = v
 				}
 			}

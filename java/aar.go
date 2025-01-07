@@ -1046,6 +1046,8 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 		AconfigTextFiles: aconfigTextFilePaths,
 	})
 
+	android.SetProvider(ctx, AndroidLibraryInfoProvider, AndroidLibraryInfo{})
+
 	a.setOutputFiles(ctx)
 }
 
@@ -1574,6 +1576,8 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		JniPackages: a.jniPackages,
 	})
 
+	android.SetProvider(ctx, AndroidLibraryInfoProvider, AndroidLibraryInfo{})
+
 	ctx.SetOutputFiles([]android.Path{a.implementationAndResourcesJarFile}, "")
 	ctx.SetOutputFiles([]android.Path{a.aarPath}, ".aar")
 }
@@ -1603,8 +1607,8 @@ var _ UsesLibraryDependency = (*AARImport)(nil)
 var _ android.ApexModule = (*AARImport)(nil)
 
 // Implements android.ApexModule
-func (a *AARImport) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Module) bool {
-	return a.depIsInSameApex(ctx, dep)
+func (a *AARImport) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
+	return a.depIsInSameApex(tag)
 }
 
 // Implements android.ApexModule
