@@ -224,6 +224,25 @@ func (b *bootimg) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	ctx.SetOutputFiles([]android.Path{output}, "")
 	b.output = output
+
+	// Set the Filesystem info of the ramdisk dependency.
+	// `android_device` will use this info to package `target_files.zip`
+	if ramdisk := proptools.String(b.properties.Ramdisk_module); ramdisk != "" {
+		ramdiskModule := ctx.GetDirectDepWithTag(ramdisk, bootimgRamdiskDep)
+		fsInfo, _ := android.OtherModuleProvider(ctx, ramdiskModule, FilesystemProvider)
+		android.SetProvider(ctx, FilesystemProvider, fsInfo)
+	}
+
+	// Set BootimgInfo for building target_files.zip
+	android.SetProvider(ctx, BootimgInfoProvider, BootimgInfo{
+		Cmdline: b.properties.Cmdline,
+	})
+}
+
+var BootimgInfoProvider = blueprint.NewProvider[BootimgInfo]()
+
+type BootimgInfo struct {
+	Cmdline []string
 }
 
 func (b *bootimg) buildBootImage(ctx android.ModuleContext, kernel android.Path) android.Path {
@@ -372,6 +391,10 @@ func (b *bootimg) addAvbFooter(ctx android.ModuleContext, unsignedImage android.
 		cmd.FlagWithArg("--rollback_index ", strconv.FormatInt(*b.properties.Avb_rollback_index, 10))
 	}
 
+	if !ctx.Config().KatiEnabled() {
+		copyImageFileToProductOut(ctx, builder, b.bootImageType.String(), output)
+	}
+
 	builder.Build("add_avb_footer", fmt.Sprintf("Adding avb footer to %s", b.BaseModuleName()))
 	return output
 }
@@ -386,6 +409,10 @@ func (b *bootimg) signImage(ctx android.ModuleContext, unsignedImage android.Pat
 		Input(propFile).
 		Implicits(toolDeps).
 		Output(output)
+
+	if !ctx.Config().KatiEnabled() {
+		copyImageFileToProductOut(ctx, builder, b.bootImageType.String(), output)
+	}
 
 	builder.Build("sign_bootimg", fmt.Sprintf("Signing %s", b.BaseModuleName()))
 	return output
