@@ -741,22 +741,31 @@ func (c *androidMkSingleton) soongOnlyBuildActions(ctx SingletonContext, mods []
 	distMkFile := absolutePath(filepath.Join(ctx.Config().katiPackageMkDir(), "dist.mk"))
 
 	var goalOutputPairs []string
-	var buf strings.Builder
-	buf.WriteString("DIST_SRC_DST_PAIRS := $(sort")
+	var srcDstPairs []string
 	for _, contributions := range allDistContributions {
 		for _, copiesForGoal := range contributions.copiesForGoals {
 			goals := strings.Fields(copiesForGoal.goals)
 			for _, copy := range copiesForGoal.copies {
 				for _, goal := range goals {
-					goalOutputPairs = append(goalOutputPairs, fmt.Sprintf("%s:%s", goal, copy.dest))
+					goalOutputPairs = append(goalOutputPairs, fmt.Sprintf(" %s:%s", goal, copy.dest))
 				}
-				buf.WriteString(fmt.Sprintf(" %s:%s", copy.from.String(), copy.dest))
+				srcDstPairs = append(srcDstPairs, fmt.Sprintf(" %s:%s", copy.from.String(), copy.dest))
 			}
 		}
 	}
-	buf.WriteString(")\nDIST_GOAL_OUTPUT_PAIRS := $(sort ")
-	buf.WriteString(strings.Join(goalOutputPairs, " "))
-	buf.WriteString(")\n")
+	// There are duplicates in the lists that we need to remove
+	goalOutputPairs = SortedUniqueStrings(goalOutputPairs)
+	srcDstPairs = SortedUniqueStrings(srcDstPairs)
+	var buf strings.Builder
+	buf.WriteString("DIST_SRC_DST_PAIRS :=")
+	for _, srcDstPair := range srcDstPairs {
+		buf.WriteString(srcDstPair)
+	}
+	buf.WriteString("\nDIST_GOAL_OUTPUT_PAIRS :=")
+	for _, goalOutputPair := range goalOutputPairs {
+		buf.WriteString(goalOutputPair)
+	}
+	buf.WriteString("\n")
 
 	writeValueIfChanged(ctx, distMkFile, buf.String())
 }
@@ -786,10 +795,20 @@ func getDistContributionsFromMods(ctx fillInEntriesContext, mods []blueprint.Mod
 			continue
 		}
 		if info, ok := OtherModuleProvider(ctx, mod, AndroidMkInfoProvider); ok {
+			// Deep copy the provider info since we need to modify the info later
+			info := deepCopyAndroidMkProviderInfo(info)
+			info.PrimaryInfo.fillInEntries(ctx, mod)
+			if info.PrimaryInfo.disabled() {
+				continue
+			}
 			if contribution := info.PrimaryInfo.getDistContributions(ctx, mod); contribution != nil {
 				allDistContributions = append(allDistContributions, *contribution)
 			}
 			for _, ei := range info.ExtraInfo {
+				ei.fillInEntries(ctx, mod)
+				if ei.disabled() {
+					continue
+				}
 				if contribution := ei.getDistContributions(ctx, mod); contribution != nil {
 					allDistContributions = append(allDistContributions, *contribution)
 				}
@@ -804,6 +823,9 @@ func getDistContributionsFromMods(ctx fillInEntriesContext, mods []blueprint.Mod
 				}
 
 				data.fillInData(ctx, mod)
+				if data.Entries.disabled() {
+					continue
+				}
 				if contribution := data.Entries.getDistContributions(mod); contribution != nil {
 					allDistContributions = append(allDistContributions, *contribution)
 				}
@@ -811,6 +833,9 @@ func getDistContributionsFromMods(ctx fillInEntriesContext, mods []blueprint.Mod
 				entriesList := x.AndroidMkEntries()
 				for _, entries := range entriesList {
 					entries.fillInEntries(ctx, mod)
+					if entries.disabled() {
+						continue
+					}
 					if contribution := entries.getDistContributions(mod); contribution != nil {
 						allDistContributions = append(allDistContributions, *contribution)
 					}

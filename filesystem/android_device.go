@@ -54,15 +54,25 @@ type PartitionNameProperties struct {
 	Odm_dlkm_partition_name *string
 }
 
+type DeviceProperties struct {
+	// Path to the prebuilt bootloader that would be copied to PRODUCT_OUT
+	Bootloader *string `android:"path"`
+}
+
 type androidDevice struct {
 	android.ModuleBase
 
 	partitionProps PartitionNameProperties
+
+	deviceProps DeviceProperties
+
+	// copyToProductOutTimestamp for copying necessary files to PRODUCT_OUT
+	copyToProductOutTimestamp android.WritablePath
 }
 
 func AndroidDeviceFactory() android.Module {
 	module := &androidDevice{}
-	module.AddProperties(&module.partitionProps)
+	module.AddProperties(&module.partitionProps, &module.deviceProps)
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibFirst)
 	return module
 }
@@ -98,6 +108,24 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	}
 }
 
+func (a *androidDevice) copyToProductOut(ctx android.ModuleContext, builder *android.RuleBuilder, src android.Path, dest string) {
+	destPath := android.PathForModuleInPartitionInstall(ctx, "").Join(ctx, dest)
+	builder.Command().Text("rsync").Flag("-a").Flag("--checksum").Input(src).Text(destPath.String())
+}
+
+func (a *androidDevice) copyFilesToProductOut(ctx android.ModuleContext) {
+	a.copyToProductOutTimestamp = android.PathForModuleOut(ctx, "timestamp")
+	builder := android.NewRuleBuilder(pctx, ctx)
+	builder.Command().Text("touch").Output(a.copyToProductOutTimestamp)
+
+	// List all individual files to be copied to PRODUCT_OUT here
+	if a.deviceProps.Bootloader != nil {
+		a.copyToProductOut(ctx, builder, android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Bootloader)), "bootloader")
+	}
+
+	builder.Build("copy_to_product_out", "Copy files to PRODUCT_OUT")
+}
+
 func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.buildTargetFilesZip(ctx)
 	var deps []android.Path
@@ -111,11 +139,15 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		}
 		deps = append(deps, imageOutput.DefaultOutputFiles[0])
 	})
+
+	a.copyFilesToProductOut(ctx)
+
 	out := android.PathForModuleOut(ctx, "out")
 	ctx.Build(pctx, android.BuildParams{
-		Rule:      android.Touch,
-		Output:    out,
-		Implicits: deps,
+		Rule:       android.Touch,
+		Output:     out,
+		Implicits:  deps,
+		Validation: a.copyToProductOutTimestamp,
 	})
 	ctx.SetOutputFiles(android.Paths{out}, "")
 	ctx.CheckbuildFile(out)
@@ -169,17 +201,34 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext) {
 			Implicit(fsInfo.Output) // so that the staging dir is built
 
 	}
-	// Copy cmdline files of boot images
+	// Copy cmdline, kernel etc. files of boot images
 	if a.partitionProps.Vendor_boot_partition_name != nil {
 		bootImg := ctx.GetDirectDepWithTag(proptools.String(a.partitionProps.Vendor_boot_partition_name), filesystemDepTag)
 		bootImgInfo, _ := android.OtherModuleProvider(ctx, bootImg, BootimgInfoProvider)
-		builder.Command().Textf("echo %s > %s/%s/cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir, "VENDOR_BOOT")
-		builder.Command().Textf("echo %s > %s/%s/vendor_cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir, "VENDOR_BOOT")
+		builder.Command().Textf("echo %s > %s/VENDOR_BOOT/cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir)
+		builder.Command().Textf("echo %s > %s/VENDOR_BOOT/vendor_cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir)
+		if bootImgInfo.Dtb != nil {
+			builder.Command().Textf("cp %s %s/VENDOR_BOOT/dtb", bootImgInfo.Dtb, targetFilesDir)
+		}
+		if bootImgInfo.Bootconfig != nil {
+			builder.Command().Textf("cp %s %s/VENDOR_BOOT/vendor_bootconfig", bootImgInfo.Bootconfig, targetFilesDir)
+		}
 	}
 	if a.partitionProps.Boot_partition_name != nil {
 		bootImg := ctx.GetDirectDepWithTag(proptools.String(a.partitionProps.Boot_partition_name), filesystemDepTag)
 		bootImgInfo, _ := android.OtherModuleProvider(ctx, bootImg, BootimgInfoProvider)
-		builder.Command().Textf("echo %s > %s/%s/cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir, "BOOT")
+		builder.Command().Textf("echo %s > %s/BOOT/cmdline", proptools.ShellEscape(strings.Join(bootImgInfo.Cmdline, " ")), targetFilesDir)
+		if bootImgInfo.Dtb != nil {
+			builder.Command().Textf("cp %s %s/BOOT/dtb", bootImgInfo.Dtb, targetFilesDir)
+		}
+		if bootImgInfo.Kernel != nil {
+			builder.Command().Textf("cp %s %s/BOOT/kernel", bootImgInfo.Kernel, targetFilesDir)
+			// Even though kernel is not used to build vendor_boot, copy the kernel to VENDOR_BOOT to match the behavior of make packaging.
+			builder.Command().Textf("cp %s %s/VENDOR_BOOT/kernel", bootImgInfo.Kernel, targetFilesDir)
+		}
+		if bootImgInfo.Bootconfig != nil {
+			builder.Command().Textf("cp %s %s/BOOT/bootconfig", bootImgInfo.Bootconfig, targetFilesDir)
+		}
 	}
 
 	builder.Command().
