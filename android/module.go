@@ -2488,6 +2488,8 @@ func (e configurationEvalutor) EvaluateConfiguration(condition proptools.Configu
 			return proptools.ConfigurableValueBool(ctx.Config().BuildFromTextStub())
 		case "debuggable":
 			return proptools.ConfigurableValueBool(ctx.Config().Debuggable())
+		case "eng":
+			return proptools.ConfigurableValueBool(ctx.Config().Eng())
 		case "use_debug_art":
 			// TODO(b/234351700): Remove once ART does not have separated debug APEX
 			return proptools.ConfigurableValueBool(ctx.Config().UseDebugArt())
