@@ -161,13 +161,14 @@ func (f *filesystemCreator) createInternalModules(ctx android.LoadHookContext) {
 		f.properties.Vbmeta_partition_names = append(f.properties.Vbmeta_partition_names, x.partitionName)
 	}
 
+	var superImageSubpartitions []string
 	if buildingSuperImage(partitionVars) {
-		createSuperImage(ctx, finalSoongGeneratedPartitions, partitionVars)
+		superImageSubpartitions = createSuperImage(ctx, finalSoongGeneratedPartitions, partitionVars)
 		f.properties.Super_image = ":" + generatedModuleNameForPartition(ctx.Config(), "super")
 	}
 
 	ctx.Config().Get(fsGenStateOnceKey).(*FsGenState).soongGeneratedPartitions = finalSoongGeneratedPartitions
-	f.createDeviceModule(ctx, finalSoongGeneratedPartitions, f.properties.Vbmeta_module_names)
+	f.createDeviceModule(ctx, finalSoongGeneratedPartitions, f.properties.Vbmeta_module_names, superImageSubpartitions)
 }
 
 func generatedModuleName(cfg android.Config, suffix string) string {
@@ -206,6 +207,7 @@ func (f *filesystemCreator) createDeviceModule(
 	ctx android.LoadHookContext,
 	generatedPartitionTypes []string,
 	vbmetaPartitions []string,
+	superImageSubPartitions []string,
 ) {
 	baseProps := &struct {
 		Name         *string
@@ -217,19 +219,22 @@ func (f *filesystemCreator) createDeviceModule(
 
 	// Currently, only the system and system_ext partition module is created.
 	partitionProps := &filesystem.PartitionNameProperties{}
-	if android.InList("system", generatedPartitionTypes) {
+	if f.properties.Super_image != "" {
+		partitionProps.Super_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "super"))
+	}
+	if android.InList("system", generatedPartitionTypes) && !android.InList("system", superImageSubPartitions) {
 		partitionProps.System_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "system"))
 	}
-	if android.InList("system_ext", generatedPartitionTypes) {
+	if android.InList("system_ext", generatedPartitionTypes) && !android.InList("system_ext", superImageSubPartitions) {
 		partitionProps.System_ext_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "system_ext"))
 	}
-	if android.InList("vendor", generatedPartitionTypes) {
+	if android.InList("vendor", generatedPartitionTypes) && !android.InList("vendor", superImageSubPartitions) {
 		partitionProps.Vendor_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "vendor"))
 	}
-	if android.InList("product", generatedPartitionTypes) {
+	if android.InList("product", generatedPartitionTypes) && !android.InList("product", superImageSubPartitions) {
 		partitionProps.Product_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "product"))
 	}
-	if android.InList("odm", generatedPartitionTypes) {
+	if android.InList("odm", generatedPartitionTypes) && !android.InList("odm", superImageSubPartitions) {
 		partitionProps.Odm_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "odm"))
 	}
 	if android.InList("userdata", f.properties.Generated_partition_types) {
@@ -238,13 +243,13 @@ func (f *filesystemCreator) createDeviceModule(
 	if android.InList("recovery", f.properties.Generated_partition_types) {
 		partitionProps.Recovery_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "recovery"))
 	}
-	if android.InList("system_dlkm", f.properties.Generated_partition_types) {
+	if android.InList("system_dlkm", f.properties.Generated_partition_types) && !android.InList("system_dlkm", superImageSubPartitions) {
 		partitionProps.System_dlkm_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "system_dlkm"))
 	}
-	if android.InList("vendor_dlkm", f.properties.Generated_partition_types) {
+	if android.InList("vendor_dlkm", f.properties.Generated_partition_types) && !android.InList("vendor_dlkm", superImageSubPartitions) {
 		partitionProps.Vendor_dlkm_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "vendor_dlkm"))
 	}
-	if android.InList("odm_dlkm", f.properties.Generated_partition_types) {
+	if android.InList("odm_dlkm", f.properties.Generated_partition_types) && !android.InList("odm_dlkm", superImageSubPartitions) {
 		partitionProps.Odm_dlkm_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "odm_dlkm"))
 	}
 	if f.properties.Boot_image != "" {
@@ -369,8 +374,14 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 		fsProps.Security_patch = proptools.StringPtr(partitionVars.OdmSecurityPatch)
 		fsProps.Stem = proptools.StringPtr("odm.img")
 	case "userdata":
-		fsProps.Base_dir = proptools.StringPtr("data")
 		fsProps.Stem = proptools.StringPtr("userdata.img")
+		if vars, ok := partitionVars.PartitionQualifiedVariables["userdata"]; ok {
+			parsed, err := strconv.ParseInt(vars.BoardPartitionSize, 10, 64)
+			if err != nil {
+				panic(fmt.Sprintf("Partition size must be an int, got %s", vars.BoardPartitionSize))
+			}
+			fsProps.Partition_size = &parsed
+		}
 	case "ramdisk":
 		// Following the logic in https://cs.android.com/android/platform/superproject/main/+/c3c5063df32748a8806ce5da5dd0db158eab9ad9:build/make/core/Makefile;l=1307
 		fsProps.Dirs = android.NewSimpleConfigurable([]string{
@@ -817,7 +828,13 @@ func generateFsProps(ctx android.EarlyModuleContext, partitionType string) (*fil
 
 	fsProps.Is_auto_generated = proptools.BoolPtr(true)
 	if partitionType != "system" {
-		fsProps.Mount_point = proptools.StringPtr(partitionType)
+		mountPoint := proptools.StringPtr(partitionType)
+		// https://cs.android.com/android/platform/superproject/main/+/main:build/make/tools/releasetools/build_image.py;l=1012;drc=3f576a753594bad3fc838ccb8b1b72f7efac1d50
+		if partitionType == "userdata" {
+			mountPoint = proptools.StringPtr("data")
+		}
+		fsProps.Mount_point = mountPoint
+
 	}
 
 	partitionSpecificFsProps(ctx, fsProps, partitionVars, partitionType)
