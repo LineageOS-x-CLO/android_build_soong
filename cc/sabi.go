@@ -136,7 +136,7 @@ func classifySourceAbiDump(m *Module) []lsdumpTag {
 		if m.isImplementationForLLNDKPublic() {
 			result = append(result, llndkLsdumpTag)
 		}
-		if m.library.hasStubsVariants() {
+		if m.library.HasStubsVariants() {
 			result = append(result, apexLsdumpTag)
 		}
 		if headerAbiChecker.enabled() {
