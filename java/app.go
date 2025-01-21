@@ -53,12 +53,6 @@ type FlagsPackages struct {
 
 var FlagsPackagesProvider = blueprint.NewProvider[FlagsPackages]()
 
-type AndroidLibraryInfo struct {
-	// Empty for now
-}
-
-var AndroidLibraryInfoProvider = blueprint.NewProvider[AndroidLibraryInfo]()
-
 func RegisterAppBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("android_app", AndroidAppFactory)
 	ctx.RegisterModuleType("android_test", AndroidTestFactory)
@@ -431,8 +425,6 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		EmbeddedJNILibs: embeddedJniLibs,
 	})
 
-	android.SetProvider(ctx, AndroidLibraryInfoProvider, AndroidLibraryInfo{})
-
 	a.requiredModuleNames = a.getRequiredModuleNames(ctx)
 }
 
@@ -682,7 +674,7 @@ func (a *AndroidApp) aaptBuildActions(ctx android.ModuleContext) {
 
 func (a *AndroidApp) proguardBuildActions(ctx android.ModuleContext) {
 	var staticLibProguardFlagFiles android.Paths
-	ctx.VisitDirectDeps(func(m android.Module) {
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
 		depProguardInfo, _ := android.OtherModuleProvider(ctx, m, ProguardSpecInfoProvider)
 		staticLibProguardFlagFiles = append(staticLibProguardFlagFiles, depProguardInfo.UnconditionallyExportedProguardFlags.ToList()...)
 		if ctx.OtherModuleDependencyTag(m) == staticLibTag {
@@ -1175,29 +1167,35 @@ func collectAppDeps(ctx android.ModuleContext, app appDepsInterface,
 			app.SdkVersion(ctx).Kind != android.SdkCorePlatform && !app.RequiresStableAPIs(ctx)
 	}
 	jniLib, prebuiltJniPackages := collectJniDeps(ctx, shouldCollectRecursiveNativeDeps,
-		checkNativeSdkVersion, func(parent, child android.Module) bool {
+		checkNativeSdkVersion, func(parent, child android.ModuleProxy) bool {
 			apkInApex := ctx.Module().(android.ApexModule).NotInPlatform()
-			childLinkable, _ := child.(cc.LinkableInterface)
-			parentLinkable, _ := parent.(cc.LinkableInterface)
-			useStubsOfDep := childLinkable.IsStubs()
-			if apkInApex && parentLinkable != nil {
+			childLinkable, _ := android.OtherModuleProvider(ctx, child, cc.LinkableInfoProvider)
+			parentIsLinkable := false
+			if ctx.EqualModules(ctx.Module(), parent) {
+				parentLinkable, _ := ctx.Module().(cc.LinkableInterface)
+				parentIsLinkable = parentLinkable != nil
+			} else {
+				_, parentIsLinkable = android.OtherModuleProvider(ctx, parent, cc.LinkableInfoProvider)
+			}
+			useStubsOfDep := childLinkable.IsStubs
+			if apkInApex && parentIsLinkable {
 				// APK-in-APEX
 				// If the parent is a linkable interface, use stubs if the dependency edge crosses an apex boundary.
-				useStubsOfDep = useStubsOfDep || (childLinkable.HasStubsVariants() && cc.ShouldUseStubForApex(ctx, parent, child))
+				useStubsOfDep = useStubsOfDep || (childLinkable.HasStubsVariants && cc.ShouldUseStubForApex(ctx, parent, child))
 			}
-			return !childLinkable.IsNdk(ctx.Config()) && !useStubsOfDep
+			return !childLinkable.IsNdk && !useStubsOfDep
 		})
 
 	var certificates []Certificate
 
 	var directImplementationDeps android.Paths
 	var transitiveImplementationDeps []depset.DepSet[android.Path]
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		otherName := ctx.OtherModuleName(module)
 		tag := ctx.OtherModuleDependencyTag(module)
 
 		if tag == certificateTag {
-			if dep, ok := module.(*AndroidAppCertificate); ok {
+			if dep, ok := android.OtherModuleProvider(ctx, module, AndroidAppCertificateInfoProvider); ok {
 				certificates = append(certificates, dep.Certificate)
 			} else {
 				ctx.ModuleErrorf("certificate dependency %q must be an android_app_certificate module", otherName)
@@ -1221,22 +1219,25 @@ func collectAppDeps(ctx android.ModuleContext, app appDepsInterface,
 func collectJniDeps(ctx android.ModuleContext,
 	shouldCollectRecursiveNativeDeps bool,
 	checkNativeSdkVersion bool,
-	filter func(parent, child android.Module) bool) ([]jniLib, android.Paths) {
+	filter func(parent, child android.ModuleProxy) bool) ([]jniLib, android.Paths) {
 	var jniLibs []jniLib
 	var prebuiltJniPackages android.Paths
 	seenModulePaths := make(map[string]bool)
 
-	ctx.WalkDeps(func(module android.Module, parent android.Module) bool {
+	ctx.WalkDepsProxy(func(module, parent android.ModuleProxy) bool {
+		if !android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoKey).Enabled {
+			return false
+		}
 		otherName := ctx.OtherModuleName(module)
 		tag := ctx.OtherModuleDependencyTag(module)
 
 		if IsJniDepTag(tag) || cc.IsSharedDepTag(tag) {
-			if dep, ok := module.(cc.LinkableInterface); ok {
+			if dep, ok := android.OtherModuleProvider(ctx, module, cc.LinkableInfoProvider); ok {
 				if filter != nil && !filter(parent, module) {
 					return false
 				}
 
-				lib := dep.OutputFile()
+				lib := dep.OutputFile
 				if lib.Valid() {
 					path := lib.Path()
 					if seenModulePaths[path.String()] {
@@ -1244,7 +1245,8 @@ func collectJniDeps(ctx android.ModuleContext,
 					}
 					seenModulePaths[path.String()] = true
 
-					if checkNativeSdkVersion && dep.SdkVersion() == "" {
+					commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoKey)
+					if checkNativeSdkVersion && commonInfo.SdkVersion == "" {
 						ctx.PropertyErrorf("jni_libs", "JNI dependency %q uses platform APIs, but this module does not",
 							otherName)
 					}
@@ -1252,11 +1254,11 @@ func collectJniDeps(ctx android.ModuleContext,
 					jniLibs = append(jniLibs, jniLib{
 						name:           ctx.OtherModuleName(module),
 						path:           path,
-						target:         module.Target(),
-						coverageFile:   dep.CoverageOutputFile(),
-						unstrippedFile: dep.UnstrippedOutputFile(),
-						partition:      dep.Partition(),
-						installPaths:   android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider).InstallFiles,
+						target:         commonInfo.Target,
+						coverageFile:   dep.CoverageOutputFile,
+						unstrippedFile: dep.UnstrippedOutputFile,
+						partition:      dep.Partition,
+						installPaths:   android.OtherModuleProviderOrDefault(ctx, module, android.InstallFilesProvider).InstallFiles,
 					})
 				} else if ctx.Config().AllowMissingDependencies() {
 					ctx.AddMissingDependencies([]string{otherName})
@@ -1837,6 +1839,12 @@ type AndroidAppCertificateProperties struct {
 	Certificate *string
 }
 
+type AndroidAppCertificateInfo struct {
+	Certificate Certificate
+}
+
+var AndroidAppCertificateInfoProvider = blueprint.NewProvider[AndroidAppCertificateInfo]()
+
 // android_app_certificate modules can be referenced by the certificates property of android_app modules to select
 // the signing key.
 func AndroidAppCertificateFactory() android.Module {
@@ -1852,6 +1860,10 @@ func (c *AndroidAppCertificate) GenerateAndroidBuildActions(ctx android.ModuleCo
 		Pem: android.PathForModuleSrc(ctx, cert+".x509.pem"),
 		Key: android.PathForModuleSrc(ctx, cert+".pk8"),
 	}
+
+	android.SetProvider(ctx, AndroidAppCertificateInfoProvider, AndroidAppCertificateInfo{
+		Certificate: c.Certificate,
+	})
 }
 
 type OverrideAndroidApp struct {
@@ -2006,7 +2018,7 @@ func (u *usesLibrary) classLoaderContextForUsesLibDeps(ctx android.ModuleContext
 		return clcMap
 	}
 
-	ctx.VisitDirectDeps(func(m android.Module) {
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
 		tag, isUsesLibTag := ctx.OtherModuleDependencyTag(m).(usesLibraryDependencyTag)
 		if !isUsesLibTag {
 			return
@@ -2014,31 +2026,35 @@ func (u *usesLibrary) classLoaderContextForUsesLibDeps(ctx android.ModuleContext
 
 		dep := android.RemoveOptionalPrebuiltPrefix(ctx.OtherModuleName(m))
 
+		javaInfo, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider)
+		if !ok {
+			return
+		}
 		// Skip stub libraries. A dependency on the implementation library has been added earlier,
 		// so it will be added to CLC, but the stub shouldn't be. Stub libraries can be distingushed
 		// from implementation libraries by their name, which is different as it has a suffix.
-		if comp, ok := m.(SdkLibraryComponentDependency); ok {
-			if impl := comp.OptionalSdkLibraryImplementation(); impl != nil && *impl != dep {
+		if comp := javaInfo.SdkLibraryComponentDependencyInfo; comp != nil {
+			if impl := comp.OptionalSdkLibraryImplementation; impl != nil && *impl != dep {
 				return
 			}
 		}
 
-		if lib, ok := m.(UsesLibraryDependency); ok {
+		if lib := javaInfo.UsesLibraryDependencyInfo; lib != nil {
 			if _, ok := android.OtherModuleProvider(ctx, m, SdkLibraryInfoProvider); ok {
 				// Skip java_sdk_library dependencies that provide stubs, but not an implementation.
 				// This will be restricted to optional_uses_libs
-				if tag == usesLibOptTag && lib.DexJarBuildPath(ctx).PathOrNil() == nil {
+				if tag == usesLibOptTag && lib.DexJarBuildPath.PathOrNil() == nil {
 					u.shouldDisableDexpreopt = true
 					return
 				}
 			}
 			libName := dep
-			if ulib, ok := m.(ProvidesUsesLib); ok && ulib.ProvidesUsesLib() != nil {
-				libName = *ulib.ProvidesUsesLib()
+			if ulib := javaInfo.ProvidesUsesLibInfo; ulib != nil && ulib.ProvidesUsesLib != nil {
+				libName = *ulib.ProvidesUsesLib
 			}
 			clcMap.AddContext(ctx, tag.sdkVersion, libName, tag.optional,
-				lib.DexJarBuildPath(ctx).PathOrNil(), lib.DexJarInstallPath(),
-				lib.ClassLoaderContexts())
+				lib.DexJarBuildPath.PathOrNil(), lib.DexJarInstallPath,
+				lib.ClassLoaderContexts)
 		} else if ctx.Config().AllowMissingDependencies() {
 			ctx.AddMissingDependencies([]string{dep})
 		} else {

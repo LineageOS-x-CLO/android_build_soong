@@ -173,12 +173,6 @@ type FilesystemProperties struct {
 	// Mount point for this image. Default is "/"
 	Mount_point *string
 
-	// If set to the name of a partition ("system", "vendor", etc), this filesystem module
-	// will also include the contents of the make-built staging directories. If any soong
-	// modules would be installed to the same location as a make module, they will overwrite
-	// the make version.
-	Include_make_built_files string
-
 	// When set, builds etc/event-log-tags file by merging logtags from all dependencies.
 	// Default is false
 	Build_logtags *bool
@@ -218,6 +212,19 @@ type FilesystemProperties struct {
 
 	// Name of the output. Default is $(module_name).img
 	Stem *string
+
+	// The size of the partition on the device. It will be a build error if this built partition
+	// image exceeds this size.
+	Partition_size *int64
+
+	// Whether to format f2fs and ext4 in a way that supports casefolding
+	Support_casefolding *bool
+
+	// Whether to format f2fs and ext4 in a way that supports project quotas
+	Support_project_quota *bool
+
+	// Whether to enable per-file compression in f2fs
+	Enable_compression *bool
 }
 
 type AndroidFilesystemDeps struct {
@@ -350,12 +357,27 @@ func (fs fsType) IsUnknown() bool {
 type FilesystemInfo struct {
 	// The built filesystem image
 	Output android.Path
+	// An additional hermetic filesystem image.
+	// e.g. this will contain inodes with pinned timestamps.
+	// This will be copied to target_files.zip
+	OutputHermetic android.Path
 	// A text file containing the list of paths installed on the partition.
 	FileListFile android.Path
 	// The root staging directory used to build the output filesystem. If consuming this, make sure
 	// to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja.
 	RootDir android.Path
+	// The rebased staging directory used to build the output filesystem. If consuming this, make
+	// sure to add a dependency on the Output file, as you cannot add dependencies on directories
+	// in ninja. In many cases this is the same as RootDir, only in the system partition is it
+	// different. There, it points to the "system" sub-directory of RootDir.
+	RebasedDir android.Path
+	// A text file with block data of the .img file
+	// This is an implicit output of `build_image`
+	MapFile android.Path
+	// Name of the module that produced this FilesystemInfo origionally. (though it may be
+	// re-exported by super images or boot images)
+	ModuleName string
 }
 
 var FilesystemProvider = blueprint.NewProvider[FilesystemInfo]()
@@ -442,14 +464,34 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		ctx.PropertyErrorf("include_files_of", "include_files_of is only supported for cpio and compressed cpio filesystem types.")
 	}
 
-	var rootDir android.OutputPath
+	rootDir := android.PathForModuleOut(ctx, f.rootDirString()).OutputPath
+	rebasedDir := rootDir
+	if f.properties.Base_dir != nil {
+		rebasedDir = rootDir.Join(ctx, *f.properties.Base_dir)
+	}
+	builder := android.NewRuleBuilder(pctx, ctx)
+
+	// Wipe the root dir to get rid of leftover files from prior builds
+	builder.Command().Textf("rm -rf %s && mkdir -p %s", rootDir, rootDir)
+	specs := f.gatherFilteredPackagingSpecs(ctx)
+	f.entries = f.copyPackagingSpecs(ctx, builder, specs, rootDir, rebasedDir)
+
+	f.buildNonDepsFiles(ctx, builder, rootDir)
+	f.buildFsverityMetadataFiles(ctx, builder, specs, rootDir, rebasedDir)
+	f.buildEventLogtagsFile(ctx, builder, rebasedDir)
+	f.buildAconfigFlagsFiles(ctx, builder, specs, rebasedDir)
+	f.filesystemBuilder.BuildLinkerConfigFile(ctx, builder, rebasedDir)
+
+	var mapFile android.Path
+	var outputHermetic android.Path
 	switch f.fsType(ctx) {
 	case ext4Type, erofsType, f2fsType:
-		f.output, rootDir = f.buildImageUsingBuildImage(ctx)
+		f.output, outputHermetic = f.buildImageUsingBuildImage(ctx, builder, rootDir, rebasedDir)
+		mapFile = f.getMapFile(ctx)
 	case compressedCpioType:
-		f.output, rootDir = f.buildCpioImage(ctx, true)
+		f.output = f.buildCpioImage(ctx, builder, rootDir, true)
 	case cpioType:
-		f.output, rootDir = f.buildCpioImage(ctx, false)
+		f.output = f.buildCpioImage(ctx, builder, rootDir, false)
 	default:
 		return
 	}
@@ -465,17 +507,32 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	fileListFile := android.PathForModuleOut(ctx, "fileList")
 	android.WriteFileRule(ctx, fileListFile, f.installedFilesList())
 
-	android.SetProvider(ctx, FilesystemProvider, FilesystemInfo{
+	fsInfo := FilesystemInfo{
 		Output:       f.output,
 		FileListFile: fileListFile,
 		RootDir:      rootDir,
-	})
+		RebasedDir:   rebasedDir,
+		ModuleName:   ctx.ModuleName(),
+	}
+	if mapFile != nil {
+		fsInfo.MapFile = mapFile
+	}
+	if outputHermetic != nil {
+		fsInfo.OutputHermetic = outputHermetic
+	}
+
+	android.SetProvider(ctx, FilesystemProvider, fsInfo)
 
 	f.fileListFile = fileListFile
 
 	if proptools.Bool(f.properties.Unchecked_module) {
 		ctx.UncheckedModule()
 	}
+}
+
+func (f *filesystem) getMapFile(ctx android.ModuleContext) android.WritablePath {
+	// create the filepath by replacing the extension of the corresponding img file
+	return android.PathForModuleOut(ctx, f.installFileName()).ReplaceExtension(ctx, "map")
 }
 
 func (f *filesystem) validateVintfFragments(ctx android.ModuleContext) {
@@ -604,43 +661,16 @@ func (f *filesystem) copyPackagingSpecs(ctx android.ModuleContext, builder *andr
 	return f.CopySpecsToDirs(ctx, builder, dirsToSpecs)
 }
 
-func (f *filesystem) copyFilesToProductOut(ctx android.ModuleContext, builder *android.RuleBuilder, rebasedDir android.OutputPath) {
-	if !(f.Name() == ctx.Config().SoongDefinedSystemImage() || proptools.Bool(f.properties.Is_auto_generated)) {
-		return
-	}
-	installPath := android.PathForModuleInPartitionInstall(ctx, f.partitionName())
-	builder.Command().Textf("rsync --checksum %s %s", rebasedDir, installPath)
-}
-
-func copyImageFileToProductOut(ctx android.ModuleContext, builder *android.RuleBuilder, partition string, output android.Path) {
-	copyDir := android.PathForModuleInPartitionInstall(ctx, "").Join(ctx, fmt.Sprintf("%s.img", partition))
-	builder.Command().Textf("rsync -a %s %s", output, copyDir)
-}
-
 func (f *filesystem) rootDirString() string {
 	return f.partitionName()
 }
 
-func (f *filesystem) buildImageUsingBuildImage(ctx android.ModuleContext) (android.Path, android.OutputPath) {
-	rootDir := android.PathForModuleOut(ctx, f.rootDirString()).OutputPath
-	rebasedDir := rootDir
-	if f.properties.Base_dir != nil {
-		rebasedDir = rootDir.Join(ctx, *f.properties.Base_dir)
-	}
-	builder := android.NewRuleBuilder(pctx, ctx)
-	// Wipe the root dir to get rid of leftover files from prior builds
-	builder.Command().Textf("rm -rf %s && mkdir -p %s", rootDir, rootDir)
-	specs := f.gatherFilteredPackagingSpecs(ctx)
-	f.entries = f.copyPackagingSpecs(ctx, builder, specs, rootDir, rebasedDir)
-
-	f.buildNonDepsFiles(ctx, builder, rootDir)
-	f.addMakeBuiltFiles(ctx, builder, rootDir)
-	f.buildFsverityMetadataFiles(ctx, builder, specs, rootDir, rebasedDir)
-	f.buildEventLogtagsFile(ctx, builder, rebasedDir)
-	f.buildAconfigFlagsFiles(ctx, builder, specs, rebasedDir)
-	f.filesystemBuilder.BuildLinkerConfigFile(ctx, builder, rebasedDir)
-	f.copyFilesToProductOut(ctx, builder, rebasedDir)
-
+func (f *filesystem) buildImageUsingBuildImage(
+	ctx android.ModuleContext,
+	builder *android.RuleBuilder,
+	rootDir android.OutputPath,
+	rebasedDir android.OutputPath,
+) (android.Path, android.Path) {
 	// run host_init_verifier
 	// Ideally we should have a concept of pluggable linters that verify the generated image.
 	// While such concept is not implement this will do.
@@ -658,6 +688,7 @@ func (f *filesystem) buildImageUsingBuildImage(ctx android.ModuleContext) (andro
 	pathToolDirs := []string{filepath.Dir(fec.String())}
 
 	output := android.PathForModuleOut(ctx, f.installFileName())
+	builder.Command().Text("touch").Output(f.getMapFile(ctx))
 	builder.Command().
 		Textf("PATH=%s:$PATH", strings.Join(pathToolDirs, ":")).
 		BuiltTool("build_image").
@@ -668,14 +699,29 @@ func (f *filesystem) buildImageUsingBuildImage(ctx android.ModuleContext) (andro
 		Output(output).
 		Text(rootDir.String()) // directory where to find fs_config_files|dirs
 
-	if !ctx.Config().KatiEnabled() {
-		copyImageFileToProductOut(ctx, builder, f.partitionName(), output)
+	// Add an additional cmd to create a hermetic img file. This will contain pinned timestamps e.g.
+	propFilePinnedTimestamp := android.PathForModuleOut(ctx, "for_target_files", "prop")
+	builder.Command().Textf("cat").Input(propFile).Flag(">").Output(propFilePinnedTimestamp).Textf(" && echo use_fixed_timestamp=true >> %s", propFilePinnedTimestamp)
+
+	outputHermetic := android.PathForModuleOut(ctx, "for_target_files", f.installFileName())
+	builder.Command().
+		Textf("PATH=%s:$PATH", strings.Join(pathToolDirs, ":")).
+		BuiltTool("build_image").
+		Text(rootDir.String()). // input directory
+		Flag(propFilePinnedTimestamp.String()).
+		Implicits(toolDeps).
+		Implicit(fec).
+		Output(outputHermetic).
+		Text(rootDir.String()) // directory where to find fs_config_files|dirs
+
+	if f.properties.Partition_size != nil {
+		assertMaxImageSize(builder, output, *f.properties.Partition_size, false)
 	}
 
 	// rootDir is not deleted. Might be useful for quick inspection.
 	builder.Build("build_filesystem_image", fmt.Sprintf("Creating filesystem %s", f.BaseModuleName()))
 
-	return output, rootDir
+	return output, outputHermetic
 }
 
 func (f *filesystem) buildFileContexts(ctx android.ModuleContext) android.Path {
@@ -715,6 +761,7 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 		}
 		panic(fmt.Errorf("unsupported fs type %v", t))
 	}
+	addStr("block_list", f.getMapFile(ctx).String()) // This will be an implicit output
 
 	addStr("fs_type", fsTypeStr(f.fsType(ctx)))
 	addStr("mount_point", proptools.StringDefault(f.properties.Mount_point, "/"))
@@ -781,12 +828,11 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 		addStr("hash_seed", uuid)
 	}
 
-	// TODO(b/381120092): This should only be added if none of the size-related properties are set,
-	// but currently soong built partitions don't have size properties. Make code:
-	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=2262;drc=39cd33701c9278db0e7e481a090605f428d5b12d
-	// Make uses system_disable_sparse but disable_sparse has the same effect, and we shouldn't need
-	// to qualify it because each partition gets its own property file built.
-	addStr("disable_sparse", "true")
+	// Disable sparse only when partition size is not defined. disable_sparse has the same
+	// effect as <partition name>_disable_sparse.
+	if f.properties.Partition_size == nil {
+		addStr("disable_sparse", "true")
+	}
 
 	fst := f.fsType(ctx)
 	switch fst {
@@ -808,6 +854,22 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 		}
 	}
 	f.checkFsTypePropertyError(ctx, fst, fsTypeStr(fst))
+
+	if f.properties.Partition_size != nil {
+		addStr("partition_size", strconv.FormatInt(*f.properties.Partition_size, 10))
+	}
+
+	if proptools.BoolDefault(f.properties.Support_casefolding, false) {
+		addStr("needs_casefold", "1")
+	}
+
+	if proptools.BoolDefault(f.properties.Support_project_quota, false) {
+		addStr("needs_projid", "1")
+	}
+
+	if proptools.BoolDefault(f.properties.Enable_compression, false) {
+		addStr("needs_compress", "1")
+	}
 
 	propFilePreProcessing := android.PathForModuleOut(ctx, "prop_pre_processing")
 	android.WriteFileRuleVerbatim(ctx, propFilePreProcessing, propFileString.String())
@@ -853,7 +915,12 @@ func includeFilesRootDir(ctx android.ModuleContext) (rootDirs android.Paths, par
 	return rootDirs, partitions
 }
 
-func (f *filesystem) buildCpioImage(ctx android.ModuleContext, compressed bool) (android.Path, android.OutputPath) {
+func (f *filesystem) buildCpioImage(
+	ctx android.ModuleContext,
+	builder *android.RuleBuilder,
+	rootDir android.OutputPath,
+	compressed bool,
+) android.Path {
 	if proptools.Bool(f.properties.Use_avb) {
 		ctx.PropertyErrorf("use_avb", "signing compresed cpio image using avbtool is not supported."+
 			"Consider adding this to bootimg module and signing the entire boot image.")
@@ -862,28 +929,6 @@ func (f *filesystem) buildCpioImage(ctx android.ModuleContext, compressed bool) 
 	if proptools.String(f.properties.File_contexts) != "" {
 		ctx.PropertyErrorf("file_contexts", "file_contexts is not supported for compressed cpio image.")
 	}
-
-	if f.properties.Include_make_built_files != "" {
-		ctx.PropertyErrorf("include_make_built_files", "include_make_built_files is not supported for compressed cpio image.")
-	}
-
-	rootDir := android.PathForModuleOut(ctx, f.rootDirString()).OutputPath
-	rebasedDir := rootDir
-	if f.properties.Base_dir != nil {
-		rebasedDir = rootDir.Join(ctx, *f.properties.Base_dir)
-	}
-	builder := android.NewRuleBuilder(pctx, ctx)
-	// Wipe the root dir to get rid of leftover files from prior builds
-	builder.Command().Textf("rm -rf %s && mkdir -p %s", rootDir, rootDir)
-	specs := f.gatherFilteredPackagingSpecs(ctx)
-	f.entries = f.copyPackagingSpecs(ctx, builder, specs, rootDir, rebasedDir)
-
-	f.buildNonDepsFiles(ctx, builder, rootDir)
-	f.buildFsverityMetadataFiles(ctx, builder, specs, rootDir, rebasedDir)
-	f.buildEventLogtagsFile(ctx, builder, rebasedDir)
-	f.buildAconfigFlagsFiles(ctx, builder, specs, rebasedDir)
-	f.filesystemBuilder.BuildLinkerConfigFile(ctx, builder, rebasedDir)
-	f.copyFilesToProductOut(ctx, builder, rebasedDir)
 
 	rootDirs, partitions := includeFilesRootDir(ctx)
 
@@ -914,7 +959,7 @@ func (f *filesystem) buildCpioImage(ctx android.ModuleContext, compressed bool) 
 	// rootDir is not deleted. Might be useful for quick inspection.
 	builder.Build("build_cpio_image", fmt.Sprintf("Creating filesystem %s", f.BaseModuleName()))
 
-	return output, rootDir
+	return output
 }
 
 var validPartitions = []string{
@@ -932,27 +977,6 @@ var validPartitions = []string{
 	"ramdisk",
 	"vendor_ramdisk",
 	"recovery",
-}
-
-func (f *filesystem) addMakeBuiltFiles(ctx android.ModuleContext, builder *android.RuleBuilder, rootDir android.Path) {
-	partition := f.properties.Include_make_built_files
-	if partition == "" {
-		return
-	}
-	if !slices.Contains(validPartitions, partition) {
-		ctx.PropertyErrorf("include_make_built_files", "Expected one of %#v, found %q", validPartitions, partition)
-		return
-	}
-	stampFile := fmt.Sprintf("target/product/%s/obj/PACKAGING/%s_intermediates/staging_dir.stamp", ctx.Config().DeviceName(), partition)
-	fileListFile := fmt.Sprintf("target/product/%s/obj/PACKAGING/%s_intermediates/file_list.txt", ctx.Config().DeviceName(), partition)
-	stagingDir := fmt.Sprintf("target/product/%s/%s", ctx.Config().DeviceName(), partition)
-
-	builder.Command().BuiltTool("merge_directories").
-		Implicit(android.PathForArbitraryOutput(ctx, stampFile)).
-		Text("--ignore-duplicates").
-		FlagWithInput("--file-list", android.PathForArbitraryOutput(ctx, fileListFile)).
-		Text(rootDir.String()).
-		Text(android.PathForArbitraryOutput(ctx, stagingDir).String())
 }
 
 func (f *filesystem) buildEventLogtagsFile(ctx android.ModuleContext, builder *android.RuleBuilder, rebasedDir android.OutputPath) {
