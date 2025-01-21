@@ -83,6 +83,7 @@ type CmdArgs struct {
 	OutDir         string
 	SoongOutDir    string
 	SoongVariables string
+	KatiSuffix     string
 
 	ModuleGraphFile   string
 	ModuleActionsFile string
@@ -349,6 +350,7 @@ type config struct {
 	// Changes behavior based on whether Kati runs after soong_build, or if soong_build
 	// runs standalone.
 	katiEnabled bool
+	katiSuffix  string
 
 	captureBuild      bool // true for tests, saves build parameters for each module
 	ignoreEnvironment bool // true for tests, returns empty from all Getenv calls
@@ -620,6 +622,7 @@ func NewConfig(cmdArgs CmdArgs, availableEnv map[string]string) (Config, error) 
 		outDir:            cmdArgs.OutDir,
 		soongOutDir:       cmdArgs.SoongOutDir,
 		runGoTests:        cmdArgs.RunGoTests,
+		katiSuffix:        cmdArgs.KatiSuffix,
 		multilibConflicts: make(map[ArchType]bool),
 
 		moduleListFile: cmdArgs.ModuleListFile,
@@ -768,11 +771,7 @@ func (c *config) SetAllowMissingDependencies() {
 // BlueprintToolLocation returns the directory containing build system tools
 // from Blueprint, like soong_zip and merge_zips.
 func (c *config) HostToolDir() string {
-	if c.KatiEnabled() {
-		return filepath.Join(c.outDir, "host", c.PrebuiltOS(), "bin")
-	} else {
-		return filepath.Join(c.soongOutDir, "host", c.PrebuiltOS(), "bin")
-	}
+	return filepath.Join(c.outDir, "host", c.PrebuiltOS(), "bin")
 }
 
 func (c *config) HostToolPath(ctx PathContext, tool string) Path {
@@ -1514,6 +1513,10 @@ func IsTrunkStableVendorApiLevel(level string) bool {
 
 func (c *config) VendorApiLevelFrozen() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_BOARD_API_LEVEL_FROZEN")
+}
+
+func (c *config) katiPackageMkDir() string {
+	return filepath.Join(c.soongOutDir, "kati_packaging"+c.katiSuffix)
 }
 
 func (c *deviceConfig) Arches() []Arch {
