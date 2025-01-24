@@ -595,8 +595,6 @@ type ProductVariables struct {
 
 	PartitionVarsForSoongMigrationOnlyDoNotUse PartitionVariables
 
-	ExtraAllowedDepsTxt *string `json:",omitempty"`
-
 	AdbKeys *string `json:",omitempty"`
 
 	DeviceMatrixFile       []string `json:",omitempty"`
@@ -708,6 +706,10 @@ type PartitionVariables struct {
 	BoardSuperPartitionGroups         map[string]BoardSuperPartitionGroupProps `json:",omitempty"`
 	ProductVirtualAbOta               bool                                     `json:",omitempty"`
 	ProductVirtualAbOtaRetrofit       bool                                     `json:",omitempty"`
+	ProductVirtualAbCompression       bool                                     `json:",omitempty"`
+	ProductVirtualAbCompressionMethod string                                   `json:",omitempty"`
+	ProductVirtualAbCompressionFactor string                                   `json:",omitempty"`
+	ProductVirtualAbCowVersion        string                                   `json:",omitempty"`
 	AbOtaUpdater                      bool                                     `json:",omitempty"`
 
 	// Avb (android verified boot) stuff
@@ -751,6 +753,10 @@ type PartitionVariables struct {
 	PrivateRecoveryUiProperties map[string]string `json:",omitempty"`
 
 	PrebuiltBootloader string `json:",omitempty"`
+
+	ProductFsCasefold    string `json:",omitempty"`
+	ProductQuotaProjid   string `json:",omitempty"`
+	ProductFsCompression string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
