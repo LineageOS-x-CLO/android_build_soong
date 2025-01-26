@@ -501,7 +501,7 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 	tf := filepath.Join(outDir, ".top")
 	defer func() {
 		if err := os.WriteFile(tf, []byte(cwd), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, fmt.Sprintf("Unable to log CWD: %v", err))
+			fmt.Fprintf(os.Stderr, "Unable to log CWD: %v", err)
 		}
 	}()
 
@@ -677,13 +677,16 @@ func runSoong(ctx Context, config Config) {
 
 		qcEnvVars := []string{
 			"TARGET_BOARD_PLATFORM",
+			"SDCLANG_CONFIG_AOSP",
 			"SDCLANG_AE_CONFIG",
 			"SDCLANG_CONFIG",
 			"SDCLANG_SA_ENABLED",
 			"QIIFA_BUILD_CONFIG",
 		}
+
 		for _, qcVar := range qcEnvVars {
-			ninjaEnv.Set(qcVar, os.Getenv(qcVar))
+			envFromCfg, _ := config.Environment().Get(qcVar)
+			ninjaEnv.Set(qcVar, envFromCfg)
 		}
 
 		cmd.Environment = &ninjaEnv

@@ -78,7 +78,7 @@ func filesystemCreatorFactory() android.Module {
 	return module
 }
 
-func generatedPartitions(ctx android.LoadHookContext) []string {
+func generatedPartitions(ctx android.EarlyModuleContext) []string {
 	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
 	generatedPartitions := []string{"system"}
 	if ctx.DeviceConfig().SystemExtPath() == "system_ext" {
@@ -339,22 +339,7 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 		}
 	case "recovery":
 		dirs := append(commonPartitionDirs, []string{
-			"odm_file_contexts",
-			"odm_property_contexts",
-			"plat_file_contexts",
-			"plat_property_contexts",
-			"plat_service_contexts",
-			"product_file_contexts",
-			"product_property_contexts",
-			"product_service_contexts",
 			"sdcard",
-			"sepolicy",
-			"system_ext_file_contexts",
-			"system_ext_property_contexts",
-			"system_ext_service_contexts",
-			"vendor_file_contexts",
-			"vendor_property_contexts",
-			"vendor_service_contexts",
 		}...)
 
 		dirsWithRoot := make([]string, len(dirs))
@@ -373,6 +358,10 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 		fsProps.Security_patch = proptools.StringPtr(partitionVars.VendorDlkmSecurityPatch)
 	case "odm_dlkm":
 		fsProps.Security_patch = proptools.StringPtr(partitionVars.OdmDlkmSecurityPatch)
+	case "vendor_ramdisk":
+		if android.InList("recovery", generatedPartitions(ctx)) {
+			fsProps.Include_files_of = []string{generatedModuleNameForPartition(ctx.Config(), "recovery")}
+		}
 	}
 }
 
@@ -507,7 +496,8 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		Options_file         *string
 		Strip_debug_symbols  *bool
 	}{
-		Name: proptools.StringPtr(name),
+		Name:                proptools.StringPtr(name),
+		Strip_debug_symbols: proptools.BoolPtr(false),
 	}
 	switch partitionType {
 	case "system_dlkm":
@@ -521,7 +511,6 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
-		props.Strip_debug_symbols = proptools.BoolPtr(false)
 	case "vendor_dlkm":
 		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorKernelModules).Strings()
 		if len(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelModules) > 0 {
@@ -531,14 +520,12 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
-		props.Strip_debug_symbols = proptools.BoolPtr(false)
 	case "odm_dlkm":
 		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.OdmKernelModules).Strings()
 		props.Odm_dlkm_specific = proptools.BoolPtr(true)
 		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.OdmKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
-		props.Strip_debug_symbols = proptools.BoolPtr(false)
 	case "vendor_ramdisk":
 		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorRamdiskKernelModules).Strings()
 		props.Vendor_ramdisk = proptools.BoolPtr(true)
