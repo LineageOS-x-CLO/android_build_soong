@@ -90,6 +90,10 @@ type CommonProperties struct {
 	// list of module-specific flags that will be used for kotlinc compiles
 	Kotlincflags []string `android:"arch_variant"`
 
+	// Kotlin language version to target. Currently only 1.9 and 2 are supported.
+	// See kotlinc's `-language-version` flag.
+	Kotlin_lang_version *string
+
 	// list of java libraries that will be in the classpath
 	Libs []string `android:"arch_variant"`
 
@@ -645,14 +649,17 @@ func (j *Module) checkSdkVersions(ctx android.ModuleContext) {
 
 	// Make sure this module doesn't statically link to modules with lower-ranked SDK link type.
 	// See rank() for details.
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		tag := ctx.OtherModuleDependencyTag(module)
-		switch module.(type) {
-		// TODO(satayev): cover other types as well, e.g. imports
-		case *Library, *AndroidLibrary:
+		_, isJavaLibrary := android.OtherModuleProvider(ctx, module, JavaLibraryInfoProvider)
+		_, isAndroidLibrary := android.OtherModuleProvider(ctx, module, AndroidLibraryInfoProvider)
+		_, isJavaAconfigLibrary := android.OtherModuleProvider(ctx, module, android.CodegenInfoProvider)
+		// Exclude java_aconfig_library modules to maintain consistency with existing behavior.
+		if (isJavaLibrary && !isJavaAconfigLibrary) || isAndroidLibrary {
+			// TODO(satayev): cover other types as well, e.g. imports
 			switch tag {
 			case bootClasspathTag, sdkLibTag, libTag, staticLibTag, java9LibTag:
-				j.checkSdkLinkType(ctx, module.(moduleWithSdkDep), tag.(dependencyTag))
+				j.checkSdkLinkType(ctx, module)
 			}
 		}
 	})
@@ -1146,7 +1153,7 @@ func (j *Module) addGeneratedSrcJars(path android.Path) {
 	j.properties.Generated_srcjars = append(j.properties.Generated_srcjars, path)
 }
 
-func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspathJars, extraCombinedJars, extraDepCombinedJars android.Paths) {
+func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspathJars, extraCombinedJars, extraDepCombinedJars android.Paths) *JavaInfo {
 	// Auto-propagating jarjar rules
 	jarjarProviderData := j.collectJarJarRules(ctx)
 	if jarjarProviderData != nil {
@@ -1280,7 +1287,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			transitiveStaticLibsHeaderJars = nil
 		}
 		if ctx.Failed() {
-			return
+			return nil
 		}
 		j.headerJarFile = combinedHeaderJarFile
 
@@ -1295,7 +1302,8 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			ctx.CheckbuildFile(j.headerJarFile)
 		}
 
-		android.SetProvider(ctx, JavaInfoProvider, &JavaInfo{
+		j.outputFile = j.headerJarFile
+		return &JavaInfo{
 			HeaderJars:                          android.PathsIfNonNil(j.headerJarFile),
 			LocalHeaderJars:                     localHeaderJars,
 			TransitiveStaticLibsHeaderJars:      depset.New(depset.PREORDER, localHeaderJars, transitiveStaticLibsHeaderJars),
@@ -1308,10 +1316,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			StubsLinkType:                       j.stubsLinkType,
 			AconfigIntermediateCacheOutputPaths: deps.aconfigProtoFiles,
 			SdkVersion:                          j.SdkVersion(ctx),
-		})
-
-		j.outputFile = j.headerJarFile
-		return
+		}
 	}
 
 	if srcFiles.HasExt(".kt") {
@@ -1323,6 +1328,26 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		// user defined kotlin flags.
 		kotlincFlags := j.properties.Kotlincflags
 		CheckKotlincFlags(ctx, kotlincFlags)
+
+		// Available kotlin versions can be found at
+		// https://github.com/JetBrains/kotlin/blob/master/compiler/util/src/org/jetbrains/kotlin/config/LanguageVersionSettings.kt#L560
+		// in the `LanguageVersion` class.
+		// For now, avoid targeting language versions directly, as we'd like to kee our source
+		// code version aligned as much as possible. Ideally, after defaulting to "2", we
+		// can remove the "1.9" option entirely, or at least make it emit a warning.
+		kotlin_default_lang_version := "1.9"
+		if build_flag_lang_version, ok := ctx.Config().GetBuildFlag("RELEASE_KOTLIN_LANG_VERSION"); ok {
+			kotlin_default_lang_version = build_flag_lang_version
+		}
+		kotlin_lang_version := proptools.StringDefault(j.properties.Kotlin_lang_version, kotlin_default_lang_version)
+		switch kotlin_lang_version {
+		case "1.9":
+			kotlincFlags = append(kotlincFlags, "-language-version 1.9")
+		case "2":
+			kotlincFlags = append(kotlincFlags, "-Xsuppress-version-warnings", "-Xconsistent-data-class-copy-visibility")
+		default:
+			ctx.PropertyErrorf("kotlin_lang_version", "Must be one of `1.9` or `2`")
+		}
 
 		// Workaround for KT-46512
 		kotlincFlags = append(kotlincFlags, "-Xsam-conversions=class")
@@ -1368,7 +1393,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		kotlinHeaderJar := android.PathForModuleOut(ctx, "kotlin_headers", jarName)
 		j.kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags)
 		if ctx.Failed() {
-			return
+			return nil
 		}
 
 		kotlinJarPath, _ := j.repackageFlagsIfNecessary(ctx, kotlinJar, jarName, "kotlinc")
@@ -1495,7 +1520,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			localImplementationJars = append(localImplementationJars, classes)
 		}
 		if ctx.Failed() {
-			return
+			return nil
 		}
 	}
 
@@ -1535,7 +1560,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		resourceJar := android.PathForModuleOut(ctx, "res", jarName)
 		TransformResourcesToJar(ctx, resourceJar, resArgs, resDeps)
 		if ctx.Failed() {
-			return
+			return nil
 		}
 		localResourceJars = append(localResourceJars, resourceJar)
 	}
@@ -1657,7 +1682,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 	}
 
 	if ctx.Failed() {
-		return
+		return nil
 	}
 
 	if j.ravenizer.enabled {
@@ -1721,7 +1746,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		CheckJarPackages(ctx, pkgckFile, outputFile, j.properties.Permitted_packages)
 
 		if ctx.Failed() {
-			return
+			return nil
 		}
 	}
 
@@ -1746,7 +1771,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 	// enforce syntax check to jacoco filters for any build (http://b/183622051)
 	specs := j.jacocoModuleToZipCommand(ctx)
 	if ctx.Failed() {
-		return
+		return nil
 	}
 
 	completeStaticLibsImplementationJarsToCombine := completeStaticLibsImplementationJars
@@ -1814,7 +1839,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			}
 			dexOutputFile, dexArtProfileOutput := j.dexer.compileDex(ctx, params)
 			if ctx.Failed() {
-				return
+				return nil
 			}
 
 			// If r8/d8 provides a profile that matches the optimized dex, use that for dexpreopt.
@@ -1873,7 +1898,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		}
 
 		if ctx.Failed() {
-			return
+			return nil
 		}
 	}
 
@@ -1920,7 +1945,10 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		ctx.CheckbuildFile(j.headerJarFile)
 	}
 
-	android.SetProvider(ctx, JavaInfoProvider, &JavaInfo{
+	// Save the output file with no relative path so that it doesn't end up in a subdirectory when used as a resource
+	j.outputFile = outputFile.WithoutRel()
+
+	return &JavaInfo{
 		HeaderJars:           android.PathsIfNonNil(j.headerJarFile),
 		RepackagedHeaderJars: android.PathsIfNonNil(repackagedHeaderJarFile),
 
@@ -1945,10 +1973,8 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		StubsLinkType:                       j.stubsLinkType,
 		AconfigIntermediateCacheOutputPaths: j.aconfigCacheFiles,
 		SdkVersion:                          j.SdkVersion(ctx),
-	})
-
-	// Save the output file with no relative path so that it doesn't end up in a subdirectory when used as a resource
-	j.outputFile = outputFile.WithoutRel()
+		OutputFile:                          j.outputFile,
+	}
 }
 
 func (j *Module) useCompose(ctx android.BaseModuleContext) bool {
@@ -1956,7 +1982,7 @@ func (j *Module) useCompose(ctx android.BaseModuleContext) bool {
 }
 
 func collectDepProguardSpecInfo(ctx android.ModuleContext) (transitiveProguardFlags, transitiveUnconditionalExportedFlags []depset.DepSet[android.Path]) {
-	ctx.VisitDirectDeps(func(m android.Module) {
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
 		depProguardInfo, _ := android.OtherModuleProvider(ctx, m, ProguardSpecInfoProvider)
 		depTag := ctx.OtherModuleDependencyTag(m)
 
@@ -2052,7 +2078,9 @@ func CheckKotlincFlags(ctx android.ModuleContext, flags []string) {
 		} else if strings.HasPrefix(flag, "-Xintellij-plugin-root") {
 			ctx.PropertyErrorf("kotlincflags",
 				"Bad flag: `%s`, only use internal compiler for consistency.", flag)
-		} else if inList(flag, config.KotlincIllegalFlags) {
+		} else if slices.ContainsFunc(config.KotlincIllegalFlags, func(f string) bool {
+			return strings.HasPrefix(flag, f)
+		}) {
 			ctx.PropertyErrorf("kotlincflags", "Flag `%s` already used by build system", flag)
 		} else if flag == "-include-runtime" {
 			ctx.PropertyErrorf("kotlincflags", "Bad flag: `%s`, do not include runtime.", flag)
@@ -2127,7 +2155,7 @@ func (j *providesTransitiveHeaderJarsForR8) collectTransitiveHeaderJarsForR8(ctx
 	directStaticLibs := android.Paths{}
 	transitiveLibs := []depset.DepSet[android.Path]{}
 	transitiveStaticLibs := []depset.DepSet[android.Path]{}
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		// don't add deps of the prebuilt version of the same library
 		if ctx.ModuleName() == android.RemoveOptionalPrebuiltPrefix(module.Name()) {
 			return
@@ -2195,6 +2223,8 @@ func (j *Module) ClassLoaderContexts() dexpreopt.ClassLoaderContextMap {
 func (j *Module) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	if j.expandJarjarRules != nil {
 		dpInfo.Jarjar_rules = append(dpInfo.Jarjar_rules, j.expandJarjarRules.String())
+	}
+	if j.headerJarFile != nil {
 		// Add the header jar so that the rdeps can be resolved to the repackaged classes.
 		dpInfo.Jars = append(dpInfo.Jars, j.headerJarFile.String())
 	}
@@ -2213,7 +2243,7 @@ func (j *Module) CompilerDeps() []string {
 
 func (j *Module) hasCode(ctx android.ModuleContext) bool {
 	srcFiles := android.PathsForModuleSrcExcludes(ctx, j.properties.Srcs, j.properties.Exclude_srcs)
-	return len(srcFiles) > 0 || len(ctx.GetDirectDepsWithTag(staticLibTag)) > 0
+	return len(srcFiles) > 0 || len(ctx.GetDirectDepsProxyWithTag(staticLibTag)) > 0
 }
 
 // Implements android.ApexModule
@@ -2251,7 +2281,7 @@ func (j *Module) JacocoReportClassesFile() android.Path {
 
 func (j *Module) collectTransitiveSrcFiles(ctx android.ModuleContext, mine android.Paths) {
 	var fromDeps []depset.DepSet[android.Path]
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		tag := ctx.OtherModuleDependencyTag(module)
 		if tag == staticLibTag {
 			if depInfo, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
@@ -2370,7 +2400,7 @@ func (m *Module) getSdkLinkType(ctx android.BaseModuleContext, name string) (ret
 // checkSdkLinkType make sures the given dependency doesn't have a lower SDK link type rank than
 // this module's. See the comment on rank() for details and an example.
 func (j *Module) checkSdkLinkType(
-	ctx android.ModuleContext, dep moduleWithSdkDep, tag dependencyTag) {
+	ctx android.ModuleContext, dep android.ModuleProxy) {
 	if ctx.Host() {
 		return
 	}
@@ -2379,7 +2409,12 @@ func (j *Module) checkSdkLinkType(
 	if stubs {
 		return
 	}
-	depLinkType, _ := dep.getSdkLinkType(ctx, ctx.OtherModuleName(dep))
+	info, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider)
+	if !ok || info.ModuleWithSdkDepInfo == nil {
+		panic(fmt.Errorf("dependency doesn't have ModuleWithSdkDepInfo: %v", dep))
+	}
+
+	depLinkType := info.ModuleWithSdkDepInfo.SdkLinkType
 
 	if myLinkType.rank() < depLinkType.rank() {
 		ctx.ModuleErrorf("compiles against %v, but dependency %q is compiling against %v. "+
@@ -2404,7 +2439,7 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 	var transitiveStaticJarsImplementationLibs []depset.DepSet[android.Path]
 	var transitiveStaticJarsResourceLibs []depset.DepSet[android.Path]
 
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		otherName := ctx.OtherModuleName(module)
 		tag := ctx.OtherModuleDependencyTag(module)
 
@@ -2438,7 +2473,7 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 				deps.bootClasspath = append(deps.bootClasspath, dep.HeaderJars...)
 				transitiveBootClasspathHeaderJars = append(transitiveBootClasspathHeaderJars, dep.TransitiveStaticLibsHeaderJars)
 			case sdkLibTag, libTag, instrumentationForTag:
-				if _, ok := module.(*Plugin); ok {
+				if _, ok := android.OtherModuleProvider(ctx, module, JavaPluginInfoProvider); ok {
 					ctx.ModuleErrorf("a java_plugin (%s) cannot be used as a libs dependency", otherName)
 				}
 				deps.classpath = append(deps.classpath, dep.HeaderJars...)
@@ -2456,7 +2491,7 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 				deps.java9Classpath = append(deps.java9Classpath, dep.HeaderJars...)
 				transitiveJava9ClasspathHeaderJars = append(transitiveJava9ClasspathHeaderJars, dep.TransitiveStaticLibsHeaderJars)
 			case staticLibTag:
-				if _, ok := module.(*Plugin); ok {
+				if _, ok := android.OtherModuleProvider(ctx, module, JavaPluginInfoProvider); ok {
 					ctx.ModuleErrorf("a java_plugin (%s) cannot be used as a static_libs dependency", otherName)
 				}
 				deps.classpath = append(deps.classpath, dep.HeaderJars...)
@@ -2476,40 +2511,40 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 				transitiveStaticJarsImplementationLibs = append(transitiveStaticJarsImplementationLibs, dep.TransitiveStaticLibsImplementationJars)
 				transitiveStaticJarsResourceLibs = append(transitiveStaticJarsResourceLibs, dep.TransitiveStaticLibsResourceJars)
 			case pluginTag:
-				if plugin, ok := module.(*Plugin); ok {
-					if plugin.pluginProperties.Processor_class != nil {
-						addPlugins(&deps, dep.ImplementationAndResourcesJars, *plugin.pluginProperties.Processor_class)
+				if plugin, ok := android.OtherModuleProvider(ctx, module, JavaPluginInfoProvider); ok {
+					if plugin.ProcessorClass != nil {
+						addPlugins(&deps, dep.ImplementationAndResourcesJars, *plugin.ProcessorClass)
 					} else {
 						addPlugins(&deps, dep.ImplementationAndResourcesJars)
 					}
 					// Turbine doesn't run annotation processors, so any module that uses an
 					// annotation processor that generates API is incompatible with the turbine
 					// optimization.
-					deps.disableTurbine = deps.disableTurbine || Bool(plugin.pluginProperties.Generates_api)
+					deps.disableTurbine = deps.disableTurbine || plugin.GeneratesApi
 				} else {
 					ctx.PropertyErrorf("plugins", "%q is not a java_plugin module", otherName)
 				}
 			case errorpronePluginTag:
-				if _, ok := module.(*Plugin); ok {
+				if _, ok := android.OtherModuleProvider(ctx, module, JavaPluginInfoProvider); ok {
 					deps.errorProneProcessorPath = append(deps.errorProneProcessorPath, dep.ImplementationAndResourcesJars...)
 				} else {
 					ctx.PropertyErrorf("plugins", "%q is not a java_plugin module", otherName)
 				}
 			case exportedPluginTag:
-				if plugin, ok := module.(*Plugin); ok {
+				if plugin, ok := android.OtherModuleProvider(ctx, module, JavaPluginInfoProvider); ok {
 					j.exportedPluginJars = append(j.exportedPluginJars, dep.ImplementationAndResourcesJars...)
-					if plugin.pluginProperties.Processor_class != nil {
-						j.exportedPluginClasses = append(j.exportedPluginClasses, *plugin.pluginProperties.Processor_class)
+					if plugin.ProcessorClass != nil {
+						j.exportedPluginClasses = append(j.exportedPluginClasses, *plugin.ProcessorClass)
 					}
 					// Turbine doesn't run annotation processors, so any module that uses an
 					// annotation processor that generates API is incompatible with the turbine
 					// optimization.
-					j.exportedDisableTurbine = Bool(plugin.pluginProperties.Generates_api)
+					j.exportedDisableTurbine = plugin.GeneratesApi
 				} else {
 					ctx.PropertyErrorf("exported_plugins", "%q is not a java_plugin module", otherName)
 				}
 			case kotlinPluginTag:
-				if _, ok := module.(*KotlinPlugin); ok {
+				if _, ok := android.OtherModuleProvider(ctx, module, KotlinPluginInfoProvider); ok {
 					deps.kotlinPlugins = append(deps.kotlinPlugins, dep.ImplementationAndResourcesJars...)
 				} else {
 					ctx.PropertyErrorf("kotlin_plugins", "%q is not a kotlin_plugin module", otherName)
@@ -2521,21 +2556,21 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 					JavaInfo: dep,
 				})
 			}
-		} else if dep, ok := module.(android.SourceFileProducer); ok {
+		} else if dep, ok := android.OtherModuleProvider(ctx, module, android.SourceFilesInfoProvider); ok {
 			switch tag {
 			case sdkLibTag, libTag:
-				checkProducesJars(ctx, dep)
-				deps.classpath = append(deps.classpath, dep.Srcs()...)
-				deps.dexClasspath = append(deps.classpath, dep.Srcs()...)
+				checkProducesJars(ctx, dep, module)
+				deps.classpath = append(deps.classpath, dep.Srcs...)
+				deps.dexClasspath = append(deps.classpath, dep.Srcs...)
 				transitiveClasspathHeaderJars = append(transitiveClasspathHeaderJars,
-					depset.New(depset.PREORDER, dep.Srcs(), nil))
+					depset.New(depset.PREORDER, dep.Srcs, nil))
 			case staticLibTag:
-				checkProducesJars(ctx, dep)
-				deps.classpath = append(deps.classpath, dep.Srcs()...)
-				deps.staticJars = append(deps.staticJars, dep.Srcs()...)
-				deps.staticHeaderJars = append(deps.staticHeaderJars, dep.Srcs()...)
+				checkProducesJars(ctx, dep, module)
+				deps.classpath = append(deps.classpath, dep.Srcs...)
+				deps.staticJars = append(deps.staticJars, dep.Srcs...)
+				deps.staticHeaderJars = append(deps.staticHeaderJars, dep.Srcs...)
 
-				depHeaderJars := depset.New(depset.PREORDER, dep.Srcs(), nil)
+				depHeaderJars := depset.New(depset.PREORDER, dep.Srcs, nil)
 				transitiveClasspathHeaderJars = append(transitiveClasspathHeaderJars, depHeaderJars)
 				transitiveStaticJarsHeaderLibs = append(transitiveStaticJarsHeaderLibs, depHeaderJars)
 				transitiveStaticJarsImplementationLibs = append(transitiveStaticJarsImplementationLibs, depHeaderJars)
@@ -2636,18 +2671,11 @@ const (
 	RenameUseExclude
 )
 
-type RenameUseElement struct {
-	DepName   string
-	RenameUse DependencyUse
-	Why       string // token for determining where in the logic the decision was made.
-}
-
 type JarJarProviderData struct {
 	// Mapping of class names: original --> renamed.  If the value is "", the class will be
 	// renamed by the next rdep that has the jarjar_prefix attribute (or this module if it has
 	// attribute). Rdeps of that module will inherit the renaming.
-	Rename    map[string]string
-	RenameUse []RenameUseElement
+	Rename map[string]string
 }
 
 func (this JarJarProviderData) GetDebugString() string {
@@ -2718,7 +2746,7 @@ func collectDirectDepsProviders(ctx android.ModuleContext) (result *JarJarProvid
 	module := ctx.Module()
 	moduleName := module.Name()
 
-	ctx.VisitDirectDeps(func(m android.Module) {
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
 		tag := ctx.OtherModuleDependencyTag(m)
 		// This logic mirrors that in (*Module).collectDeps above.  There are several places
 		// where we explicitly return RenameUseExclude, even though it is the default, to
@@ -2726,93 +2754,89 @@ func collectDirectDepsProviders(ctx android.ModuleContext) (result *JarJarProvid
 		//
 		// Note well: there are probably cases that are getting to the unconditional return
 		// and are therefore wrong.
-		shouldIncludeRenames := func() (DependencyUse, string) {
+		shouldIncludeRenames := func() DependencyUse {
 			if moduleName == m.Name() {
-				return RenameUseInclude, "name" // If we have the same module name, include the renames.
+				return RenameUseInclude // If we have the same module name, include the renames.
 			}
 			if sc, ok := module.(android.SdkContext); ok {
 				if ctx.Device() {
 					sdkDep := decodeSdkDep(ctx, sc)
 					if !sdkDep.invalidVersion && sdkDep.useFiles {
-						return RenameUseExclude, "useFiles"
+						return RenameUseExclude
 					}
 				}
 			}
 			if IsJniDepTag(tag) || tag == certificateTag || tag == proguardRaiseTag {
-				return RenameUseExclude, "tags"
+				return RenameUseExclude
 			}
 			if _, ok := android.OtherModuleProvider(ctx, m, SdkLibraryInfoProvider); ok {
 				switch tag {
 				case sdkLibTag, libTag:
-					return RenameUseExclude, "sdklibdep" // matches collectDeps()
+					return RenameUseExclude // matches collectDeps()
 				}
-				return RenameUseInvalid, "sdklibdep" // dep is not used in collectDeps()
+				return RenameUseInvalid // dep is not used in collectDeps()
 			} else if ji, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok {
 				switch ji.StubsLinkType {
 				case Stubs:
-					return RenameUseExclude, "info"
+					return RenameUseExclude
 				case Implementation:
-					return RenameUseInclude, "info"
+					return RenameUseInclude
 				default:
 					//fmt.Printf("collectDirectDepsProviders: %v -> %v StubsLinkType unknown\n", module, m)
 					// Fall through to the heuristic logic.
 				}
-				switch reflect.TypeOf(m).String() {
-				case "*java.GeneratedJavaLibraryModule":
+				if _, ok := android.OtherModuleProvider(ctx, m, android.CodegenInfoProvider); ok {
 					// Probably a java_aconfig_library module.
-					// TODO: make this check better.
-					return RenameUseInclude, "reflect"
+					return RenameUseInclude
 				}
 				switch tag {
 				case bootClasspathTag:
-					return RenameUseExclude, "tagswitch"
+					return RenameUseExclude
 				case sdkLibTag, libTag, instrumentationForTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				case java9LibTag:
-					return RenameUseExclude, "tagswitch"
+					return RenameUseExclude
 				case staticLibTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				case pluginTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				case errorpronePluginTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				case exportedPluginTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				case kotlinPluginTag:
-					return RenameUseInclude, "tagswitch"
+					return RenameUseInclude
 				default:
-					return RenameUseExclude, "tagswitch"
+					return RenameUseExclude
 				}
-			} else if _, ok := m.(android.SourceFileProducer); ok {
+			} else if _, ok := android.OtherModuleProvider(ctx, m, android.SourceFilesInfoProvider); ok {
 				switch tag {
 				case sdkLibTag, libTag, staticLibTag:
-					return RenameUseInclude, "srcfile"
+					return RenameUseInclude
 				default:
-					return RenameUseExclude, "srcfile"
+					return RenameUseExclude
 				}
 			} else if _, ok := android.OtherModuleProvider(ctx, m, android.CodegenInfoProvider); ok {
-				return RenameUseInclude, "aconfig_declarations_group"
+				return RenameUseInclude
 			} else {
 				switch tag {
 				case bootClasspathTag:
-					return RenameUseExclude, "else"
+					return RenameUseExclude
 				case systemModulesTag:
-					return RenameUseInclude, "else"
+					return RenameUseInclude
 				}
 			}
 			// If we got here, choose the safer option, which may lead to a build failure, rather
 			// than runtime failures on the device.
-			return RenameUseExclude, "end"
+			return RenameUseExclude
 		}
 
 		if result == nil {
 			result = &JarJarProviderData{
-				Rename:    make(map[string]string),
-				RenameUse: make([]RenameUseElement, 0),
+				Rename: make(map[string]string),
 			}
 		}
-		how, why := shouldIncludeRenames()
-		result.RenameUse = append(result.RenameUse, RenameUseElement{DepName: m.Name(), RenameUse: how, Why: why})
+		how := shouldIncludeRenames()
 		if how != RenameUseInclude {
 			// Nothing to merge.
 			return

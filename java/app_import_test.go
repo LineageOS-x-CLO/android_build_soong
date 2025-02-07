@@ -59,6 +59,45 @@ func TestAndroidAppImport(t *testing.T) {
 	android.AssertStringEquals(t, "Invalid args", "/system/app/foo/foo.apk", rule.Args["install_path"])
 }
 
+func TestAndroidAppImportWithDefaults(t *testing.T) {
+	ctx, _ := testJava(t, `
+		android_app_import {
+			name: "foo",
+			defaults: ["foo_defaults"],
+		}
+
+		java_defaults {
+			name: "foo_defaults",
+			apk: "prebuilts/apk/app.apk",
+			certificate: "platform",
+			dex_preopt: {
+				enabled: true,
+			},
+		}
+		`)
+
+	variant := ctx.ModuleForTests("foo", "android_common")
+
+	// Check dexpreopt outputs.
+	if variant.MaybeOutput("dexpreopt/foo/oat/arm64/package.vdex").Rule == nil ||
+		variant.MaybeOutput("dexpreopt/foo/oat/arm64/package.odex").Rule == nil {
+		t.Errorf("can't find dexpreopt outputs")
+	}
+
+	// Check cert signing flag.
+	signedApk := variant.Output("signed/foo.apk")
+	signingFlag := signedApk.Args["certificates"]
+	expected := "build/make/target/product/security/platform.x509.pem build/make/target/product/security/platform.pk8"
+	if expected != signingFlag {
+		t.Errorf("Incorrect signing flags, expected: %q, got: %q", expected, signingFlag)
+	}
+	rule := variant.Rule("genProvenanceMetaData")
+	android.AssertStringEquals(t, "Invalid input", "prebuilts/apk/app.apk", rule.Inputs[0].String())
+	android.AssertStringEquals(t, "Invalid output", "out/soong/.intermediates/provenance_metadata/foo/provenance_metadata.textproto", rule.Output.String())
+	android.AssertStringEquals(t, "Invalid args", "foo", rule.Args["module_name"])
+	android.AssertStringEquals(t, "Invalid args", "/system/app/foo/foo.apk", rule.Args["install_path"])
+}
+
 func TestAndroidAppImport_NoDexPreopt(t *testing.T) {
 	ctx, _ := testJava(t, `
 		android_app_import {
@@ -325,10 +364,25 @@ func TestAndroidAppImport_Filename(t *testing.T) {
 		}
 
 		android_app_import {
+			name: "foo_compressed",
+			apk: "prebuilts/apk/app.apk",
+			presigned: true,
+			compress_apk: true,
+		}
+
+		android_app_import {
 			name: "bar",
 			apk: "prebuilts/apk/app.apk",
 			presigned: true,
-			filename: "bar_sample.apk"
+			filename: "bar_sample.apk",
+		}
+
+		android_app_import {
+			name: "compressed_bar",
+			apk: "prebuilts/apk/app.apk",
+			presigned: true,
+			filename: "bar_sample.apk",
+			compress_apk: true,
 		}
 		`)
 
@@ -347,11 +401,25 @@ func TestAndroidAppImport_Filename(t *testing.T) {
 			expectedMetaDataPath: "out/soong/.intermediates/provenance_metadata/foo/provenance_metadata.textproto",
 		},
 		{
+			name:                 "foo_compressed",
+			expected:             "foo_compressed.apk.gz",
+			onDevice:             "/system/app/foo_compressed/foo_compressed.apk.gz",
+			expectedArtifactPath: "prebuilts/apk/app.apk",
+			expectedMetaDataPath: "out/soong/.intermediates/provenance_metadata/foo_compressed/provenance_metadata.textproto",
+		},
+		{
 			name:                 "bar",
 			expected:             "bar_sample.apk",
 			onDevice:             "/system/app/bar/bar_sample.apk",
 			expectedArtifactPath: "prebuilts/apk/app.apk",
 			expectedMetaDataPath: "out/soong/.intermediates/provenance_metadata/bar/provenance_metadata.textproto",
+		},
+		{
+			name:                 "compressed_bar",
+			expected:             "bar_sample.apk",
+			onDevice:             "/system/app/compressed_bar/bar_sample.apk",
+			expectedArtifactPath: "prebuilts/apk/app.apk",
+			expectedMetaDataPath: "out/soong/.intermediates/provenance_metadata/compressed_bar/provenance_metadata.textproto",
 		},
 	}
 
@@ -685,6 +753,22 @@ func TestAndroidAppImport_relativeInstallPath(t *testing.T) {
 	}
 }
 
+func TestAndroidAppImport_ExtractApk(t *testing.T) {
+	ctx, _ := testJava(t, `
+		android_app_import {
+			name: "foo",
+			apk: "prebuilts/apk/app.apk",
+			certificate: "platform",
+			extract_apk: "extract_path/sub_app.apk"
+		}
+		`)
+
+	variant := ctx.ModuleForTests("foo", "android_common")
+	extractRuleArgs := variant.Output("extract-apk/foo.apk").BuildParams.Args
+	if extractRuleArgs["extract_apk"] != "extract_path/sub_app.apk" {
+		t.Errorf("Unexpected extract apk args: %s", extractRuleArgs["extract_apk"])
+	}
+}
 func TestAndroidTestImport(t *testing.T) {
 	ctx, _ := testJava(t, `
 		android_test_import {
@@ -737,13 +821,13 @@ func TestAndroidTestImport_NoJinUncompressForPresigned(t *testing.T) {
 	variant := ctx.ModuleForTests("foo", "android_common")
 	jniRule := variant.Output("jnis-uncompressed/foo.apk").BuildParams.Rule.String()
 	if jniRule == android.Cp.String() {
-		t.Errorf("Unexpected JNI uncompress rule command: " + jniRule)
+		t.Errorf("Unexpected JNI uncompress rule command: %s", jniRule)
 	}
 
 	variant = ctx.ModuleForTests("foo_presigned", "android_common")
 	jniRule = variant.Output("jnis-uncompressed/foo_presigned.apk").BuildParams.Rule.String()
 	if jniRule != android.Cp.String() {
-		t.Errorf("Unexpected JNI uncompress rule: " + jniRule)
+		t.Errorf("Unexpected JNI uncompress rule: %s", jniRule)
 	}
 	if variant.MaybeOutput("zip-aligned/foo_presigned.apk").Rule == nil {
 		t.Errorf("Presigned test apk should be aligned")
@@ -764,7 +848,7 @@ func TestAndroidTestImport_Preprocessed(t *testing.T) {
 	variant := ctx.ModuleForTests("foo", "android_common")
 	jniRule := variant.Output("jnis-uncompressed/" + apkName).BuildParams.Rule.String()
 	if jniRule != android.Cp.String() {
-		t.Errorf("Unexpected JNI uncompress rule: " + jniRule)
+		t.Errorf("Unexpected JNI uncompress rule: %s", jniRule)
 	}
 
 	// Make sure signing and aligning were skipped.
@@ -807,7 +891,7 @@ func TestAndroidAppImport_Preprocessed(t *testing.T) {
 			variant := result.ModuleForTests("foo", "android_common")
 			outputBuildParams := variant.Output(apkName).BuildParams
 			if outputBuildParams.Rule.String() != android.Cp.String() {
-				t.Errorf("Unexpected prebuilt android_app_import rule: " + outputBuildParams.Rule.String())
+				t.Errorf("Unexpected prebuilt android_app_import rule: %s", outputBuildParams.Rule.String())
 			}
 
 			// Make sure compression and aligning were validated.
@@ -817,7 +901,7 @@ func TestAndroidAppImport_Preprocessed(t *testing.T) {
 
 			validationBuildParams := variant.Output("validated-prebuilt/check.stamp").BuildParams
 			if validationBuildParams.Rule.String() != checkPresignedApkRule.String() {
-				t.Errorf("Unexpected validation rule: " + validationBuildParams.Rule.String())
+				t.Errorf("Unexpected validation rule: %s", validationBuildParams.Rule.String())
 			}
 
 			expectedScriptArgs := "--preprocessed"
@@ -829,7 +913,7 @@ func TestAndroidAppImport_Preprocessed(t *testing.T) {
 			variant = result.ModuleForTests("bar", "android_common")
 			outputBuildParams = variant.Output(apkName).BuildParams
 			if outputBuildParams.Rule.String() != android.Cp.String() {
-				t.Errorf("Unexpected prebuilt android_app_import rule: " + outputBuildParams.Rule.String())
+				t.Errorf("Unexpected prebuilt android_app_import rule: %s", outputBuildParams.Rule.String())
 			}
 
 			// Make sure compression and aligning were validated.
@@ -839,7 +923,7 @@ func TestAndroidAppImport_Preprocessed(t *testing.T) {
 
 			validationBuildParams = variant.Output("validated-prebuilt/check.stamp").BuildParams
 			if validationBuildParams.Rule.String() != checkPresignedApkRule.String() {
-				t.Errorf("Unexpected validation rule: " + validationBuildParams.Rule.String())
+				t.Errorf("Unexpected validation rule: %s", validationBuildParams.Rule.String())
 			}
 
 			expectedScriptArgs = "--privileged"

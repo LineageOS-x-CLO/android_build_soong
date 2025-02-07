@@ -29,28 +29,25 @@ import (
 // and the corresponding functions are called from [exceptionHandleFunctionsTable] map.
 // ----------------------------------------------------------------------------
 
-type exceptionHandleFunc func(ModuleContext, Module, Module) bool
+type exceptionHandleFunc func(ModuleContext, Module, ModuleProxy) bool
 
 type StubsAvailableModule interface {
 	IsStubsModule() bool
 }
 
 // Returns true if the dependency module is a stubs module
-var depIsStubsModule exceptionHandleFunc = func(_ ModuleContext, _, dep Module) bool {
-	if stubsModule, ok := dep.(StubsAvailableModule); ok {
-		return stubsModule.IsStubsModule()
-	}
-	return false
+var depIsStubsModule exceptionHandleFunc = func(mctx ModuleContext, _ Module, dep ModuleProxy) bool {
+	return OtherModuleProviderOrDefault(mctx, dep, CommonModuleInfoKey).IsStubsModule
 }
 
 // Returns true if the dependency module belongs to any of the apexes.
-var depIsApexModule exceptionHandleFunc = func(mctx ModuleContext, _, dep Module) bool {
+var depIsApexModule exceptionHandleFunc = func(mctx ModuleContext, _ Module, dep ModuleProxy) bool {
 	depContainersInfo, _ := getContainerModuleInfo(mctx, dep)
 	return InList(ApexContainer, depContainersInfo.belongingContainers)
 }
 
 // Returns true if the module and the dependent module belongs to common apexes.
-var belongsToCommonApexes exceptionHandleFunc = func(mctx ModuleContext, m, dep Module) bool {
+var belongsToCommonApexes exceptionHandleFunc = func(mctx ModuleContext, m Module, dep ModuleProxy) bool {
 	mContainersInfo, _ := getContainerModuleInfo(mctx, m)
 	depContainersInfo, _ := getContainerModuleInfo(mctx, dep)
 
@@ -60,7 +57,7 @@ var belongsToCommonApexes exceptionHandleFunc = func(mctx ModuleContext, m, dep 
 // Returns true when all apexes that the module belongs to are non updatable.
 // For an apex module to be allowed to depend on a non-apex partition module,
 // all apexes that the module belong to must be non updatable.
-var belongsToNonUpdatableApex exceptionHandleFunc = func(mctx ModuleContext, m, _ Module) bool {
+var belongsToNonUpdatableApex exceptionHandleFunc = func(mctx ModuleContext, m Module, _ ModuleProxy) bool {
 	mContainersInfo, _ := getContainerModuleInfo(mctx, m)
 
 	return !mContainersInfo.UpdatableApex()
@@ -68,7 +65,7 @@ var belongsToNonUpdatableApex exceptionHandleFunc = func(mctx ModuleContext, m, 
 
 // Returns true if the dependency is added via dependency tags that are not used to tag dynamic
 // dependency tags.
-var depIsNotDynamicDepTag exceptionHandleFunc = func(ctx ModuleContext, m, dep Module) bool {
+var depIsNotDynamicDepTag exceptionHandleFunc = func(ctx ModuleContext, m Module, dep ModuleProxy) bool {
 	mInstallable, _ := m.(InstallableModule)
 	depTag := ctx.OtherModuleDependencyTag(dep)
 	return !InList(depTag, mInstallable.DynamicDependencyTags())
@@ -77,7 +74,7 @@ var depIsNotDynamicDepTag exceptionHandleFunc = func(ctx ModuleContext, m, dep M
 // Returns true if the dependency is added via dependency tags that are not used to tag static
 // or dynamic dependency tags. These dependencies do not affect the module in compile time or in
 // runtime, thus are not significant enough to raise an error.
-var depIsNotStaticOrDynamicDepTag exceptionHandleFunc = func(ctx ModuleContext, m, dep Module) bool {
+var depIsNotStaticOrDynamicDepTag exceptionHandleFunc = func(ctx ModuleContext, m Module, dep ModuleProxy) bool {
 	mInstallable, _ := m.(InstallableModule)
 	depTag := ctx.OtherModuleDependencyTag(dep)
 	return !InList(depTag, append(mInstallable.StaticDependencyTags(), mInstallable.DynamicDependencyTags()...))
@@ -104,7 +101,7 @@ var globallyAllowlistedDependencies = []string{
 }
 
 // Returns true when the dependency is globally allowlisted for inter-container dependency
-var depIsGloballyAllowlisted exceptionHandleFunc = func(_ ModuleContext, _, dep Module) bool {
+var depIsGloballyAllowlisted exceptionHandleFunc = func(_ ModuleContext, _ Module, dep ModuleProxy) bool {
 	return InList(dep.Name(), globallyAllowlistedDependencies)
 }
 
@@ -196,9 +193,7 @@ var unstableInfoProvider = blueprint.NewProvider[unstableInfo]()
 func determineUnstableModule(mctx ModuleContext) bool {
 	module := mctx.Module()
 
-	// TODO(b/383559945) Remove "framework-minus-apex_jarjar-sharded" once
-	// we remove this module.
-	unstableModule := module.Name() == "framework-minus-apex" || module.Name() == "framework-minus-apex_jarjar-sharded"
+	unstableModule := module.Name() == "framework-minus-apex"
 	if installable, ok := module.(InstallableModule); ok {
 		for _, staticDepTag := range installable.StaticDependencyTags() {
 			mctx.VisitDirectDepsWithTag(staticDepTag, func(dep Module) {
@@ -422,7 +417,7 @@ func generateContainerInfo(ctx ModuleContext) ContainersInfo {
 }
 
 func getContainerModuleInfo(ctx ModuleContext, module Module) (ContainersInfo, bool) {
-	if ctx.Module() == module {
+	if ctx.EqualModules(ctx.Module(), module) {
 		return ctx.getContainersInfo(), true
 	}
 

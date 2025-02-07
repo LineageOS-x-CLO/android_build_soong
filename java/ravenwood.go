@@ -110,7 +110,7 @@ func ravenwoodTestFactory() android.Module {
 	module.AddProperties(&module.testProperties, &module.ravenwoodTestProperties)
 
 	module.Module.dexpreopter.isTest = true
-	module.Module.linter.properties.Lint.Test = proptools.BoolPtr(true)
+	module.Module.linter.properties.Lint.Test_module_type = proptools.BoolPtr(true)
 
 	module.testProperties.Test_suites = []string{
 		"general-tests",
@@ -185,26 +185,24 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// All JNI libraries included in the runtime
 	var runtimeJniModuleNames map[string]bool
 
-	if utils := ctx.GetDirectDepsWithTag(ravenwoodUtilsTag)[0]; utils != nil {
-		for _, installFile := range android.OtherModuleProviderOrDefault(
-			ctx, utils, android.InstallFilesProvider).InstallFiles {
-			installDeps = append(installDeps, installFile)
-		}
-		jniDeps, ok := android.OtherModuleProvider(ctx, utils, ravenwoodLibgroupJniDepProvider)
-		if ok {
-			runtimeJniModuleNames = jniDeps.names
-		}
+	utils := ctx.GetDirectDepsProxyWithTag(ravenwoodUtilsTag)[0]
+	for _, installFile := range android.OtherModuleProviderOrDefault(
+		ctx, utils, android.InstallFilesProvider).InstallFiles {
+		installDeps = append(installDeps, installFile)
+	}
+	jniDeps, ok := android.OtherModuleProvider(ctx, utils, ravenwoodLibgroupJniDepProvider)
+	if ok {
+		runtimeJniModuleNames = jniDeps.names
 	}
 
-	if runtime := ctx.GetDirectDepsWithTag(ravenwoodRuntimeTag)[0]; runtime != nil {
-		for _, installFile := range android.OtherModuleProviderOrDefault(
-			ctx, runtime, android.InstallFilesProvider).InstallFiles {
-			installDeps = append(installDeps, installFile)
-		}
-		jniDeps, ok := android.OtherModuleProvider(ctx, runtime, ravenwoodLibgroupJniDepProvider)
-		if ok {
-			runtimeJniModuleNames = jniDeps.names
-		}
+	runtime := ctx.GetDirectDepsProxyWithTag(ravenwoodRuntimeTag)[0]
+	for _, installFile := range android.OtherModuleProviderOrDefault(
+		ctx, runtime, android.InstallFilesProvider).InstallFiles {
+		installDeps = append(installDeps, installFile)
+	}
+	jniDeps, ok = android.OtherModuleProvider(ctx, runtime, ravenwoodLibgroupJniDepProvider)
+	if ok {
+		runtimeJniModuleNames = jniDeps.names
 	}
 
 	// Also remember what JNI libs are in the runtime.
@@ -228,7 +226,7 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	resApkInstallPath := installPath.Join(ctx, "ravenwood-res-apks")
 
 	copyResApk := func(tag blueprint.DependencyTag, toFileName string) {
-		if resApk := ctx.GetDirectDepsWithTag(tag); len(resApk) > 0 {
+		if resApk := ctx.GetDirectDepsProxyWithTag(tag); len(resApk) > 0 {
 			installFile := android.OutputFileForModule(ctx, resApk[0], "")
 			installResApk := ctx.InstallFile(resApkInstallPath, toFileName, installFile)
 			installDeps = append(installDeps, installResApk)
@@ -345,7 +343,7 @@ func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContex
 	// Install our runtime into expected location for packaging
 	installPath := android.PathForModuleInstall(ctx, r.BaseModuleName())
 	for _, lib := range r.ravenwoodLibgroupProperties.Libs {
-		libModule := ctx.GetDirectDepWithTag(lib, ravenwoodLibContentTag)
+		libModule := ctx.GetDirectDepProxyWithTag(lib, ravenwoodLibContentTag)
 		if libModule == nil {
 			if ctx.Config().AllowMissingDependencies() {
 				ctx.AddMissingDependencies([]string{lib})

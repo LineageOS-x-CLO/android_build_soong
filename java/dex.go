@@ -42,11 +42,25 @@ type DexProperties struct {
 		// True if the module containing this has it set by default.
 		EnabledByDefault bool `blueprint:"mutated"`
 
+		// Whether to allow that library classes inherit from program classes.
+		// Defaults to false.
+		Ignore_library_extends_program *bool
+
 		// Whether to continue building even if warnings are emitted.  Defaults to true.
 		Ignore_warnings *bool
 
+		// Whether runtime invisible annotations should be kept by R8. Defaults to false.
+		// This is equivalent to:
+		//   -keepattributes RuntimeInvisibleAnnotations,
+		//                   RuntimeInvisibleParameterAnnotations,
+		//                   RuntimeInvisibleTypeAnnotations
+		// This is only applicable when RELEASE_R8_ONLY_RUNTIME_VISIBLE_ANNOTATIONS is
+		// enabled and will be used to migrate away from keeping runtime invisible
+		// annotations (b/387958004).
+		Keep_runtime_invisible_annotations *bool
+
 		// If true, runs R8 in Proguard compatibility mode, otherwise runs R8 in full mode.
-		// Defaults to false for apps, true for libraries and tests.
+		// Defaults to false for apps and tests, true for libraries.
 		Proguard_compatibility *bool
 
 		// If true, optimize for size by removing unused code.  Defaults to true for apps,
@@ -306,7 +320,7 @@ func (d *dexer) r8Flags(ctx android.ModuleContext, dexParams *compileDexParams, 
 	// TODO(b/360905238): Remove SdkSystemServer exception after resolving missing class references.
 	if !dexParams.sdkVersion.Stable() || dexParams.sdkVersion.Kind == android.SdkSystemServer {
 		var proguardRaiseDeps classpath
-		ctx.VisitDirectDepsWithTag(proguardRaiseTag, func(m android.Module) {
+		ctx.VisitDirectDepsProxyWithTag(proguardRaiseTag, func(m android.ModuleProxy) {
 			if dep, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok {
 				proguardRaiseDeps = append(proguardRaiseDeps, dep.RepackagedHeaderJars...)
 			}
@@ -356,7 +370,15 @@ func (d *dexer) r8Flags(ctx android.ModuleContext, dexParams *compileDexParams, 
 
 	r8Flags = append(r8Flags, opt.Proguard_flags...)
 
-	if BoolDefault(opt.Proguard_compatibility, true) {
+	if BoolDefault(opt.Ignore_library_extends_program, false) {
+		r8Flags = append(r8Flags, "--ignore-library-extends-program")
+	}
+
+	if BoolDefault(opt.Keep_runtime_invisible_annotations, false) {
+		r8Flags = append(r8Flags, "--keep-runtime-invisible-annotations")
+	}
+
+	if BoolDefault(opt.Proguard_compatibility, !ctx.Config().UseR8FullModeByDefault()) {
 		r8Flags = append(r8Flags, "--force-proguard-compatibility")
 	}
 

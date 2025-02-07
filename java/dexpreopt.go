@@ -204,7 +204,7 @@ func disableSourceApexVariant(ctx android.BaseModuleContext) bool {
 	}
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	psi := android.PrebuiltSelectionInfoMap{}
-	ctx.VisitDirectDeps(func(am android.Module) {
+	ctx.VisitDirectDepsProxy(func(am android.ModuleProxy) {
 		if prebuiltSelectionInfo, ok := android.OtherModuleProvider(ctx, am, android.PrebuiltSelectionInfoProvider); ok {
 			psi = prebuiltSelectionInfo
 		}
@@ -346,7 +346,11 @@ func (d *Dexpreopter) DexpreoptPrebuiltApexSystemServerJars(ctx android.ModuleCo
 	d.installPath = android.PathForModuleInPartitionInstall(ctx, "", strings.TrimPrefix(dexpreopt.GetSystemServerDexLocation(ctx, dc, libraryName), "/"))
 	// generate the rules for creating the .odex and .vdex files for this system server jar
 	dexJarFile := di.PrebuiltExportPath(ApexRootRelativePathToJavaLib(libraryName))
-
+	if dexJarFile == nil {
+		ctx.ModuleErrorf(
+			`Could not find library %s in prebuilt apex %s.
+Please make sure that the value of PRODUCT_APEX_(SYSTEM_SERVER|STANDALONE_SYSTEM_SERVER)_JARS is correct`, libraryName, ctx.ModuleName())
+	}
 	d.inputProfilePathOnHost = nil // reset: TODO(spandandas): Make dexpreopter stateless
 	if android.InList(libraryName, di.GetDexpreoptProfileGuidedExportedModuleNames()) {
 		// Set the profile path to guide optimization
