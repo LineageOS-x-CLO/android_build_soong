@@ -64,6 +64,7 @@ func registerJavaBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("java_api_library", ApiLibraryFactory)
 	ctx.RegisterModuleType("java_api_contribution", ApiContributionFactory)
 	ctx.RegisterModuleType("java_api_contribution_import", ApiContributionImportFactory)
+	ctx.RegisterModuleType("java_genrule_combiner", GenruleCombinerFactory)
 
 	// This mutator registers dependencies on dex2oat for modules that should be
 	// dexpreopted. This is done late when the final variants have been
@@ -373,7 +374,7 @@ type JavaInfo struct {
 
 	ProvidesUsesLibInfo *ProvidesUsesLibInfo
 
-	ModuleWithUsesLibraryInfo *ModuleWithUsesLibraryInfo
+	MissingOptionalUsesLibs []string
 
 	ModuleWithSdkDepInfo *ModuleWithSdkDepInfo
 
@@ -402,7 +403,12 @@ type JavaInfo struct {
 
 	BuiltInstalled string
 
-	BuiltInstalledForApex []dexpreopterInstall
+	// ApexSystemServerDexpreoptInstalls stores the list of dexpreopt artifacts if this is a system server
+	// jar in an apex.
+	ApexSystemServerDexpreoptInstalls []DexpreopterInstall
+
+	// ApexSystemServerDexJars stores the list of dex jars if this is a system server jar in an apex.
+	ApexSystemServerDexJars android.Paths
 
 	// The config is used for two purposes:
 	// - Passing dexpreopt information about libraries from Soong to Make. This is needed when
@@ -590,7 +596,7 @@ var (
 )
 
 func IsLibDepTag(depTag blueprint.DependencyTag) bool {
-	return depTag == libTag || depTag == sdkLibTag
+	return depTag == libTag
 }
 
 func IsStaticLibDepTag(depTag blueprint.DependencyTag) bool {
@@ -823,6 +829,8 @@ type Library struct {
 	combinedExportedProguardFlagsFile android.Path
 
 	InstallMixin func(ctx android.ModuleContext, installPath android.Path) (extraInstallDeps android.InstallPaths)
+
+	apiXmlFile android.WritablePath
 }
 
 var _ android.ApexModule = (*Library)(nil)
@@ -1129,7 +1137,8 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		javaInfo.BootDexJarPath = j.bootDexJarPath
 		javaInfo.UncompressDexState = j.uncompressDexState
 		javaInfo.Active = j.active
-		javaInfo.BuiltInstalledForApex = j.builtInstalledForApex
+		javaInfo.ApexSystemServerDexpreoptInstalls = j.apexSystemServerDexpreoptInstalls
+		javaInfo.ApexSystemServerDexJars = j.apexSystemServerDexJars
 		javaInfo.BuiltInstalled = j.builtInstalled
 		javaInfo.ConfigPath = j.configPath
 		javaInfo.OutputProfilePathOnHost = j.outputProfilePathOnHost
@@ -1149,6 +1158,8 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	j.javaLibraryModuleInfoJSON(ctx)
 
 	buildComplianceMetadata(ctx)
+
+	j.createApiXmlFile(ctx)
 }
 
 func (j *Library) javaLibraryModuleInfoJSON(ctx android.ModuleContext) *android.ModuleInfoJSON {
@@ -1172,7 +1183,6 @@ func (j *Library) javaLibraryModuleInfoJSON(ctx android.ModuleContext) *android.
 
 	if j.hideApexVariantFromMake {
 		moduleInfoJSON.Disabled = true
-		j.dexpreopter.ModuleInfoJSONForApex(ctx)
 	}
 	return moduleInfoJSON
 }
@@ -1251,6 +1261,35 @@ func (j *Library) DepsMutator(ctx android.BottomUpMutatorContext) {
 		if prebuiltSdkLibExists && ctx.OtherModuleExists("all_apex_contributions") {
 			ctx.AddDependency(ctx.Module(), android.AcDepTag, "all_apex_contributions")
 		}
+	}
+}
+
+var apiXMLGeneratingApiSurfaces = []android.SdkKind{
+	android.SdkPublic,
+	android.SdkSystem,
+	android.SdkModule,
+	android.SdkSystemServer,
+	android.SdkTest,
+}
+
+func (j *Library) createApiXmlFile(ctx android.ModuleContext) {
+	if kind, ok := android.JavaLibraryNameToSdkKind(ctx.ModuleName()); ok && android.InList(kind, apiXMLGeneratingApiSurfaces) {
+		scopePrefix := AllApiScopes.matchingScopeFromSdkKind(kind).apiFilePrefix
+		j.apiXmlFile = android.PathForModuleOut(ctx, fmt.Sprintf("%sapi.xml", scopePrefix))
+		ctx.Build(pctx, android.BuildParams{
+			Rule: generateApiXMLRule,
+			// LOCAL_SOONG_CLASSES_JAR
+			Input:  j.implementationAndResourcesJar,
+			Output: j.apiXmlFile,
+		})
+	}
+}
+
+var _ android.ModuleMakeVarsProvider = (*Library)(nil)
+
+func (j *Library) MakeVars(ctx android.MakeVarsModuleContext) {
+	if j.apiXmlFile != nil {
+		ctx.DistForGoal("dist_files", j.apiXmlFile)
 	}
 }
 
@@ -1883,8 +1922,8 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 			dataPath := android.DataPath{SrcPath: data}
 			ctx.InstallTestData(pathInTestCases, []android.DataPath{dataPath})
 		}
-		if j.installFile != nil {
-			ctx.InstallFile(pathInTestCases, ctx.ModuleName()+".jar", j.installFile)
+		if j.outputFile != nil {
+			ctx.InstallFile(pathInTestCases, ctx.ModuleName()+".jar", j.outputFile)
 		}
 	}
 }
@@ -3674,11 +3713,11 @@ func addMissingOptionalUsesLibsFromDep(ctx android.ModuleContext, depModule andr
 	usesLibrary *usesLibrary) {
 
 	dep, ok := android.OtherModuleProvider(ctx, depModule, JavaInfoProvider)
-	if !ok || dep.ModuleWithUsesLibraryInfo == nil {
+	if !ok {
 		return
 	}
 
-	for _, lib := range dep.ModuleWithUsesLibraryInfo.UsesLibrary.usesLibraryProperties.Missing_optional_uses_libs {
+	for _, lib := range dep.MissingOptionalUsesLibs {
 		if !android.InList(lib, usesLibrary.usesLibraryProperties.Missing_optional_uses_libs) {
 			usesLibrary.usesLibraryProperties.Missing_optional_uses_libs =
 				append(usesLibrary.usesLibraryProperties.Missing_optional_uses_libs, lib)
@@ -3766,9 +3805,7 @@ func setExtraJavaInfo(ctx android.ModuleContext, module android.Module, javaInfo
 	}
 
 	if mwul, ok := module.(ModuleWithUsesLibrary); ok {
-		javaInfo.ModuleWithUsesLibraryInfo = &ModuleWithUsesLibraryInfo{
-			UsesLibrary: mwul.UsesLibrary(),
-		}
+		javaInfo.MissingOptionalUsesLibs = mwul.UsesLibrary().usesLibraryProperties.Missing_optional_uses_libs
 	}
 
 	if mwsd, ok := module.(moduleWithSdkDep); ok {

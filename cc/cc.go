@@ -66,19 +66,19 @@ type AidlInterfaceInfo struct {
 type CompilerInfo struct {
 	Srcs android.Paths
 	// list of module-specific flags that will be used for C and C++ compiles.
-	Cflags               proptools.Configurable[[]string]
+	Cflags               []string
 	AidlInterfaceInfo    AidlInterfaceInfo
 	LibraryDecoratorInfo *LibraryDecoratorInfo
 }
 
 type LinkerInfo struct {
-	WholeStaticLibs proptools.Configurable[[]string]
+	WholeStaticLibs []string
 	// list of modules that should be statically linked into this module.
-	StaticLibs proptools.Configurable[[]string]
+	StaticLibs []string
 	// list of modules that should be dynamically linked into this module.
-	SharedLibs proptools.Configurable[[]string]
+	SharedLibs []string
 	// list of modules that should only provide headers for this module.
-	HeaderLibs               proptools.Configurable[[]string]
+	HeaderLibs               []string
 	ImplementationModuleName *string
 
 	BinaryDecoratorInfo    *BinaryDecoratorInfo
@@ -91,7 +91,7 @@ type LinkerInfo struct {
 
 type BinaryDecoratorInfo struct{}
 type LibraryDecoratorInfo struct {
-	ExportIncludeDirs proptools.Configurable[[]string]
+	ExportIncludeDirs []string
 	InjectBsslHash    bool
 }
 
@@ -839,6 +839,7 @@ type libraryDependencyTag struct {
 
 	reexportFlags       bool
 	explicitlyVersioned bool
+	explicitlyImpl      bool
 	dataLib             bool
 	ndk                 bool
 
@@ -933,6 +934,11 @@ var (
 	aidlLibraryTag        = dependencyTag{name: "aidl_library"}
 	llndkHeaderLibTag     = dependencyTag{name: "llndk_header_lib"}
 )
+
+func IsExplicitImplSharedDepTag(depTag blueprint.DependencyTag) bool {
+	ccLibDepTag, ok := depTag.(libraryDependencyTag)
+	return ok && ccLibDepTag.shared() && ccLibDepTag.explicitlyImpl
+}
 
 func IsSharedDepTag(depTag blueprint.DependencyTag) bool {
 	ccLibDepTag, ok := depTag.(libraryDependencyTag)
@@ -2288,9 +2294,10 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		HasLlndkStubs:          c.HasLlndkStubs(),
 	}
 	if c.compiler != nil {
+		cflags := c.compiler.baseCompilerProps().Cflags
 		ccInfo.CompilerInfo = &CompilerInfo{
 			Srcs:   c.compiler.(CompiledInterface).Srcs(),
-			Cflags: c.compiler.baseCompilerProps().Cflags,
+			Cflags: cflags.GetOrDefault(ctx, nil),
 			AidlInterfaceInfo: AidlInterfaceInfo{
 				Sources:  c.compiler.baseCompilerProps().AidlInterface.Sources,
 				AidlRoot: c.compiler.baseCompilerProps().AidlInterface.AidlRoot,
@@ -2301,16 +2308,17 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		switch decorator := c.compiler.(type) {
 		case *libraryDecorator:
 			ccInfo.CompilerInfo.LibraryDecoratorInfo = &LibraryDecoratorInfo{
-				ExportIncludeDirs: decorator.flagExporter.Properties.Export_include_dirs,
+				ExportIncludeDirs: decorator.flagExporter.Properties.Export_include_dirs.GetOrDefault(ctx, nil),
 			}
 		}
 	}
 	if c.linker != nil {
+		baseLinkerProps := c.linker.baseLinkerProps()
 		ccInfo.LinkerInfo = &LinkerInfo{
-			WholeStaticLibs: c.linker.baseLinkerProps().Whole_static_libs,
-			StaticLibs:      c.linker.baseLinkerProps().Static_libs,
-			SharedLibs:      c.linker.baseLinkerProps().Shared_libs,
-			HeaderLibs:      c.linker.baseLinkerProps().Header_libs,
+			WholeStaticLibs: baseLinkerProps.Whole_static_libs.GetOrDefault(ctx, nil),
+			StaticLibs:      baseLinkerProps.Static_libs.GetOrDefault(ctx, nil),
+			SharedLibs:      baseLinkerProps.Shared_libs.GetOrDefault(ctx, nil),
+			HeaderLibs:      baseLinkerProps.Header_libs.GetOrDefault(ctx, nil),
 		}
 		switch decorator := c.linker.(type) {
 		case *binaryDecorator:
@@ -2698,6 +2706,9 @@ func AddSharedLibDependenciesWithVersions(ctx android.BottomUpMutatorContext, mo
 		variations = append(variations, blueprint.Variation{Mutator: "version", Variation: version})
 		if tag, ok := depTag.(libraryDependencyTag); ok {
 			tag.explicitlyVersioned = true
+			if version == "" {
+				tag.explicitlyImpl = true
+			}
 			// depTag is an interface that contains a concrete non-pointer struct.  That makes the local
 			// tag variable a copy of the contents of depTag, and updating it doesn't change depTag.  Reassign
 			// the modified copy to depTag.
@@ -4088,7 +4099,7 @@ func (c *Module) OutgoingDepIsInSameApex(depTag blueprint.DependencyTag) bool {
 
 func (c *Module) IncomingDepIsInSameApex(depTag blueprint.DependencyTag) bool {
 	if c.HasStubsVariants() {
-		if IsSharedDepTag(depTag) {
+		if IsSharedDepTag(depTag) && !IsExplicitImplSharedDepTag(depTag) {
 			// dynamic dep to a stubs lib crosses APEX boundary
 			return false
 		}
