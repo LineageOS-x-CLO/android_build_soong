@@ -237,6 +237,26 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	ctx.CheckbuildFile(allImagesStamp)
 
 	a.setVbmetaPhonyTargets(ctx)
+
+	a.distFiles(ctx)
+}
+
+func (a *androidDevice) distFiles(ctx android.ModuleContext) {
+	if !ctx.Config().KatiEnabled() {
+		if proptools.Bool(a.deviceProps.Main_device) {
+			fsInfoMap := a.getFsInfos(ctx)
+			for _, partition := range android.SortedKeys(fsInfoMap) {
+				fsInfo := fsInfoMap[partition]
+				if fsInfo.InstalledFiles.Json != nil {
+					ctx.DistForGoal("droidcore-unbundled", fsInfo.InstalledFiles.Json)
+				}
+				if fsInfo.InstalledFiles.Txt != nil {
+					ctx.DistForGoal("droidcore-unbundled", fsInfo.InstalledFiles.Txt)
+				}
+			}
+		}
+	}
+
 }
 
 func (a *androidDevice) MakeVars(ctx android.MakeVarsModuleContext) {
@@ -398,8 +418,12 @@ func (a *androidDevice) copyImagesToTargetZip(ctx android.ModuleContext, builder
 		superPartition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Super_partition_name, superPartitionDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, superPartition, SuperImageProvider); ok {
 			for _, partition := range android.SortedKeys(info.SubImageInfo) {
-				builder.Command().Textf("cp ").Input(info.SubImageInfo[partition].OutputHermetic).Textf(" %s/IMAGES/", targetFilesDir.String())
-				builder.Command().Textf("cp ").Input(info.SubImageInfo[partition].MapFile).Textf(" %s/IMAGES/", targetFilesDir.String())
+				if info.SubImageInfo[partition].OutputHermetic != nil {
+					builder.Command().Textf("cp ").Input(info.SubImageInfo[partition].OutputHermetic).Textf(" %s/IMAGES/", targetFilesDir.String())
+				}
+				if info.SubImageInfo[partition].MapFile != nil {
+					builder.Command().Textf("cp ").Input(info.SubImageInfo[partition].MapFile).Textf(" %s/IMAGES/", targetFilesDir.String())
+				}
 			}
 		} else {
 			ctx.ModuleErrorf("Super partition %s does set SuperImageProvider\n", superPartition.Name())
