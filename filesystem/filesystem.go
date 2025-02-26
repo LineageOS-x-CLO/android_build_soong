@@ -90,6 +90,8 @@ type filesystem struct {
 	entries []string
 
 	filesystemBuilder filesystemBuilder
+
+	selinuxFc android.Path
 }
 
 type filesystemBuilder interface {
@@ -413,6 +415,12 @@ type FilesystemInfo struct {
 
 	// Installed files list
 	InstalledFiles InstalledFilesStruct
+
+	// Path to compress hints file for erofs filesystems
+	// This will be nil for other fileystems like ext4
+	ErofsCompressHints android.Path
+
+	SelinuxFc android.Path
 }
 
 // FullInstallPathInfo contains information about the "full install" paths of all the files
@@ -634,6 +642,11 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	installedFileTxt, installedFileJson := buildInstalledFiles(ctx, partitionName, rootDir, f.output)
 
+	var erofsCompressHints android.Path
+	if f.properties.Erofs.Compress_hints != nil {
+		erofsCompressHints = android.PathForModuleSrc(ctx, *f.properties.Erofs.Compress_hints)
+	}
+
 	fsInfo := FilesystemInfo{
 		Output:                 f.output,
 		OutputHermetic:         outputHermetic,
@@ -650,6 +663,8 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			Txt:  installedFileTxt,
 			Json: installedFileJson,
 		},
+		ErofsCompressHints: erofsCompressHints,
+		SelinuxFc:          f.selinuxFc,
 	}
 
 	android.SetProvider(ctx, FilesystemProvider, fsInfo)
@@ -996,12 +1011,12 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 	if f.properties.File_contexts != nil && f.properties.Precompiled_file_contexts != nil {
 		ctx.ModuleErrorf("file_contexts and precompiled_file_contexts cannot both be set")
 	} else if f.properties.File_contexts != nil {
-		addPath("selinux_fc", f.buildFileContexts(ctx))
+		f.selinuxFc = f.buildFileContexts(ctx)
 	} else if f.properties.Precompiled_file_contexts != nil {
-		src := android.PathForModuleSrc(ctx, *f.properties.Precompiled_file_contexts)
-		if src != nil {
-			addPath("selinux_fc", src)
-		}
+		f.selinuxFc = android.PathForModuleSrc(ctx, *f.properties.Precompiled_file_contexts)
+	}
+	if f.selinuxFc != nil {
+		addPath("selinux_fc", f.selinuxFc)
 	}
 	if timestamp := proptools.String(f.properties.Fake_timestamp); timestamp != "" {
 		addStr("timestamp", timestamp)
