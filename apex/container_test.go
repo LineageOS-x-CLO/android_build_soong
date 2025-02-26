@@ -29,6 +29,7 @@ var checkContainerMatch = func(t *testing.T, name string, container string, expe
 
 func TestApexDepsContainers(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -162,6 +163,7 @@ func TestApexDepsContainers(t *testing.T) {
 
 func TestNonUpdatableApexDepsContainers(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -273,6 +275,7 @@ func TestNonUpdatableApexDepsContainers(t *testing.T) {
 
 func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,

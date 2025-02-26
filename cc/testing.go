@@ -196,7 +196,7 @@ func commonDefaultModules() string {
 			},
 			apex_available: [
 				"//apex_available:platform",
-				"myapex"
+				"//apex_available:anyapex",
 			],
 			llndk: {
 				symbol_file: "libm.map.txt",
@@ -259,7 +259,7 @@ func commonDefaultModules() string {
 			},
 			apex_available: [
 				"//apex_available:platform",
-				"myapex"
+				"//apex_available:anyapex",
 			],
 			llndk: {
 				symbol_file: "libdl.map.txt",
