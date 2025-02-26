@@ -1908,12 +1908,17 @@ type CommonModuleInfo struct {
 	// is used to avoid adding install or packaging dependencies into libraries provided
 	// by apexes.
 	UninstallableApexPlatformVariant bool
-	HideFromMake                     bool
-	SkipInstall                      bool
-	IsStubsModule                    bool
-	Host                             bool
 	MinSdkVersionSupported           ApiLevel
 	ModuleWithMinSdkVersionCheck     bool
+	// Tests if this module can be installed to APEX as a file. For example, this would return
+	// true for shared libs while return false for static libs because static libs are not
+	// installable module (but it can still be mutated for APEX)
+	IsInstallableToApex bool
+	HideFromMake        bool
+	SkipInstall         bool
+	IsStubsModule       bool
+	Host                bool
+	IsApexModule        bool
 }
 
 type ApiLevelOrPlatform struct {
@@ -2246,7 +2251,6 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		ReplacedByPrebuilt:               m.commonProperties.ReplacedByPrebuilt,
 		Target:                           m.commonProperties.CompileTarget,
 		SkipAndroidMkProcessing:          shouldSkipAndroidMkProcessing(ctx, m),
-		BaseModuleName:                   m.BaseModuleName(),
 		UninstallableApexPlatformVariant: m.commonProperties.UninstallableApexPlatformVariant,
 		HideFromMake:                     m.commonProperties.HideFromMake,
 		SkipInstall:                      m.commonProperties.SkipInstall,
@@ -2289,6 +2293,8 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		commonData.NotAvailableForPlatform = am.NotAvailableForPlatform()
 		commonData.NotInPlatform = am.NotInPlatform()
 		commonData.MinSdkVersionSupported = am.MinSdkVersionSupported(ctx)
+		commonData.IsInstallableToApex = am.IsInstallableToApex()
+		commonData.IsApexModule = true
 	}
 
 	if _, ok := m.module.(ModuleWithMinSdkVersionCheck); ok {
@@ -2297,6 +2303,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 
 	if st, ok := m.module.(StubsAvailableModule); ok {
 		commonData.IsStubsModule = st.IsStubsModule()
+	}
+	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
+		commonData.BaseModuleName = mm.BaseModuleName()
 	}
 	SetProvider(ctx, CommonModuleInfoKey, commonData)
 	if p, ok := m.module.(PrebuiltInterface); ok && p.Prebuilt() != nil {
