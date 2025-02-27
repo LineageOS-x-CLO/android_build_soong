@@ -1252,7 +1252,7 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 	linkerDeps = append(linkerDeps, deps.SharedLibsDeps...)
 	linkerDeps = append(linkerDeps, deps.LateSharedLibsDeps...)
 
-	if generatedLib := generateRustStaticlib(ctx, deps.RustRlibDeps); generatedLib != nil && !library.BuildStubs() {
+	if generatedLib := GenerateRustStaticlib(ctx, deps.RustRlibDeps); generatedLib != nil && !library.BuildStubs() {
 		if ctx.Module().(*Module).WholeRustStaticlib {
 			deps.WholeStaticLibs = append(deps.WholeStaticLibs, generatedLib)
 		} else {
@@ -2252,6 +2252,9 @@ func (linkageTransitionMutator) Split(ctx android.BaseModuleContext) []string {
 }
 
 func (linkageTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
+	if ctx.DepTag() == android.PrebuiltDepTag {
+		return sourceVariation
+	}
 	return ""
 }
 
@@ -2308,11 +2311,13 @@ func (linkageTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, varia
 			library.setStatic()
 			if !library.buildStatic() {
 				library.disablePrebuilt()
+				ctx.Module().(*Module).Prebuilt().SetUsePrebuilt(false)
 			}
 		} else if variation == "shared" {
 			library.setShared()
 			if !library.buildShared() {
 				library.disablePrebuilt()
+				ctx.Module().(*Module).Prebuilt().SetUsePrebuilt(false)
 			}
 		}
 	} else if library, ok := ctx.Module().(LinkableInterface); ok && library.CcLibraryInterface() {
@@ -2425,6 +2430,9 @@ func (versionTransitionMutator) Split(ctx android.BaseModuleContext) []string {
 }
 
 func (versionTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
+	if ctx.DepTag() == android.PrebuiltDepTag {
+		return sourceVariation
+	}
 	return ""
 }
 
