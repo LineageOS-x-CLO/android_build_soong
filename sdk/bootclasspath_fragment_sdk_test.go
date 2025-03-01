@@ -66,6 +66,7 @@ func fixtureAddPrebuiltApexForBootclasspathFragment(apex, fragment string) andro
 				exported_bootclasspath_fragments: [
 					"%s",
 				],
+				prefer: false,
 			}
 		`, apex, apexFile, fragment)),
 		android.FixtureAddFile(filepath.Join(dir, apexFile), nil),
@@ -226,8 +227,8 @@ java_import {
 			checkBootJarsPackageCheckRule(t, result,
 				append(
 					[]string{
-						"out/soong/.intermediates/prebuilts/apex/com.android.art/android_common_com.android.art/deapexer/javalib/core1.jar",
-						"out/soong/.intermediates/prebuilts/apex/com.android.art/android_common_com.android.art/deapexer/javalib/core2.jar",
+						"out/soong/.intermediates/prebuilts/apex/com.android.art/android_common_prebuilt_com.android.art/deapexer/javalib/core1.jar",
+						"out/soong/.intermediates/prebuilts/apex/com.android.art/android_common_prebuilt_com.android.art/deapexer/javalib/core2.jar",
 						"out/soong/.intermediates/default/java/framework/android_common/aligned/framework.jar",
 					},
 					java.ApexBootJarDexJarPaths...,
@@ -271,7 +272,7 @@ java_import {
 // package check rule.
 func checkBootJarsPackageCheckRule(t *testing.T, result *android.TestResult, expectedModules ...string) {
 	t.Helper()
-	platformBcp := result.ModuleForTests("platform-bootclasspath", "android_common")
+	platformBcp := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 	bootJarsCheckRule := platformBcp.Rule("boot_jars_package_check")
 	command := bootJarsCheckRule.RuleParams.Command
 	expectedCommandArgs := " build/soong/scripts/check_boot_jars/package_allowed_list.txt " + strings.Join(expectedModules, " ") + " &&"
@@ -477,7 +478,7 @@ java_sdk_library_import {
 		checkAllCopyRules(copyRules),
 		snapshotTestPreparer(checkSnapshotWithoutSource, preparerForSnapshot),
 		snapshotTestChecker(checkSnapshotWithoutSource, func(t *testing.T, result *android.TestResult) {
-			module := result.ModuleForTests("platform-bootclasspath", "android_common")
+			module := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 			var rule android.TestingBuildParams
 			rule = module.Output("out/soong/hiddenapi/hiddenapi-flags.csv")
 			java.CheckHiddenAPIRuleInputs(t, "monolithic flags", `
@@ -503,7 +504,7 @@ java_sdk_library_import {
 		}),
 		snapshotTestPreparer(checkSnapshotWithSourcePreferred, preparerForSnapshot),
 		snapshotTestChecker(checkSnapshotWithSourcePreferred, func(t *testing.T, result *android.TestResult) {
-			module := result.ModuleForTests("platform-bootclasspath", "android_common")
+			module := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 			rule := module.Output("out/soong/hiddenapi/hiddenapi-flags.csv.valid")
 			android.AssertStringDoesContain(t, "verify-overlaps", rule.RuleParams.Command, " out/soong/.intermediates/mybootclasspathfragment/android_common_myapex/modular-hiddenapi/filtered-flags.csv:out/soong/.intermediates/mybootclasspathfragment/android_common_myapex/modular-hiddenapi/signature-patterns.csv ")
 		}),
@@ -739,6 +740,7 @@ func TestBasicSdkWithBootclasspathFragment(t *testing.T) {
 	android.GroupFixturePreparers(
 		prepareForSdkTestWithApex,
 		prepareForSdkTestWithJava,
+		java.PrepareForTestWithJavaDefaultModules,
 		android.FixtureMergeMockFs(android.MockFS{
 			"java/mybootlib.jar":                nil,
 			"hiddenapi/annotation-flags.csv":    nil,
@@ -751,6 +753,13 @@ func TestBasicSdkWithBootclasspathFragment(t *testing.T) {
 		android.FixtureWithRootAndroidBp(`
 		sdk {
 			name: "mysdk",
+			bootclasspath_fragments: ["mybootclasspathfragment"],
+		}
+
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			min_sdk_version: "1",
 			bootclasspath_fragments: ["mybootclasspathfragment"],
 		}
 
@@ -796,7 +805,7 @@ func TestBasicSdkWithBootclasspathFragment(t *testing.T) {
 		java_import {
 			name: "mybootlib",
 			visibility: ["//visibility:public"],
-			apex_available: ["com.android.art"],
+			apex_available: ["myapex"],
 			jars: ["java/mybootlib.jar"],
 		}
 	`),
@@ -1115,7 +1124,7 @@ func testSnapshotWithBootClasspathFragment_MinSdkVersion(t *testing.T, targetBui
 		`),
 	).RunTest(t)
 
-	bcpf := result.ModuleForTests("mybootclasspathfragment", "android_common")
+	bcpf := result.ModuleForTests(t, "mybootclasspathfragment", "android_common")
 	rule := bcpf.Output("out/soong/.intermediates/mybootclasspathfragment/android_common/modular-hiddenapi" + suffix + "/stub-flags.csv")
 	android.AssertPathsRelativeToTopEquals(t, "stub flags inputs", android.SortedUniqueStrings(expectedStubFlagsInputs), android.SortedUniquePaths(rule.Implicits))
 

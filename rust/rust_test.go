@@ -184,8 +184,8 @@ func TestDepsTracking(t *testing.T) {
 			srcs: ["foo.rs"],
 		}
 	`)
-	module := ctx.ModuleForTests("fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
-	rustc := ctx.ModuleForTests("librlib", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
+	module := ctx.ModuleForTests(t, "fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
+	rustc := ctx.ModuleForTests(t, "librlib", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
 
 	// Since dependencies are added to AndroidMk* properties, we can check these to see if they've been picked up.
 	if !android.InList("librlib.rlib-std", module.Properties.AndroidMkRlibs) {
@@ -274,7 +274,7 @@ func TestSourceProviderDeps(t *testing.T) {
 		}
 	`)
 
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_dylib-std").Rule("rustc")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_dylib-std").Rule("rustc")
 	if !android.SuffixInList(libfoo.Implicits.Strings(), "/out/bindings.rs") {
 		t.Errorf("rust_bindgen generated source not included as implicit input for libfoo; Implicits %#v", libfoo.Implicits.Strings())
 	}
@@ -282,7 +282,7 @@ func TestSourceProviderDeps(t *testing.T) {
 		t.Errorf("genrule generated source not included as implicit input for libfoo; Implicits %#v", libfoo.Implicits.Strings())
 	}
 
-	fizzBuzz := ctx.ModuleForTests("fizz-buzz-dep", "android_arm64_armv8-a").Rule("rustc")
+	fizzBuzz := ctx.ModuleForTests(t, "fizz-buzz-dep", "android_arm64_armv8-a").Rule("rustc")
 	if !android.SuffixInList(fizzBuzz.Implicits.Strings(), "/out/bindings.rs") {
 		t.Errorf("rust_bindgen generated source not included as implicit input for fizz-buzz-dep; Implicits %#v", libfoo.Implicits.Strings())
 	}
@@ -290,7 +290,7 @@ func TestSourceProviderDeps(t *testing.T) {
 		t.Errorf("genrule generated source not included as implicit input for fizz-buzz-dep; Implicits %#v", libfoo.Implicits.Strings())
 	}
 
-	libprocmacro := ctx.ModuleForTests("libprocmacro", "linux_glibc_x86_64").Rule("rustc")
+	libprocmacro := ctx.ModuleForTests(t, "libprocmacro", "linux_glibc_x86_64").Rule("rustc")
 	if !android.SuffixInList(libprocmacro.Implicits.Strings(), "/out/bindings.rs") {
 		t.Errorf("rust_bindgen generated source not included as implicit input for libprocmacro; Implicits %#v", libfoo.Implicits.Strings())
 	}
@@ -299,15 +299,15 @@ func TestSourceProviderDeps(t *testing.T) {
 	}
 
 	// Check that our bindings are picked up as crate dependencies as well
-	libfooMod := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
+	libfooMod := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
 	if !android.InList("libbindings", libfooMod.Properties.AndroidMkRlibs) {
 		t.Errorf("bindgen dependency not detected as a rlib dependency (dependency missing from AndroidMkRlibs)")
 	}
-	fizzBuzzMod := ctx.ModuleForTests("fizz-buzz-dep", "android_arm64_armv8-a").Module().(*Module)
+	fizzBuzzMod := ctx.ModuleForTests(t, "fizz-buzz-dep", "android_arm64_armv8-a").Module().(*Module)
 	if !android.InList("libbindings", fizzBuzzMod.Properties.AndroidMkRlibs) {
 		t.Errorf("bindgen dependency not detected as a rlib dependency (dependency missing from AndroidMkRlibs)")
 	}
-	libprocmacroMod := ctx.ModuleForTests("libprocmacro", "linux_glibc_x86_64").Module().(*Module)
+	libprocmacroMod := ctx.ModuleForTests(t, "libprocmacro", "linux_glibc_x86_64").Module().(*Module)
 	if !android.InList("libbindings.rlib-std", libprocmacroMod.Properties.AndroidMkRlibs) {
 		t.Errorf("bindgen dependency not detected as a rlib dependency (dependency missing from AndroidMkRlibs)")
 	}
@@ -354,7 +354,7 @@ func TestProcMacroDeviceDeps(t *testing.T) {
 			srcs: ["foo.rs"],
 		}
 	`)
-	rustc := ctx.ModuleForTests("libpm", "linux_glibc_x86_64").Rule("rustc")
+	rustc := ctx.ModuleForTests(t, "libpm", "linux_glibc_x86_64").Rule("rustc")
 
 	if !strings.Contains(rustc.Args["libFlags"], "libbar/linux_glibc_x86_64") {
 		t.Errorf("Proc_macro is not using host variant of dependent modules.")
@@ -369,7 +369,7 @@ func TestNoStdlibs(t *testing.T) {
 			srcs: ["foo.rs"],
 			no_stdlibs: true,
 		}`)
-	module := ctx.ModuleForTests("fizz-buzz", "android_arm64_armv8-a").Module().(*Module)
+	module := ctx.ModuleForTests(t, "fizz-buzz", "android_arm64_armv8-a").Module().(*Module)
 
 	if android.InList("libstd", module.Properties.AndroidMkDylibs) {
 		t.Errorf("no_stdlibs did not suppress dependency on libstd")
@@ -385,8 +385,8 @@ func TestMultilib(t *testing.T) {
 			crate_name: "foo",
 		}`)
 
-	_ = ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_dylib-std")
-	_ = ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_rlib_dylib-std")
+	_ = ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_dylib-std")
+	_ = ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_rlib_dylib-std")
 }
 
 // Test that library size measurements are generated.
@@ -398,7 +398,7 @@ func TestLibrarySizes(t *testing.T) {
 			crate_name: "waldo",
 		}`)
 
-	m := ctx.SingletonForTests("file_metrics")
+	m := ctx.SingletonForTests(t, "file_metrics")
 	m.Output("unstripped/libwaldo.dylib.so.bloaty.csv")
 	m.Output("libwaldo.dylib.so.bloaty.csv")
 }
@@ -423,7 +423,7 @@ func TestRustAliases(t *testing.T) {
 			aliases: ["bar:bar_renamed"],
 		}`)
 
-	fooRustc := ctx.ModuleForTests("foo", "android_arm64_armv8-a").Rule("rustc")
+	fooRustc := ctx.ModuleForTests(t, "foo", "android_arm64_armv8-a").Rule("rustc")
 	if !strings.Contains(fooRustc.Args["libFlags"], "--extern force:bar_renamed=out/soong/.intermediates/libbar/android_arm64_armv8-a_dylib/unstripped/libbar.dylib.so") {
 		t.Errorf("--extern force:bar_renamed=out/soong/.intermediates/libbar/android_arm64_armv8-a_dylib/unstripped/libbar.dylib.so flag not being passed to rustc for rust_binary with aliases. libFlags: %#v", fooRustc.Args["libFlags"])
 	}
@@ -432,7 +432,7 @@ func TestRustAliases(t *testing.T) {
 	}
 }
 
-func TestRustRlibs(t *testing.T) {
+func TestRustFFIRlibs(t *testing.T) {
 	ctx := testRust(t, `
 		rust_ffi_static {
 			name: "libbar",
@@ -449,8 +449,22 @@ func TestRustRlibs(t *testing.T) {
 		}
 
 		rust_ffi_static {
+			name: "libfoo_from_rlib",
+			crate_name: "foo_from_rlib",
+			srcs: ["src/lib.rs"],
+			export_include_dirs: ["foo_includes"]
+		}
+
+		rust_ffi_static {
 			name: "libbuzz",
 			crate_name: "buzz",
+			srcs: ["src/lib.rs"],
+			export_include_dirs: ["buzz_includes"]
+		}
+
+		rust_ffi_static {
+			name: "libbuzz_from_rlib",
+			crate_name: "buzz_from_rlib",
 			srcs: ["src/lib.rs"],
 			export_include_dirs: ["buzz_includes"]
 		}
@@ -468,20 +482,45 @@ func TestRustRlibs(t *testing.T) {
 			whole_static_libs: ["libfoo"],
 		}
 
+		cc_library_static {
+			name: "libcc_static_from_rlib",
+			srcs:["foo.c"],
+			static_libs: ["libbuzz_from_rlib"],
+			whole_static_libs: ["libfoo_from_rlib"],
+		}
+
 		cc_binary {
 			name: "ccBin",
 			srcs:["foo.c"],
 			static_libs: ["libcc_static", "libbar"],
 		}
+
+		rust_library {
+			name: "librs",
+			srcs:["src/foo.rs"],
+			crate_name: "rs",
+			static_libs: ["libcc_static_from_rlib"],
+		}
+
+		rust_binary {
+			name: "rsBin",
+			srcs:["src/foo.rs"],
+			crate_name: "rsBin",
+			rlibs: ["librs", "libbar"],
+			static_libs: ["libcc_static"],
+		}
 		`)
 
-	libbar := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_rlib_rlib-std").Rule("rustc")
-	libcc_shared_rustc := ctx.ModuleForTests("libcc_shared", "android_arm64_armv8-a_shared").Rule("rustc")
-	libcc_shared_ld := ctx.ModuleForTests("libcc_shared", "android_arm64_armv8-a_shared").Rule("ld")
-	libcc_shared_cc := ctx.ModuleForTests("libcc_shared", "android_arm64_armv8-a_shared").Rule("cc")
-	ccbin_rustc := ctx.ModuleForTests("ccBin", "android_arm64_armv8-a").Rule("rustc")
-	ccbin_ld := ctx.ModuleForTests("ccBin", "android_arm64_armv8-a").Rule("ld")
-	ccbin_cc := ctx.ModuleForTests("ccBin", "android_arm64_armv8-a").Rule("cc")
+	libbar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_rlib_rlib-std").Rule("rustc")
+	libcc_shared_rustc := ctx.ModuleForTests(t, "libcc_shared", "android_arm64_armv8-a_shared").Rule("rustc")
+	libcc_shared_ld := ctx.ModuleForTests(t, "libcc_shared", "android_arm64_armv8-a_shared").Rule("ld")
+	libcc_shared_cc := ctx.ModuleForTests(t, "libcc_shared", "android_arm64_armv8-a_shared").Rule("cc")
+	ccbin_rustc := ctx.ModuleForTests(t, "ccBin", "android_arm64_armv8-a").Rule("rustc")
+	ccbin_ld := ctx.ModuleForTests(t, "ccBin", "android_arm64_armv8-a").Rule("ld")
+	ccbin_cc := ctx.ModuleForTests(t, "ccBin", "android_arm64_armv8-a").Rule("cc")
+	rustbin_genlib := ctx.ModuleForTests(t, "rsBin", "android_arm64_armv8-a").Output("generated_rust_staticlib/librustlibs.a")
+	rustbin := ctx.ModuleForTests(t, "rsBin", "android_arm64_armv8-a").Output("unstripped/rsBin")
+	librs_rlib := ctx.ModuleForTests(t, "librs", "android_arm64_armv8-a_rlib_dylib-std").MaybeOutput("generated_rust_staticlib/librustlibs.a")
 
 	if !strings.Contains(libbar.Args["rustcFlags"], "crate-type=rlib") {
 		t.Errorf("missing crate-type for static variant, expecting %#v, rustcFlags: %#v", "rlib", libbar.Args["rustcFlags"])
@@ -513,7 +552,7 @@ func TestRustRlibs(t *testing.T) {
 	// Make sure the static lib is included in the cc command
 	if !strings.Contains(ccbin_ld.Args["libFlags"], "generated_rust_staticlib/librustlibs.a") {
 		t.Errorf("missing generated static library in linker step libFlags, expecting %#v, libFlags: %#v",
-			"ccBin.generated_rust_staticlib.a", ccbin_ld.Args["libFlags"])
+			"generated_rust_staticlib/librustlibs.a", ccbin_ld.Args["libFlags"])
 	}
 
 	// Make sure the static lib includes are in the ld command
@@ -534,10 +573,42 @@ func TestRustRlibs(t *testing.T) {
 		t.Errorf("Missing direct dependency libbar when writing generated Rust staticlib: %#v", ccbin_rustc.Args["libFlags"])
 	}
 
+	// Make sure the static lib is included in the rustc command
+	if !strings.Contains(rustbin.Args["linkFlags"], "generated_rust_staticlib/librustlibs.a") {
+		t.Errorf("missing generated static library in linker step libFlags in Rust module, expecting %#v, libFlags: %#v",
+			"generated_rust_staticlib/librustlibs.a", rustbin.Args["libFlags"])
+	}
+
+	// Make sure that direct dependencies and indirect whole static dependencies are
+	// propagating correctly for the rlib -> cc_library_static -> rust_* generated library example.
+	if !strings.Contains(rustbin_genlib.Args["libFlags"], "--extern foo=") {
+		t.Errorf("Missing indirect whole_static_lib dependency libfoo from cc static_lib when writing generated Rust staticlib: %#v", rustbin_genlib.Args["libFlags"])
+	}
+	if strings.Contains(rustbin_genlib.Args["libFlags"], "--extern buzz=") {
+		t.Errorf("Indirect rlib dependency libbuzz from cc static_lib found when writing generated Rust staticlib: %#v", rustbin_genlib.Args["libFlags"])
+	}
+	if strings.Contains(rustbin_genlib.Args["libFlags"], "--extern bar=") {
+		t.Errorf("Direct rlib dependency libbar getting included in the generated Rust staticlib: %#v", rustbin_genlib.Args["libFlags"])
+	}
+	if !strings.Contains(rustbin_genlib.Args["libFlags"], "--extern foo_from_rlib=") {
+		t.Errorf("Missing indirect whole_static_lib dependency libfoo_from_rlib from cc static_lib when writing generated Rust staticlib: %#v", rustbin_genlib.Args["libFlags"])
+	}
+	if strings.Contains(rustbin_genlib.Args["libFlags"], "--extern buzz_from_rlib=") {
+		// While static-libs propagate for rust modules, this is not the
+		// expected behavior for cc modules. Thus, libbuzz_from_rlib would
+		// be expected to have to be re-declared as a direct rlib dependency.
+		t.Errorf("Indirect rlib dependency libbuzz_from_rlib from cc static_lib found when writing generated Rust staticlib: %#v", rustbin_genlib.Args["libFlags"])
+	}
+
 	// Test indirect includes propagation
 	if !strings.Contains(ccbin_cc.Args["cFlags"], "-Ifoo_includes") {
 		t.Errorf("missing rlibs includes, expecting %#v, cFlags: %#v",
 			"-Ifoo_includes", ccbin_cc.Args)
+	}
+
+	// Make sure we're not generating superfluous mto staticlibs.
+	if librs_rlib.Rule != nil {
+		t.Error("rlibs should not be generating mto staticlibs", "rlib", libbar.Args["rustcFlags"])
 	}
 }
 
@@ -681,8 +752,8 @@ func TestRustLinkPropagation(t *testing.T) {
 	}
 	`)
 
-	librlib3 := ctx.ModuleForTests("librlib3", "android_arm64_armv8-a_rlib_dylib-std").Rule("rustc")
-	libdylib3 := ctx.ModuleForTests("libdylib3", "android_arm64_armv8-a_dylib").Rule("rustc")
+	librlib3 := ctx.ModuleForTests(t, "librlib3", "android_arm64_armv8-a_rlib_dylib-std").Rule("rustc")
+	libdylib3 := ctx.ModuleForTests(t, "libdylib3", "android_arm64_armv8-a_dylib").Rule("rustc")
 
 	// Test static lib propagation from:
 	// rlib -> rlib

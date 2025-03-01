@@ -231,7 +231,7 @@ func TestDexpreoptEnabled(t *testing.T) {
 				variant += "_apex1000"
 			}
 
-			dexpreopt := ctx.ModuleForTests(moduleName, variant).MaybeRule("dexpreopt")
+			dexpreopt := ctx.ModuleForTests(t, moduleName, variant).MaybeRule("dexpreopt")
 			enabled := dexpreopt.Rule != nil
 
 			if enabled != test.enabled {
@@ -316,7 +316,7 @@ func TestApexSystemServerDexpreoptInstalls(t *testing.T) {
 			apex_available: ["com.android.apex1"],
 		}`)
 	ctx := result.TestContext
-	module := ctx.ModuleForTests("service-foo", "android_common_apex1000")
+	module := ctx.ModuleForTests(t, "service-foo", "android_common_apex1000")
 	library := module.Module().(*Library)
 
 	installs := library.dexpreopter.ApexSystemServerDexpreoptInstalls()
@@ -357,7 +357,7 @@ func TestApexSystemServerDexpreoptInstalls(t *testing.T) {
 			srcs: ["a.java"],
 		}`)
 	ctx = result.TestContext
-	module = ctx.ModuleForTests("foo", "android_common")
+	module = ctx.ModuleForTests(t, "foo", "android_common")
 	library = module.Module().(*Library)
 
 	installs = library.dexpreopter.ApexSystemServerDexpreoptInstalls()
@@ -385,7 +385,7 @@ func TestGenerateProfileEvenIfDexpreoptIsDisabled(t *testing.T) {
 		}`)
 
 	ctx := result.TestContext
-	dexpreopt := ctx.ModuleForTests("foo", "android_common").MaybeRule("dexpreopt")
+	dexpreopt := ctx.ModuleForTests(t, "foo", "android_common").MaybeRule("dexpreopt")
 
 	expected := []string{"out/soong/.intermediates/foo/android_common/dexpreopt/foo/profile.prof"}
 
