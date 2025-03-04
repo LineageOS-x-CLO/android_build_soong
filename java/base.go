@@ -1181,7 +1181,8 @@ func (j *Module) addGeneratedSrcJars(path android.Path) {
 	j.properties.Generated_srcjars = append(j.properties.Generated_srcjars, path)
 }
 
-func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
+func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspathJars, extraCombinedJars,
+	extraDepCombinedJars android.Paths) *JavaInfo {
 
 	manifest := j.overrideManifest
 	if !manifest.Valid() && j.properties.Manifest != nil {
@@ -1503,7 +1504,8 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			j.addKSnapshot(ctx, kaptResJar)
 		}
 
-		j.kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags, kotlinCompileData, incrementalKotlin)
+		j.kotlinCompile(ctx, kotlinJar, kotlinHeaderJar, uniqueSrcFiles, kotlinCommonSrcFiles, srcJars, flags,
+			manifest, kotlinCompileData, incrementalKotlin)
 		if ctx.Failed() {
 			return nil
 		}
@@ -1545,23 +1547,8 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			// with sharding enabled. See: b/77284273.
 		}
 		extraJars := slices.Clone(kotlinHeaderJars)
-		extraJars = append(extraJars, j.extraCombinedJars...)
-		// if we are not sharding, let's first run turbine APT, generate some sources + res, hand them to turbine, plus pass them to javac
-		srcJarsForTurbine := slices.Clone(srcJars)
-		if !enableSharding && ctx.Config().GetBuildFlagBool("RELEASE_USE_TURBINE_APT_JAVAC") {
-			if len(flags.processorPath) > 0 {
-				turbineAptSrcJar := android.PathForModuleOut(ctx, "turbine-apt", "turbine-apt-sources.jar")
-				turbineAptResJar := android.PathForModuleOut(ctx, "turbine-apt", "turbine-apt-res.jar")
-				TurbineApt(ctx, turbineAptSrcJar, turbineAptResJar, uniqueJavaFiles, srcJars, flags)
-				genAnnoSrcJars = append(genAnnoSrcJars, turbineAptSrcJar)
-				localImplementationJars = append(localImplementationJars, turbineAptResJar)
-				srcJarsForTurbine = append(srcJarsForTurbine, genAnnoSrcJars...)
-				// Disable annotation processing in javac, it's already been handled here
-				flags.processorPath = nil
-				flags.processors = nil
-			}
-		}
-		localHeaderJars, shardingHeaderJars, combinedHeaderJarFile = j.compileJavaHeader(ctx, uniqueJavaFiles, srcJarsForTurbine, deps, flags, jarName, extraJars, manifest)
+		extraJars = append(extraJars, extraCombinedJars...)
+		localHeaderJars, shardingHeaderJars, combinedHeaderJarFile = j.compileJavaHeader(ctx, uniqueJavaFiles, srcJars, deps, flags, jarName, extraJars, manifest)
 
 		var jarjared bool
 		j.headerJarFile, jarjared = j.jarjarIfNecessary(ctx, combinedHeaderJarFile, jarName, "turbine", false)
@@ -1606,7 +1593,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			}
 			// turbine was disabled, lets run it now
 			turbineExtraJars := slices.Clone(kotlinHeaderJars)
-			turbineExtraJars = append(turbineExtraJars, j.extraCombinedJars...)
+			turbineExtraJars = append(turbineExtraJars, extraCombinedJars...)
 			_, shardingHeaderJars, _ = j.compileJavaHeader(ctx, uniqueJavaFiles, srcJarsForTurbine, deps, flags, jarName,
 				turbineExtraJars, manifest)
 		}
