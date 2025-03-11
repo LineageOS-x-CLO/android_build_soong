@@ -241,6 +241,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 					apex_available: [
 						"com.android.art",
 					],
+					min_sdk_version: "33",
 				}
 			`, content)
 		}
@@ -319,6 +320,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 		})
 
 		java.CheckModuleDependencies(t, result.TestContext, "com.android.art", "android_common_com.android.art", []string{
+			`all_apex_contributions`,
 			`art-bootclasspath-fragment`,
 			`com.android.art.key`,
 			`dex2oatd`,
@@ -424,6 +426,7 @@ func TestBootclasspathFragmentInArtApex(t *testing.T) {
 		})
 
 		java.CheckModuleDependencies(t, result.TestContext, "com.android.art", "android_common_com.android.art", []string{
+			`all_apex_contributions`,
 			`art-bootclasspath-fragment`,
 			`com.android.art.key`,
 			`dex2oatd`,
@@ -697,6 +700,7 @@ func TestBootclasspathFragmentContentsNoName(t *testing.T) {
 	})
 
 	java.CheckModuleDependencies(t, result.TestContext, "myapex", "android_common_myapex", []string{
+		`all_apex_contributions`,
 		`dex2oatd`,
 		`myapex.key`,
 		`mybootclasspathfragment`,
@@ -707,7 +711,7 @@ func TestBootclasspathFragmentContentsNoName(t *testing.T) {
 	copyCommands := apexRule.Args["copy_commands"]
 
 	// Make sure that the fragment provides the hidden API encoded dex jars to the APEX.
-	fragment := result.Module("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.Module("mybootclasspathfragment", "android_common_myapex")
 
 	info, _ := android.OtherModuleProvider(result, fragment, java.BootclasspathFragmentApexContentInfoProvider)
 
@@ -723,8 +727,8 @@ func TestBootclasspathFragmentContentsNoName(t *testing.T) {
 		android.AssertStringDoesContain(t, name+" apex copy command", copyCommands, expectedCopyCommand)
 	}
 
-	checkFragmentExportedDexJar("foo", "out/soong/.intermediates/mybootclasspathfragment/android_common_apex10000/hiddenapi-modular/encoded/foo.jar")
-	checkFragmentExportedDexJar("bar", "out/soong/.intermediates/mybootclasspathfragment/android_common_apex10000/hiddenapi-modular/encoded/bar.jar")
+	checkFragmentExportedDexJar("foo", "out/soong/.intermediates/mybootclasspathfragment/android_common_myapex/hiddenapi-modular/encoded/foo.jar")
+	checkFragmentExportedDexJar("bar", "out/soong/.intermediates/mybootclasspathfragment/android_common_myapex/hiddenapi-modular/encoded/bar.jar")
 }
 
 func getDexJarPath(result *android.TestResult, name string) string {
@@ -854,7 +858,7 @@ func TestBootclasspathFragment_HiddenAPIList(t *testing.T) {
 		}
 	`)
 
-	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_apex10000", []string{
+	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_myapex", []string{
 		"all_apex_contributions",
 		"art-bootclasspath-fragment",
 		"bar",
@@ -869,7 +873,7 @@ func TestBootclasspathFragment_HiddenAPIList(t *testing.T) {
 	quuzModuleLibStubs := getDexJarPath(result, "quuz.stubs.exportable.module_lib")
 
 	// Make sure that the fragment uses the quuz stub dex jars when generating the hidden API flags.
-	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_myapex")
 
 	rule := fragment.Rule("modularHiddenAPIStubFlagsFile")
 	command := rule.RuleParams.Command
@@ -1026,7 +1030,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromSource(t *testing.T) {
 		}
 	`)
 
-	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_apex10000", []string{
+	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_myapex", []string{
 		"all_apex_contributions",
 		"android-non-updatable.stubs",
 		"android-non-updatable.stubs.module_lib",
@@ -1045,7 +1049,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromSource(t *testing.T) {
 
 	// Make sure that the fragment uses the android-non-updatable modules when generating the hidden
 	// API flags.
-	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_myapex")
 
 	rule := fragment.Rule("modularHiddenAPIStubFlagsFile")
 	command := rule.RuleParams.Command
@@ -1199,7 +1203,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromText(t *testing.T) {
 		}
 	`)
 
-	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_apex10000", []string{
+	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_myapex", []string{
 		"all_apex_contributions",
 		"android-non-updatable.stubs",
 		"android-non-updatable.stubs.system",
@@ -1215,7 +1219,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_FromText(t *testing.T) {
 
 	// Make sure that the fragment uses the android-non-updatable modules when generating the hidden
 	// API flags.
-	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_myapex")
 
 	rule := fragment.Rule("modularHiddenAPIStubFlagsFile")
 	command := rule.RuleParams.Command
@@ -1353,7 +1357,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_AlwaysUsePrebuiltSdks(t *test
 		}
 	`)
 
-	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_apex10000", []string{
+	java.CheckModuleDependencies(t, result.TestContext, "mybootclasspathfragment", "android_common_myapex", []string{
 		"all_apex_contributions",
 		"art-bootclasspath-fragment",
 		"bar",
@@ -1372,7 +1376,7 @@ func TestBootclasspathFragment_AndroidNonUpdatable_AlwaysUsePrebuiltSdks(t *test
 
 	// Make sure that the fragment uses the android-non-updatable modules when generating the hidden
 	// API flags.
-	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_myapex")
 
 	rule := fragment.Rule("modularHiddenAPIStubFlagsFile")
 	command := rule.RuleParams.Command
@@ -1455,7 +1459,7 @@ func TestBootclasspathFragmentProtoContainsMinSdkVersion(t *testing.T) {
 		}
 	`)
 
-	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_apex10000")
+	fragment := result.ModuleForTests("mybootclasspathfragment", "android_common_myapex")
 	classPathProtoContent := android.ContentFromFileRuleForTests(t, result.TestContext, fragment.Output("bootclasspath.pb.textproto"))
 	// foo
 	ensureContains(t, classPathProtoContent, `jars {
