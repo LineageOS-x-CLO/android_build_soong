@@ -357,6 +357,7 @@ func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPa
 		})
 	}
 	fuzzPackagedModule.DataIntermediateDir = intermediateDir
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Host_common_data)...)
 
 	if fuzzPackagedModule.FuzzProperties.Dictionary != nil {
 		fuzzPackagedModule.Dictionary = android.PathForModuleSrc(ctx, *fuzzPackagedModule.FuzzProperties.Dictionary)
