@@ -995,6 +995,10 @@ func (c *config) PlatformSdkVersion() ApiLevel {
 	return uncheckedFinalApiLevel(*c.productVariables.Platform_sdk_version)
 }
 
+func (c *config) PlatformSdkVersionFull() string {
+	return proptools.StringDefault(c.productVariables.Platform_sdk_version_full, "")
+}
+
 func (c *config) RawPlatformSdkVersion() *int {
 	return c.productVariables.Platform_sdk_version
 }
@@ -2241,6 +2245,10 @@ func (c *config) UseR8OnlyRuntimeVisibleAnnotations() bool {
 
 func (c *config) UseR8StoreStoreFenceConstructorInlining() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_R8_STORE_STORE_FENCE_CONSTRUCTOR_INLINING")
+}
+
+func (c *config) UseR8GlobalCheckNotNullFlags() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_R8_GLOBAL_CHECK_NOT_NULL_FLAGS")
 }
 
 func (c *config) UseDexV41() bool {
