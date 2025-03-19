@@ -36,6 +36,8 @@ import (
 func init() {
 	registerBuildComponents(android.InitRegistrationContext)
 	registerMutators(android.InitRegistrationContext)
+	pctx.HostBinToolVariable("fileslist", "fileslist")
+	pctx.HostBinToolVariable("fs_config", "fs_config")
 }
 
 func registerBuildComponents(ctx android.RegistrationContext) {
@@ -54,11 +56,28 @@ func registerMutators(ctx android.RegistrationContext) {
 	})
 }
 
-// Remember to add referenced files to implicits!
-var textFileProcessorRule = pctx.AndroidStaticRule("text_file_processing", blueprint.RuleParams{
-	Command:     "build/soong/scripts/text_file_processor.py $in $out",
-	CommandDeps: []string{"build/soong/scripts/text_file_processor.py"},
-})
+var (
+	// Remember to add referenced files to implicits!
+	textFileProcessorRule = pctx.AndroidStaticRule("text_file_processing", blueprint.RuleParams{
+		Command:     "build/soong/scripts/text_file_processor.py $in $out",
+		CommandDeps: []string{"build/soong/scripts/text_file_processor.py"},
+	})
+
+	// Remember to add the output image file as an implicit dependency!
+	installedFilesJsonRule = pctx.AndroidStaticRule("installed_files_json", blueprint.RuleParams{
+		Command:     `${fileslist} ${rootDir} > ${out}`,
+		CommandDeps: []string{"${fileslist}"},
+	}, "rootDir")
+
+	installedFilesTxtRule = pctx.AndroidStaticRule("installed_files_txt", blueprint.RuleParams{
+		Command:     `build/make/tools/fileslist_util.py -c ${in} > ${out}`,
+		CommandDeps: []string{"build/make/tools/fileslist_util.py"},
+	})
+	fsConfigRule = pctx.AndroidStaticRule("fs_config_rule", blueprint.RuleParams{
+		Command:     `(cd ${rootDir}; find . -type d | sed 's,$$,/,'; find . \! -type d) | cut -c 3- | sort | sed 's,^,${prefix},' | ${fs_config} -C -D ${rootDir} -R "${prefix}" > ${out}`,
+		CommandDeps: []string{"${fs_config}"},
+	}, "rootDir", "prefix")
+)
 
 type filesystem struct {
 	android.ModuleBase
@@ -76,6 +95,8 @@ type filesystem struct {
 	entries []string
 
 	filesystemBuilder filesystemBuilder
+
+	selinuxFc android.Path
 }
 
 type filesystemBuilder interface {
@@ -131,7 +152,7 @@ type FilesystemProperties struct {
 	// The index used to prevent rollback of the image. Only used if use_avb is true.
 	Rollback_index *int64
 
-	// Rollback index location of this image. Must be 0, 1, 2, etc.
+	// Rollback index location of this image. Must be 1, 2, 3, etc.
 	Rollback_index_location *int64
 
 	// Name of the partition stored in vbmeta desc. Defaults to the name of this module.
@@ -358,9 +379,22 @@ func (fs fsType) IsUnknown() bool {
 	return fs == unknown
 }
 
+type InstalledFilesStruct struct {
+	Txt  android.Path
+	Json android.Path
+}
+
+type InstalledModuleInfo struct {
+	Name      string
+	Variation string
+}
+
 type FilesystemInfo struct {
 	// The built filesystem image
 	Output android.Path
+	// Returns the output file that is signed by avbtool. If this module is not signed, returns
+	// nil.
+	SignedOutputPath android.Path
 	// An additional hermetic filesystem image.
 	// e.g. this will contain inodes with pinned timestamps.
 	// This will be copied to target_files.zip
@@ -371,6 +405,9 @@ type FilesystemInfo struct {
 	// to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja.
 	RootDir android.Path
+	// Extra root directories that are also built into the partition. Currently only used for
+	// including the recovery partition files into the vendor_boot image.
+	ExtraRootDirs android.Paths
 	// The rebased staging directory used to build the output filesystem. If consuming this, make
 	// sure to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja. In many cases this is the same as RootDir, only in the system partition is it
@@ -391,6 +428,19 @@ type FilesystemInfo struct {
 	SpecsForSystemOther map[string]android.PackagingSpec
 
 	FullInstallPaths []FullInstallPathInfo
+
+	// Installed files list
+	InstalledFiles InstalledFilesStruct
+
+	// Path to compress hints file for erofs filesystems
+	// This will be nil for other fileystems like ext4
+	ErofsCompressHints android.Path
+
+	SelinuxFc android.Path
+
+	FilesystemConfig android.Path
+
+	Owners []InstalledModuleInfo
 }
 
 // FullInstallPathInfo contains information about the "full install" paths of all the files
@@ -498,6 +548,34 @@ func (f *filesystem) ModifyPackagingSpec(ps *android.PackagingSpec) {
 	}
 }
 
+func buildInstalledFiles(ctx android.ModuleContext, partition string, rootDir android.Path, image android.Path) (txt android.ModuleOutPath, json android.ModuleOutPath) {
+	fileName := "installed-files"
+	if len(partition) > 0 {
+		fileName += fmt.Sprintf("-%s", partition)
+	}
+	txt = android.PathForModuleOut(ctx, fmt.Sprintf("%s.txt", fileName))
+	json = android.PathForModuleOut(ctx, fmt.Sprintf("%s.json", fileName))
+
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        installedFilesJsonRule,
+		Implicit:    image,
+		Output:      json,
+		Description: "Installed file list json",
+		Args: map[string]string{
+			"rootDir": rootDir.String(),
+		},
+	})
+
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        installedFilesTxtRule,
+		Input:       json,
+		Output:      txt,
+		Description: "Installed file list txt",
+	})
+
+	return txt, json
+}
+
 var pctx = android.NewPackageContext("android/soong/filesystem")
 
 func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -522,7 +600,8 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	specs := f.gatherFilteredPackagingSpecs(ctx)
 
 	var fullInstallPaths []FullInstallPathInfo
-	for _, spec := range specs {
+	for _, specRel := range android.SortedKeys(specs) {
+		spec := specs[specRel]
 		fullInstallPaths = append(fullInstallPaths, FullInstallPathInfo{
 			FullInstallPath:     spec.FullInstallPath(),
 			RequiresFullInstall: spec.RequiresFullInstall(),
@@ -537,19 +616,33 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	f.buildEventLogtagsFile(ctx, builder, rebasedDir, &fullInstallPaths)
 	f.buildAconfigFlagsFiles(ctx, builder, specs, rebasedDir, &fullInstallPaths)
 	f.filesystemBuilder.BuildLinkerConfigFile(ctx, builder, rebasedDir, &fullInstallPaths)
+	// Assemeble the staging dir and output a timestamp
+	builder.Command().Text("touch").Output(f.fileystemStagingDirTimestamp(ctx))
+	builder.Build("assemble_filesystem_staging_dir", fmt.Sprintf("Assemble filesystem staging dir %s", f.BaseModuleName()))
 
+	// Create a new rule builder for build_image
+	builder = android.NewRuleBuilder(pctx, ctx)
 	var mapFile android.Path
-	var outputHermetic android.Path
+	var outputHermetic android.WritablePath
 	var buildImagePropFile android.Path
 	var buildImagePropFileDeps android.Paths
+	var extraRootDirs android.Paths
 	switch f.fsType(ctx) {
 	case ext4Type, erofsType, f2fsType:
-		f.output, outputHermetic, buildImagePropFile, buildImagePropFileDeps = f.buildImageUsingBuildImage(ctx, builder, rootDir, rebasedDir)
+		buildImagePropFile, buildImagePropFileDeps = f.buildPropFile(ctx)
+		output := android.PathForModuleOut(ctx, f.installFileName())
+		f.buildImageUsingBuildImage(ctx, builder, buildImageParams{rootDir, buildImagePropFile, buildImagePropFileDeps, output})
+		f.output = output
+		// Create the hermetic img file using a separate rule builder so that it can be built independently
+		hermeticBuilder := android.NewRuleBuilder(pctx, ctx)
+		outputHermetic = android.PathForModuleOut(ctx, "for_target_files", f.installFileName())
+		propFileHermetic := f.propFileForHermeticImg(ctx, hermeticBuilder, buildImagePropFile)
+		f.buildImageUsingBuildImage(ctx, hermeticBuilder, buildImageParams{rootDir, propFileHermetic, buildImagePropFileDeps, outputHermetic})
 		mapFile = f.getMapFile(ctx)
 	case compressedCpioType:
-		f.output = f.buildCpioImage(ctx, builder, rootDir, true)
+		f.output, extraRootDirs = f.buildCpioImage(ctx, builder, rootDir, true)
 	case cpioType:
-		f.output = f.buildCpioImage(ctx, builder, rootDir, false)
+		f.output, extraRootDirs = f.buildCpioImage(ctx, builder, rootDir, false)
 	default:
 		return
 	}
@@ -565,11 +658,24 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	fileListFile := android.PathForModuleOut(ctx, "fileList")
 	android.WriteFileRule(ctx, fileListFile, f.installedFilesList())
 
+	partitionName := f.partitionName()
+	if partitionName == "system" {
+		partitionName = ""
+	}
+	installedFileTxt, installedFileJson := buildInstalledFiles(ctx, partitionName, rootDir, f.output)
+
+	var erofsCompressHints android.Path
+	if f.properties.Erofs.Compress_hints != nil {
+		erofsCompressHints = android.PathForModuleSrc(ctx, *f.properties.Erofs.Compress_hints)
+	}
+
 	fsInfo := FilesystemInfo{
-		Output:                 f.output,
+		Output:                 f.OutputPath(),
+		SignedOutputPath:       f.SignedOutputPath(),
 		OutputHermetic:         outputHermetic,
 		FileListFile:           fileListFile,
 		RootDir:                rootDir,
+		ExtraRootDirs:          extraRootDirs,
 		RebasedDir:             rebasedDir,
 		MapFile:                mapFile,
 		ModuleName:             ctx.ModuleName(),
@@ -577,6 +683,14 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		BuildImagePropFileDeps: buildImagePropFileDeps,
 		SpecsForSystemOther:    f.systemOtherFiles(ctx),
 		FullInstallPaths:       fullInstallPaths,
+		InstalledFiles: InstalledFilesStruct{
+			Txt:  installedFileTxt,
+			Json: installedFileJson,
+		},
+		ErofsCompressHints: erofsCompressHints,
+		SelinuxFc:          f.selinuxFc,
+		FilesystemConfig:   f.generateFilesystemConfig(ctx, rootDir, rebasedDir),
+		Owners:             f.gatherOwners(specs),
 	}
 
 	android.SetProvider(ctx, FilesystemProvider, fsInfo)
@@ -588,6 +702,34 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	f.setVbmetaPartitionProvider(ctx)
+}
+
+func (f *filesystem) fileystemStagingDirTimestamp(ctx android.ModuleContext) android.WritablePath {
+	return android.PathForModuleOut(ctx, "staging_dir.timestamp")
+}
+
+func (f *filesystem) generateFilesystemConfig(ctx android.ModuleContext, rootDir android.Path, rebasedDir android.Path) android.Path {
+	rootDirString := rootDir.String()
+	prefix := f.partitionName() + "/"
+	if f.partitionName() == "system" {
+		rootDirString = rebasedDir.String()
+	}
+	if f.partitionName() == "ramdisk" || f.partitionName() == "recovery" {
+		// Hardcoded to match make behavior.
+		// https://cs.android.com/android/_/android/platform/build/+/2a0ef42a432d4da00201e8eb7697dcaa68fd2389:core/Makefile;l=6957-6962;drc=9ea8ad9232cef4d0a24d70133b1b9d2ce2defe5f;bpv=1;bpt=0
+		prefix = ""
+	}
+	out := android.PathForModuleOut(ctx, "filesystem_config.txt")
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   fsConfigRule,
+		Input:  f.fileystemStagingDirTimestamp(ctx), // assemble the staging directory
+		Output: out,
+		Args: map[string]string{
+			"rootDir": rootDirString,
+			"prefix":  prefix,
+		},
+	})
+	return out
 }
 
 func (f *filesystem) setVbmetaPartitionProvider(ctx android.ModuleContext) {
@@ -776,28 +918,35 @@ func (f *filesystem) copyPackagingSpecs(ctx android.ModuleContext, builder *andr
 	dirsToSpecs[rootDir] = rootDirSpecs
 	dirsToSpecs[rebasedDir] = rebasedDirSpecs
 
-	return f.CopySpecsToDirs(ctx, builder, dirsToSpecs)
+	// Preserve timestamps for adb sync, so that this staging dir file matches the timestamp in the
+	// out/target/product staging directory.
+	return f.CopySpecsToDirs(ctx, builder, dirsToSpecs, true)
 }
 
 func (f *filesystem) rootDirString() string {
 	return f.partitionName()
 }
 
+type buildImageParams struct {
+	// inputs
+	rootDir  android.OutputPath
+	propFile android.Path
+	toolDeps android.Paths
+	// outputs
+	output android.WritablePath
+}
+
 func (f *filesystem) buildImageUsingBuildImage(
 	ctx android.ModuleContext,
 	builder *android.RuleBuilder,
-	rootDir android.OutputPath,
-	rebasedDir android.OutputPath,
-) (android.Path, android.Path, android.Path, android.Paths) {
+	params buildImageParams) {
 	// run host_init_verifier
 	// Ideally we should have a concept of pluggable linters that verify the generated image.
 	// While such concept is not implement this will do.
 	// TODO(b/263574231): substitute with pluggable linter.
 	builder.Command().
 		BuiltTool("host_init_verifier").
-		FlagWithArg("--out_system=", rootDir.String()+"/system")
-
-	propFile, toolDeps := f.buildPropFile(ctx)
+		FlagWithArg("--out_system=", params.rootDir.String()+"/system")
 
 	// Most of the time, if build_image were to call a host tool, it accepts the path to the
 	// host tool in a field in the prop file. However, it doesn't have that option for fec, which
@@ -805,44 +954,32 @@ func (f *filesystem) buildImageUsingBuildImage(
 	fec := ctx.Config().HostToolPath(ctx, "fec")
 	pathToolDirs := []string{filepath.Dir(fec.String())}
 
-	output := android.PathForModuleOut(ctx, f.installFileName())
-	builder.Command().Text("touch").Output(f.getMapFile(ctx))
 	builder.Command().
 		Textf("PATH=%s:$PATH", strings.Join(pathToolDirs, ":")).
 		BuiltTool("build_image").
-		Text(rootDir.String()). // input directory
-		Input(propFile).
-		Implicits(toolDeps).
+		Text(params.rootDir.String()). // input directory
+		Input(params.propFile).
+		Implicits(params.toolDeps).
 		Implicit(fec).
-		Output(output).
-		Text(rootDir.String()) // directory where to find fs_config_files|dirs
-
-	// TODO (b/393203512): Re-enable hermetic img file creation for target_files.zip
-	// Add an additional cmd to create a hermetic img file. This will contain pinned timestamps e.g.
-	//propFilePinnedTimestamp := android.PathForModuleOut(ctx, "for_target_files", "prop")
-	//builder.Command().Textf("cat").Input(propFile).Flag(">").Output(propFilePinnedTimestamp).
-	//	Textf(" && echo use_fixed_timestamp=true >> %s", propFilePinnedTimestamp).
-	//	Textf(" && echo block_list=%s >> %s", f.getMapFile(ctx).String(), propFilePinnedTimestamp) // mapfile will be an implicit output
-
-	//outputHermetic := android.PathForModuleOut(ctx, "for_target_files", f.installFileName())
-	//builder.Command().
-	//	Textf("PATH=%s:$PATH", strings.Join(pathToolDirs, ":")).
-	//	BuiltTool("build_image").
-	//	Text(rootDir.String()). // input directory
-	//	Flag(propFilePinnedTimestamp.String()).
-	//	Implicits(toolDeps).
-	//	Implicit(fec).
-	//	Output(outputHermetic).
-	//	Text(rootDir.String()) // directory where to find fs_config_files|dirs
+		Implicit(f.fileystemStagingDirTimestamp(ctx)). // assemble the staging directory
+		Output(params.output).
+		Text(params.rootDir.String()) // directory where to find fs_config_files|dirs
 
 	if f.properties.Partition_size != nil {
-		assertMaxImageSize(builder, output, *f.properties.Partition_size, false)
+		assertMaxImageSize(builder, params.output, *f.properties.Partition_size, false)
 	}
 
 	// rootDir is not deleted. Might be useful for quick inspection.
-	builder.Build("build_filesystem_image", fmt.Sprintf("Creating filesystem %s", f.BaseModuleName()))
+	builder.Build("build_"+params.output.String(), fmt.Sprintf("Creating filesystem %s", f.BaseModuleName()))
+}
 
-	return output, nil, propFile, toolDeps
+func (f *filesystem) propFileForHermeticImg(ctx android.ModuleContext, builder *android.RuleBuilder, inputPropFile android.Path) android.Path {
+	propFilePinnedTimestamp := android.PathForModuleOut(ctx, "for_target_files", "prop")
+	builder.Command().Textf("cat").Input(inputPropFile).Flag(">").Output(propFilePinnedTimestamp).
+		Textf(" && echo use_fixed_timestamp=true >> %s", propFilePinnedTimestamp).
+		Textf(" && echo block_list=%s >> %s", f.getMapFile(ctx).String(), propFilePinnedTimestamp) // mapfile will be an implicit output
+	builder.Command().Text("touch").Output(f.getMapFile(ctx))
+	return propFilePinnedTimestamp
 }
 
 func (f *filesystem) buildFileContexts(ctx android.ModuleContext) android.Path {
@@ -926,12 +1063,12 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 	if f.properties.File_contexts != nil && f.properties.Precompiled_file_contexts != nil {
 		ctx.ModuleErrorf("file_contexts and precompiled_file_contexts cannot both be set")
 	} else if f.properties.File_contexts != nil {
-		addPath("selinux_fc", f.buildFileContexts(ctx))
+		f.selinuxFc = f.buildFileContexts(ctx)
 	} else if f.properties.Precompiled_file_contexts != nil {
-		src := android.PathForModuleSrc(ctx, *f.properties.Precompiled_file_contexts)
-		if src != nil {
-			addPath("selinux_fc", src)
-		}
+		f.selinuxFc = android.PathForModuleSrc(ctx, *f.properties.Precompiled_file_contexts)
+	}
+	if f.selinuxFc != nil {
+		addPath("selinux_fc", f.selinuxFc)
 	}
 	if timestamp := proptools.String(f.properties.Fake_timestamp); timestamp != "" {
 		addStr("timestamp", timestamp)
@@ -1038,7 +1175,7 @@ func (f *filesystem) buildCpioImage(
 	builder *android.RuleBuilder,
 	rootDir android.OutputPath,
 	compressed bool,
-) android.Path {
+) (android.Path, android.Paths) {
 	if proptools.Bool(f.properties.Use_avb) {
 		ctx.PropertyErrorf("use_avb", "signing compresed cpio image using avbtool is not supported."+
 			"Consider adding this to bootimg module and signing the entire boot image.")
@@ -1053,6 +1190,7 @@ func (f *filesystem) buildCpioImage(
 	output := android.PathForModuleOut(ctx, f.installFileName())
 	cmd := builder.Command().
 		BuiltTool("mkbootfs").
+		Implicit(f.fileystemStagingDirTimestamp(ctx)).
 		Text(rootDir.String()) // input directory
 
 	for i := range len(rootDirs) {
@@ -1077,7 +1215,7 @@ func (f *filesystem) buildCpioImage(
 	// rootDir is not deleted. Might be useful for quick inspection.
 	builder.Build("build_cpio_image", fmt.Sprintf("Creating filesystem %s", f.BaseModuleName()))
 
-	return output
+	return output, rootDirs
 }
 
 var validPartitions = []string{
@@ -1204,6 +1342,18 @@ func (f *filesystem) SignedOutputPath() android.Path {
 // for symbol lookup by imitating "activated" paths.
 func (f *filesystem) gatherFilteredPackagingSpecs(ctx android.ModuleContext) map[string]android.PackagingSpec {
 	return f.PackagingBase.GatherPackagingSpecsWithFilterAndModifier(ctx, f.filesystemBuilder.FilterPackagingSpec, f.filesystemBuilder.ModifyPackagingSpec)
+}
+
+func (f *filesystem) gatherOwners(specs map[string]android.PackagingSpec) []InstalledModuleInfo {
+	var owners []InstalledModuleInfo
+	for _, p := range android.SortedKeys(specs) {
+		spec := specs[p]
+		owners = append(owners, InstalledModuleInfo{
+			Name:      spec.Owner(),
+			Variation: spec.Variation(),
+		})
+	}
+	return owners
 }
 
 // Dexpreopt files are installed to system_other. Collect the packaingSpecs for the dexpreopt files
@@ -1371,5 +1521,18 @@ func addAutogeneratedRroDeps(ctx android.BottomUpMutatorContext) {
 			ctx.AddFarVariationDependencies(nil, dependencyTagWithVisibilityEnforcementBypass, productOverlay)
 		}
 		return true
+	})
+}
+
+func (f *filesystem) MakeVars(ctx android.MakeVarsModuleContext) {
+	if f.Name() == ctx.Config().SoongDefinedSystemImage() {
+		ctx.StrictRaw("SOONG_DEFINED_SYSTEM_IMAGE_PATH", f.output.String())
+	}
+}
+
+func setCommonFilesystemInfo(ctx android.ModuleContext, m Filesystem) {
+	android.SetProvider(ctx, FilesystemProvider, FilesystemInfo{
+		Output:           m.OutputPath(),
+		SignedOutputPath: m.SignedOutputPath(),
 	})
 }
