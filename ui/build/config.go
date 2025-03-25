@@ -229,7 +229,7 @@ func NewConfig(ctx Context, args ...string) Config {
 	ret := &configImpl{
 		environ:               OsEnvironment(),
 		sandboxConfig:         &SandboxConfig{},
-		ninjaWeightListSource: NOT_USED,
+		ninjaWeightListSource: DEFAULT,
 	}
 	wd, err := os.Getwd()
 	if err != nil {
