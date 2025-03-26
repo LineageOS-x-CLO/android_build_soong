@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -87,6 +88,14 @@ type DeviceProperties struct {
 
 	Ramdisk_node_list      *string `android:"path"`
 	Releasetools_extension *string `android:"path"`
+	FastbootInfo           *string `android:"path"`
+
+	// The kernel version in the build. Will be verified against the actual kernel.
+	// If not provided, will attempt to extract it from the loose kernel or the kernel inside
+	// the boot image. The version is later used to decide whether or not to enable uffd_gc
+	// when dexpreopting apps. So setting this doesn't really do anything except enforce that the
+	// actual kernel version is as specified here.
+	Kernel_version *string
 }
 
 type androidDevice struct {
@@ -98,9 +107,15 @@ type androidDevice struct {
 
 	allImagesZip android.Path
 
-	proguardDictZip     android.Path
-	proguardDictMapping android.Path
-	proguardUsageZip    android.Path
+	proguardDictZip             android.Path
+	proguardDictMapping         android.Path
+	proguardUsageZip            android.Path
+	kernelConfig                android.Path
+	kernelVersion               android.Path
+	miscInfo                    android.Path
+	rootDirForFsConfig          string
+	rootDirForFsConfigTimestamp android.Path
+	apkCertsInfo                android.Path
 }
 
 func AndroidDeviceFactory() android.Module {
@@ -175,7 +190,10 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	allInstalledModules := a.allInstalledModules(ctx)
 
-	a.buildTargetFilesZip(ctx)
+	a.apkCertsInfo = a.buildApkCertsInfo(ctx, allInstalledModules)
+	a.kernelVersion, a.kernelConfig = a.extractKernelVersionAndConfigs(ctx)
+	a.miscInfo = a.addMiscInfo(ctx)
+	a.buildTargetFilesZip(ctx, allInstalledModules)
 	a.buildProguardZips(ctx, allInstalledModules)
 
 	var deps []android.Path
@@ -263,6 +281,39 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.setVbmetaPhonyTargets(ctx)
 
 	a.distFiles(ctx)
+
+	android.SetProvider(ctx, android.AndroidDeviceInfoProvider, android.AndroidDeviceInfo{
+		Main_device: android.Bool(a.deviceProps.Main_device),
+	})
+
+	if proptools.String(a.partitionProps.Super_partition_name) != "" {
+		buildComplianceMetadata(ctx, superPartitionDepTag, filesystemDepTag)
+	} else {
+		buildComplianceMetadata(ctx, filesystemDepTag)
+	}
+}
+
+func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.DependencyTag) {
+	// Collect metadata from deps
+	filesContained := make([]string, 0)
+	prebuiltFilesCopied := make([]string, 0)
+	for _, tag := range tags {
+		ctx.VisitDirectDepsProxyWithTag(tag, func(m android.ModuleProxy) {
+			if complianceMetadataInfo, ok := android.OtherModuleProvider(ctx, m, android.ComplianceMetadataProvider); ok {
+				filesContained = append(filesContained, complianceMetadataInfo.GetFilesContained()...)
+				prebuiltFilesCopied = append(prebuiltFilesCopied, complianceMetadataInfo.GetPrebuiltFilesCopied()...)
+			}
+		})
+	}
+	// Merge to module's ComplianceMetadataInfo
+	complianceMetadataInfo := ctx.ComplianceMetadataInfo()
+	filesContained = append(filesContained, complianceMetadataInfo.GetFilesContained()...)
+	sort.Strings(filesContained)
+	complianceMetadataInfo.SetFilesContained(filesContained)
+
+	prebuiltFilesCopied = append(prebuiltFilesCopied, complianceMetadataInfo.GetPrebuiltFilesCopied()...)
+	sort.Strings(prebuiltFilesCopied)
+	complianceMetadataInfo.SetPrebuiltFilesCopied(prebuiltFilesCopied)
 }
 
 // Returns a list of modules that are installed, which are collected from the dependency
@@ -302,18 +353,32 @@ func insertBeforeExtension(file, insertion string) string {
 	return strings.TrimSuffix(file, ext) + insertion + ext
 }
 
+func (a *androidDevice) distInstalledFiles(ctx android.ModuleContext) {
+	distInstalledFilesJsonAndTxt := func(installedFiles InstalledFilesStruct) {
+		if installedFiles.Json != nil {
+			ctx.DistForGoal("droidcore-unbundled", installedFiles.Json)
+		}
+		if installedFiles.Txt != nil {
+			ctx.DistForGoal("droidcore-unbundled", installedFiles.Txt)
+		}
+	}
+
+	fsInfoMap := a.getFsInfos(ctx)
+	for _, partition := range android.SortedKeys(fsInfoMap) {
+		// installed-files-*{.txt | .json} is not disted for userdata partition
+		if partition == "userdata" {
+			continue
+		}
+		fsInfo := fsInfoMap[partition]
+		for _, installedFiles := range fsInfo.InstalledFilesDepSet.ToList() {
+			distInstalledFilesJsonAndTxt(installedFiles)
+		}
+	}
+}
+
 func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 	if !ctx.Config().KatiEnabled() && proptools.Bool(a.deviceProps.Main_device) {
-		fsInfoMap := a.getFsInfos(ctx)
-		for _, partition := range android.SortedKeys(fsInfoMap) {
-			fsInfo := fsInfoMap[partition]
-			if fsInfo.InstalledFiles.Json != nil {
-				ctx.DistForGoal("droidcore-unbundled", fsInfo.InstalledFiles.Json)
-			}
-			if fsInfo.InstalledFiles.Txt != nil {
-				ctx.DistForGoal("droidcore-unbundled", fsInfo.InstalledFiles.Txt)
-			}
-		}
+		a.distInstalledFiles(ctx)
 
 		namePrefix := ""
 		if ctx.Config().HasDeviceProduct() {
@@ -322,6 +387,10 @@ func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 		ctx.DistForGoalWithFilename("droidcore-unbundled", a.proguardDictZip, namePrefix+insertBeforeExtension(a.proguardDictZip.Base(), "-FILE_NAME_TAG_PLACEHOLDER"))
 		ctx.DistForGoalWithFilename("droidcore-unbundled", a.proguardDictMapping, namePrefix+insertBeforeExtension(a.proguardDictMapping.Base(), "-FILE_NAME_TAG_PLACEHOLDER"))
 		ctx.DistForGoalWithFilename("droidcore-unbundled", a.proguardUsageZip, namePrefix+insertBeforeExtension(a.proguardUsageZip.Base(), "-FILE_NAME_TAG_PLACEHOLDER"))
+
+		if a.deviceProps.Android_info != nil {
+			ctx.DistForGoal("droidcore-unbundled", android.PathForModuleSrc(ctx, *a.deviceProps.Android_info))
+		}
 	}
 }
 
@@ -393,7 +462,7 @@ type targetFilesystemZipCopy struct {
 	destSubdir string
 }
 
-func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext) {
+func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstalledModules []android.Module) {
 	targetFilesDir := android.PathForModuleOut(ctx, "target_files_dir")
 	targetFilesZip := android.PathForModuleOut(ctx, "target_files.zip")
 
@@ -459,6 +528,17 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext) {
 		if toCopy.destSubdir == "SYSTEM" {
 			// Create the ROOT partition in target_files.zip
 			builder.Command().Textf("rsync --links --exclude=system/* %s/ -r %s/ROOT", toCopy.fsInfo.RootDir, targetFilesDir.String())
+			// Add a duplicate rule to assemble the ROOT/ directory in separate intermediates.
+			// The output timestamp will be an input to a separate fs_config call.
+			a.rootDirForFsConfig = android.PathForModuleOut(ctx, "root_dir_for_fs_config").String()
+			rootDirBuilder := android.NewRuleBuilder(pctx, ctx)
+			rootDirForFsConfigTimestamp := android.PathForModuleOut(ctx, "root_dir_for_fs_config.timestamp")
+			rootDirBuilder.Command().Textf("rsync --links --exclude=system/* %s/ -r %s", toCopy.fsInfo.RootDir, a.rootDirForFsConfig).
+				Implicit(toCopy.fsInfo.Output).
+				Text("&& touch").
+				Output(rootDirForFsConfigTimestamp)
+			rootDirBuilder.Build("assemble_root_dir_for_fs_config", "Assemble ROOT/ for fs_config")
+			a.rootDirForFsConfigTimestamp = rootDirForFsConfigTimestamp
 		}
 	}
 	// Copy cmdline, kernel etc. files of boot images
@@ -497,7 +577,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext) {
 	}
 
 	a.copyImagesToTargetZip(ctx, builder, targetFilesDir)
-	a.copyMetadataToTargetZip(ctx, builder, targetFilesDir)
+	a.copyMetadataToTargetZip(ctx, builder, targetFilesDir, allInstalledModules)
 
 	builder.Command().
 		BuiltTool("soong_zip").
@@ -549,7 +629,7 @@ func (a *androidDevice) copyImagesToTargetZip(ctx android.ModuleContext, builder
 	}
 }
 
-func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir android.WritablePath) {
+func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir android.WritablePath, allInstalledModules []android.Module) {
 	// Create a META/ subdirectory
 	builder.Command().Textf("mkdir -p %s/META", targetFilesDir.String())
 	if proptools.Bool(a.deviceProps.Ab_ota_updater) {
@@ -587,7 +667,28 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 		if android.InList(partition, []string{"userdata"}) {
 			continue
 		}
-		builder.Command().Textf("cp").Input(fsInfos[partition].FilesystemConfig).Textf(" %s/META/%s", targetFilesDir.String(), a.filesystemConfigNameForTargetFiles(partition))
+		if partition != "vendor_ramdisk" {
+			// vendor_ramdisk will be handled separately.
+			builder.Command().Textf("cp").Input(fsInfos[partition].FilesystemConfig).Textf(" %s/META/%s", targetFilesDir.String(), a.filesystemConfigNameForTargetFiles(partition))
+		}
+		if partition == "ramdisk" {
+			// Create an additional copy at boot_filesystem_config.txt
+			builder.Command().Textf("cp").Input(fsInfos[partition].FilesystemConfig).Textf(" %s/META/boot_filesystem_config.txt", targetFilesDir.String())
+		}
+		if partition == "system" {
+			// Create root_filesystem_config from the assembled ROOT/ intermediates directory
+			a.generateFilesystemConfigForTargetFiles(ctx, builder, a.rootDirForFsConfigTimestamp, targetFilesDir.String(), a.rootDirForFsConfig, "root_filesystem_config.txt")
+		}
+		if partition == "vendor_ramdisk" {
+			// Create vendor_boot_filesystem_config from the assembled VENDOR_BOOT/RAMDISK intermediates directory
+			vendorRamdiskStagingDir := targetFilesDir.String() + "/VENDOR_BOOT/RAMDISK"
+			vendorRamdiskFsConfigOut := targetFilesDir.String() + "/META/vendor_boot_filesystem_config.txt"
+			fsConfigBin := ctx.Config().HostToolPath(ctx, "fs_config")
+			builder.Command().Textf(
+				`(cd %s; find . -type d | sed 's,$,/,'; find . \! -type d) | cut -c 3- | sort | sed 's,^,,' | %s -C -D %s -R \"\" > %s`,
+				vendorRamdiskStagingDir, fsConfigBin, vendorRamdiskStagingDir, vendorRamdiskFsConfigOut).
+				Implicit(fsConfigBin)
+		}
 	}
 	// Copy ramdisk_node_list
 	if ramdiskNodeList := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Ramdisk_node_list)); ramdiskNodeList != nil {
@@ -597,6 +698,123 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	if releaseTools := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Releasetools_extension)); releaseTools != nil {
 		builder.Command().Textf("cp").Input(releaseTools).Textf(" %s/META/", targetFilesDir.String())
 	}
+	// apexkeys.txt
+	var installedApexKeys []android.Path
+	for _, installedModule := range allInstalledModules {
+		if info, ok := android.OtherModuleProvider(ctx, installedModule, ApexKeyPathInfoProvider); ok {
+			installedApexKeys = append(installedApexKeys, info.ApexKeyPath)
+		}
+	}
+	installedApexKeys = android.SortedUniquePaths(installedApexKeys) // Sort by keypath to match make
+	builder.Command().Text("cat").Inputs(installedApexKeys).Textf(" >> %s/META/apexkeys.txt", targetFilesDir.String())
+	// apkcerts.txt
+	builder.Command().Textf("cp").Input(a.apkCertsInfo).Textf(" %s/META/", targetFilesDir.String())
+
+	// Copy fastboot-info.txt
+	if fastbootInfo := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.FastbootInfo)); fastbootInfo != nil {
+		// TODO (b/399788523): Autogenerate fastboot-info.txt if there is no source fastboot-info.txt
+		// https://cs.android.com/android/_/android/platform/build/+/80b9546f8f69e78b8fe1870e0e745d70fc18dfcd:core/Makefile;l=5831-5893;drc=077490384423dff9eac954da5c001c6f0be3fa6e;bpv=0;bpt=0
+		builder.Command().Textf("cp").Input(fastbootInfo).Textf(" %s/META/fastboot-info.txt", targetFilesDir.String())
+	}
+
+	// kernel_configs.txt and kernel_version.txt
+	if a.kernelConfig != nil {
+		builder.Command().Textf("cp").Input(a.kernelConfig).Textf(" %s/META/", targetFilesDir.String())
+	}
+	if a.kernelVersion != nil {
+		builder.Command().Textf("cp").Input(a.kernelVersion).Textf(" %s/META/", targetFilesDir.String())
+	}
+	// misc_info.txt
+	if a.miscInfo != nil {
+		builder.Command().Textf("cp").Input(a.miscInfo).Textf(" %s/META/", targetFilesDir.String())
+	}
+	// apex_info.pb, care_map.pb, vbmeta_digest.txt
+	a.addImgToTargetFiles(ctx, builder, targetFilesDir.String())
+
+	if a.partitionProps.Super_partition_name != nil {
+		superPartition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Super_partition_name, superPartitionDepTag)
+		if info, ok := android.OtherModuleProvider(ctx, superPartition, SuperImageProvider); ok {
+			// dynamic_partitions_info.txt
+			// TODO (b/390192334): Add `building_super_empty_partition=true`
+			builder.Command().Text("cp").Input(info.DynamicPartitionsInfo).Textf(" %s/META/", targetFilesDir.String())
+		} else {
+			ctx.ModuleErrorf("Super partition %s does set SuperImageProvider\n", superPartition.Name())
+		}
+	}
+
+}
+
+// A partial implementation of make's $PRODUCT_OUT/misc_info.txt
+// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=5894?q=misc_info.txt%20f:build%2Fmake%2Fcore%2FMakefile&ss=android%2Fplatform%2Fsuperproject%2Fmain
+// This file is subsequently used by add_img_to_target_files to create additioanl metadata files like apex_info.pb
+// TODO (b/399788119): Complete the migration of misc_info.txt
+func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
+	builder := android.NewRuleBuilder(pctx, ctx)
+	miscInfo := android.PathForModuleOut(ctx, "misc_info.txt")
+	builder.Command().
+		Textf("rm -f %s", miscInfo).
+		Textf("&& echo recovery_api_version=%s >> %s", ctx.Config().VendorConfig("recovery").String("recovery_api_version"), miscInfo).
+		Textf("&& echo fstab_version=%s >> %s", ctx.Config().VendorConfig("recovery").String("recovery_fstab_version"), miscInfo).
+		ImplicitOutput(miscInfo)
+
+	if a.partitionProps.Recovery_partition_name == nil {
+		builder.Command().Textf("echo no_recovery=true >> %s", miscInfo)
+	}
+	fsInfos := a.getFsInfos(ctx)
+	for _, partition := range android.SortedKeys(fsInfos) {
+		if fsInfos[partition].UseAvb {
+			builder.Command().Textf("echo 'avb_%s_hashtree_enable=true' >> %s", partition, miscInfo)
+		}
+	}
+	if len(a.partitionProps.Vbmeta_partitions) > 0 {
+		builder.Command().
+			Textf("echo avb_enable=true >> %s", miscInfo).
+			Textf("&& echo avb_building_vbmeta_image=true >> %s", miscInfo).
+			Textf("&& echo avb_avbtool=avbtool >> %s", miscInfo)
+	}
+	if a.partitionProps.Boot_partition_name != nil {
+		builder.Command().Textf("echo boot_images=boot.img >> %s", miscInfo)
+	}
+
+	builder.Build("misc_info", "Building misc_info")
+
+	return miscInfo
+}
+
+// addImgToTargetFiles invokes `add_img_to_target_files` and creates the following files in META/
+// - apex_info.pb
+// - care_map.pb
+// - vbmeta_digest.txt
+func (a *androidDevice) addImgToTargetFiles(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir string) {
+	mkbootimg := ctx.Config().HostToolPath(ctx, "mkbootimg")
+	builder.Command().
+		Textf("PATH=%s:$PATH", ctx.Config().HostToolDir()).
+		Textf("MKBOOTIMG=%s", mkbootimg).
+		Implicit(mkbootimg).
+		BuiltTool("add_img_to_target_files").
+		Flag("-a -v -p").
+		Flag(ctx.Config().HostToolDir()).
+		Text(targetFilesDir)
+}
+
+type ApexKeyPathInfo struct {
+	ApexKeyPath android.Path
+}
+
+var ApexKeyPathInfoProvider = blueprint.NewProvider[ApexKeyPathInfo]()
+
+func (a *androidDevice) generateFilesystemConfigForTargetFiles(ctx android.ModuleContext, builder *android.RuleBuilder, stagingDirTimestamp android.Path, targetFilesDir, stagingDir, filename string) {
+	fsConfigOut := android.PathForModuleOut(ctx, filename)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:     fsConfigRule,
+		Implicit: stagingDirTimestamp,
+		Output:   fsConfigOut,
+		Args: map[string]string{
+			"rootDir": stagingDir,
+			"prefix":  "",
+		},
+	})
+	builder.Command().Textf("cp").Input(fsConfigOut).Textf(" %s/META/", targetFilesDir)
 }
 
 // Filenames for the partition specific fs_config files.
@@ -635,4 +853,122 @@ func (a *androidDevice) setVbmetaPhonyTargets(ctx android.ModuleContext) {
 			}
 		}
 	}
+}
+
+func (a *androidDevice) getKernel(ctx android.ModuleContext) android.Path {
+	if a.partitionProps.Boot_partition_name != nil {
+		bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Boot_partition_name), filesystemDepTag)
+		bootImgInfo, _ := android.OtherModuleProvider(ctx, bootImg, BootimgInfoProvider)
+		return bootImgInfo.Kernel
+	}
+	return nil
+}
+
+// Gets the kernel version and configs from the actual kernel file itself. Roughly equivalent to
+// this make code: https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=5443;drc=c0b66fc59de069e06ce0ffd703d4d21613be30c6
+// However, it is a simplified version of that make code. Differences include:
+//   - Not handling BOARD_KERNEL_CONFIG_FILE because BOARD_KERNEL_CONFIG_FILE was never used.
+//   - Not unpacking the bootimage, as we should be able to just always export the kernel directly
+//     in the BootimgInfo. We don't currently support prebuilt boot images, but even if we add that
+//     in the future, it can be done in a prebuilt_bootimage module type that still exports the same
+//     BootimgInfo.
+//   - We don't print a warning and output '<unknown-kernel>' to kernel_version_for_uffd_gc.txt
+//     because we expect the kernel to always be present. If it's not, we will get an error that
+//     kernel_version_for_uffd_gc.txt doesn't exist. This may require later tweaking to the
+//     dexpreopt rules so that they don't attempt to access that file in builds that don't have
+//     a kernel.
+func (a *androidDevice) extractKernelVersionAndConfigs(ctx android.ModuleContext) (android.Path, android.Path) {
+	kernel := a.getKernel(ctx)
+	// If there's no kernel, don't create kernel version / kernel config files. Reverse dependencies
+	// on those files have to account for this, for example by disabling dexpreopt in unbundled
+	// builds.
+	if kernel == nil {
+		return nil, nil
+	}
+
+	lz4tool := ctx.Config().HostToolPath(ctx, "lz4")
+
+	extractedVersionFile := android.PathForModuleOut(ctx, "kernel_version.txt")
+	extractedConfigsFile := android.PathForModuleOut(ctx, "kernel_configs.txt")
+	builder := android.NewRuleBuilder(pctx, ctx)
+	builder.Command().BuiltTool("extract_kernel").
+		Flag("--tools lz4:"+lz4tool.String()).Implicit(lz4tool).
+		FlagWithInput("--input ", kernel).
+		FlagWithOutput("--output-release ", extractedVersionFile).
+		FlagWithOutput("--output-configs ", extractedConfigsFile).
+		Textf(`&& printf "\n" >> %s`, extractedVersionFile)
+
+	if specifiedVersion := proptools.String(a.deviceProps.Kernel_version); specifiedVersion != "" {
+		specifiedVersionFile := android.PathForModuleOut(ctx, "specified_kernel_version.txt")
+		android.WriteFileRule(ctx, specifiedVersionFile, specifiedVersion)
+		builder.Command().Text("diff -q").
+			Input(specifiedVersionFile).
+			Input(extractedVersionFile).
+			Textf(`|| (echo "Specified kernel version '$(cat %s)' does not match actual kernel version '$(cat %s)'"; exit 1)`, specifiedVersionFile, extractedVersionFile)
+	}
+
+	builder.Build("extract_kernel_info", "Extract kernel version and configs")
+
+	if proptools.Bool(a.deviceProps.Main_device) && !ctx.Config().KatiEnabled() {
+		if ctx.Config().EnableUffdGc() == "default" {
+			kernelVersionFile := android.PathForOutput(ctx, "dexpreopt/kernel_version_for_uffd_gc.txt")
+			ctx.Build(pctx, android.BuildParams{
+				Rule:   android.CpIfChanged,
+				Input:  extractedVersionFile,
+				Output: kernelVersionFile,
+			})
+		}
+
+		ctx.DistForGoal("droid_targets", extractedVersionFile)
+	}
+
+	return extractedVersionFile, extractedConfigsFile
+}
+
+func (a *androidDevice) buildApkCertsInfo(ctx android.ModuleContext, allInstalledModules []android.Module) android.Path {
+	// TODO (spandandas): Add compressed
+	formatLine := func(cert java.Certificate, name, partition string) string {
+		pem := cert.AndroidMkString()
+		var key string
+		if cert.Key == nil {
+			key = ""
+		} else {
+			key = cert.Key.String()
+		}
+		return fmt.Sprintf(`name="%s" certificate="%s" private_key="%s" partition="%s"`, name, pem, key, partition)
+	}
+
+	apkCerts := []string{}
+	for _, installedModule := range allInstalledModules {
+		partition := ""
+		if commonInfo, ok := android.OtherModuleProvider(ctx, installedModule, android.CommonModuleInfoKey); ok {
+			partition = commonInfo.PartitionTag
+		} else {
+			ctx.ModuleErrorf("%s does not set CommonModuleInfoKey", installedModule.Name())
+		}
+		if info, ok := android.OtherModuleProvider(ctx, installedModule, java.AppInfoProvider); ok {
+			apkCerts = append(apkCerts, formatLine(info.Certificate, info.InstallApkName+".apk", partition))
+		} else if info, ok := android.OtherModuleProvider(ctx, installedModule, java.AppInfosProvider); ok {
+			for _, certInfo := range info {
+				// Partition information of apk-in-apex is not exported to the legacy Make packaging system.
+				// Hardcode the partition to "system"
+				apkCerts = append(apkCerts, formatLine(certInfo.Certificate, certInfo.InstallApkName+".apk", "system"))
+			}
+		} else if info, ok := android.OtherModuleProvider(ctx, installedModule, java.RuntimeResourceOverlayInfoProvider); ok {
+			apkCerts = append(apkCerts, formatLine(info.Certificate, info.OutputFile.Base(), partition))
+		}
+	}
+	slices.Sort(apkCerts) // sort by name
+	fsInfos := a.getFsInfos(ctx)
+	if fsInfos["system"].HasFsverity {
+		defaultPem, defaultKey := ctx.Config().DefaultAppCertificate(ctx)
+		apkCerts = append(apkCerts, formatLine(java.Certificate{Pem: defaultPem, Key: defaultKey}, "BuildManifest.apk", "system"))
+		if info, ok := fsInfos["system_ext"]; ok && info.HasFsverity {
+			apkCerts = append(apkCerts, formatLine(java.Certificate{Pem: defaultPem, Key: defaultKey}, "BuildManifestSystemExt.apk", "system_ext"))
+		}
+	}
+
+	apkCertsInfo := android.PathForModuleOut(ctx, "apkcerts.txt")
+	android.WriteFileRuleVerbatim(ctx, apkCertsInfo, strings.Join(apkCerts, "\n")+"\n")
+	return apkCertsInfo
 }
