@@ -413,7 +413,7 @@ func generateContainerInfo(ctx ModuleContext) ContainersInfo {
 }
 
 func getContainerModuleInfo(ctx ModuleContext, module Module) (ContainersInfo, bool) {
-	if ctx.EqualModules(ctx.Module(), module) {
+	if EqualModules(ctx.Module(), module) {
 		return ctx.getContainersInfo(), true
 	}
 
