@@ -454,6 +454,9 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 			if standaloneTestDep.SkipInstall() {
 				continue
 			}
+			if standaloneTestDep.Partition() == "data" {
+				continue
+			}
 			test.binaryDecorator.baseInstaller.installStandaloneTestDep(ctx, standaloneTestDep)
 		}
 	}

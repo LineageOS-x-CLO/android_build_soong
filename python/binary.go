@@ -204,7 +204,7 @@ func (p *PythonBinaryModule) HostToolPath() android.OptionalPath {
 }
 
 func (p *PythonBinaryModule) isEmbeddedLauncherEnabled() bool {
-	return Bool(p.properties.Embedded_launcher)
+	return BoolDefault(p.properties.Embedded_launcher, false)
 }
 
 func (b *PythonBinaryModule) autorun() bool {
