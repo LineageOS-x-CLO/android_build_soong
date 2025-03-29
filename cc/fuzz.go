@@ -490,7 +490,7 @@ func (s *ccRustFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) 
 			sharedLibsInstallDirPrefix = "lib/vendor"
 		}
 
-		commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoKey)
+		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
 		isHost := commonInfo.Target.Os.Class == android.Host
 		hostOrTargetString := "target"
 		if commonInfo.Target.HostCross {
