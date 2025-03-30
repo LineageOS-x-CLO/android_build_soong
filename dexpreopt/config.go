@@ -139,6 +139,11 @@ var allSystemServerJarsKey = android.NewOnceKey("allSystemServerJars")
 
 // Returns all jars that system_server loads.
 func (g *GlobalConfig) AllSystemServerJars(ctx android.PathContext) *android.ConfiguredJarList {
+	// dexpreopt does not initialize the soong config.
+	// Initialize the OncePer here.
+	if ctx.Config().OncePer == nil {
+		ctx.Config().OncePer = &android.OncePer{}
+	}
 	return ctx.Config().Once(allSystemServerJarsKey, func() interface{} {
 		res := g.AllPlatformSystemServerJars(ctx).AppendList(g.AllApexSystemServerJars(ctx))
 		return &res
@@ -464,8 +469,8 @@ func (d dex2oatDependencyTag) AllowDisabledModuleDependency(target android.Modul
 
 func (d dex2oatDependencyTag) AllowDisabledModuleDependencyProxy(
 	ctx android.OtherModuleProviderContext, target android.ModuleProxy) bool {
-	return android.OtherModuleProviderOrDefault(
-		ctx, target, android.CommonModuleInfoKey).ReplacedByPrebuilt
+	return android.OtherModulePointerProviderOrDefault(
+		ctx, target, android.CommonModuleInfoProvider).ReplacedByPrebuilt
 }
 
 // Dex2oatDepTag represents the dependency onto the dex2oatd module. It is added to any module that
