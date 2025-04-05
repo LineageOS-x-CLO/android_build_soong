@@ -7867,7 +7867,7 @@ func TestJavaSDKLibrary_WithinApex(t *testing.T) {
 
 	// The bar library should depend on the implementation jar.
 	barLibrary := ctx.ModuleForTests(t, "bar", "android_common_apex10000").Rule("javac")
-	if expected, actual := `^-classpath [^:]*/turbine-combined/foo\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
+	if expected, actual := `^-classpath [^:]*/turbine/foo\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
 		t.Errorf("expected %q, found %#q", expected, actual)
 	}
 }
@@ -7919,7 +7919,7 @@ func TestJavaSDKLibrary_CrossBoundary(t *testing.T) {
 
 	// The bar library should depend on the stubs jar.
 	barLibrary := ctx.ModuleForTests(t, "bar", "android_common").Rule("javac")
-	if expected, actual := `^-classpath [^:]*/turbine-combined/foo\.stubs\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
+	if expected, actual := `^-classpath [^:]*/foo\.stubs\.from-text/foo\.stubs\.from-text\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
 		t.Errorf("expected %q, found %#q", expected, actual)
 	}
 }
@@ -8013,7 +8013,7 @@ func TestJavaSDKLibrary_ImportPreferred(t *testing.T) {
 
 	// The bar library should depend on the implementation jar.
 	barLibrary := ctx.ModuleForTests(t, "bar", "android_common_apex10000").Rule("javac")
-	if expected, actual := `^-classpath [^:]*/turbine-combined/foo\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
+	if expected, actual := `^-classpath [^:]*/turbine/foo\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
 		t.Errorf("expected %q, found %#q", expected, actual)
 	}
 }
@@ -11451,6 +11451,16 @@ func TestInstallationRulesForMultipleApexPrebuilts(t *testing.T) {
 		// 1. The contents of the selected apex_contributions are visible to make
 		// 2. The rest of the apexes in the mainline module family (source or other prebuilt) is hidden from make
 		checkHideFromMake(t, ctx, tc.expectedVisibleModuleName, tc.expectedHiddenModuleNames)
+
+		// Check that source_apex_name is written as LOCAL_MODULE for make packaging
+		if tc.expectedVisibleModuleName == "prebuilt_com.google.android.foo.v2" {
+			apex := ctx.ModuleForTests(t, "prebuilt_com.google.android.foo.v2", "android_common_prebuilt_com.android.foo").Module()
+			entries := android.AndroidMkEntriesForTest(t, ctx, apex)[0]
+
+			expected := "com.google.android.foo"
+			actual := entries.EntryMap["LOCAL_MODULE"][0]
+			android.AssertStringEquals(t, "LOCAL_MODULE", expected, actual)
+		}
 	}
 }
 
@@ -11650,7 +11660,7 @@ func TestAconfifDeclarationsValidation(t *testing.T) {
 
 	// Arguments passed to aconfig to retrieve the state of the flags defined in the
 	// textproto files
-	aconfigFlagArgs := m.Output("released-flagged-apis-exportable.txt").Args["flags_path"]
+	aconfigFlagArgs := m.Output("released-flags-exportable.pb").Args["flags_path"]
 
 	// "bar-lib" is a static_lib of "foo" and is passed to metalava as classpath. Thus the
 	// cache file provided by the associated aconfig_declarations module "bar" should be passed
@@ -12198,4 +12208,31 @@ func TestVintfFragmentInApex(t *testing.T) {
 
 	// Ensure that vintf fragment file is being installed
 	ensureContains(t, cmd, "/etc/vintf/my_vintf_fragment.xml ")
+}
+
+func TestNoVintfFragmentInUpdatableApex(t *testing.T) {
+	t.Parallel()
+	testApexError(t, `VINTF fragment .* is not supported in updatable APEX`, apex_default_bp+`
+		apex {
+			name: "myapex",
+			manifest: ":myapex.manifest",
+			key: "myapex.key",
+			binaries: [ "mybin" ],
+			updatable: true,
+			min_sdk_version: "29",
+		}
+
+		cc_binary {
+			name: "mybin",
+			srcs: ["mybin.cpp"],
+			vintf_fragment_modules: ["my_vintf_fragment.xml"],
+			apex_available: [ "myapex" ],
+			min_sdk_version: "29",
+		}
+
+		vintf_fragment {
+			name: "my_vintf_fragment.xml",
+			src: "my_vintf_fragment.xml",
+		}
+	`)
 }

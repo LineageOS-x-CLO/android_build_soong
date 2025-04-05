@@ -168,6 +168,7 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_common_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_prefer32_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Host_common_data)...)
 
 	var ok bool
 	var instrumentedApp *JavaInfo
@@ -283,6 +284,11 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
 		TestSuites: r.TestSuites(),
 	})
+
+	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+		TestOnly:       Bool(r.sourceProperties.Test_only),
+		TopLevelTarget: r.sourceProperties.Top_level_test_target,
+	})
 }
 
 func generateSameDirRoboTestConfigJar(ctx android.ModuleContext, outputFile android.ModuleOutPath) {
@@ -334,7 +340,8 @@ func RobolectricTestFactory() android.Module {
 
 	module.Module.dexpreopter.isTest = true
 	module.Module.linter.properties.Lint.Test_module_type = proptools.BoolPtr(true)
-
+	module.Module.sourceProperties.Test_only = proptools.BoolPtr(true)
+	module.Module.sourceProperties.Top_level_test_target = true
 	module.testProperties.Test_suites = []string{"robolectric-tests"}
 
 	InitJavaModule(module, android.DeviceSupported)

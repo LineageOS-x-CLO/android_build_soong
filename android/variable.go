@@ -65,12 +65,6 @@ type variableProperties struct {
 			Enabled proptools.Configurable[bool] `android:"arch_variant,replace_instead_of_append"`
 		} `android:"arch_variant"`
 
-		// similar to `Unbundled_build`, but `Always_use_prebuilt_sdks` means that it uses prebuilt
-		// sdk specifically.
-		Always_use_prebuilt_sdks struct {
-			Enabled proptools.Configurable[bool] `android:"arch_variant,replace_instead_of_append"`
-		} `android:"arch_variant"`
-
 		Malloc_low_memory struct {
 			Cflags              []string `android:"arch_variant"`
 			Shared_libs         []string `android:"arch_variant"`
@@ -259,8 +253,8 @@ type ProductVariables struct {
 	Platform_version_last_stable           *string  `json:",omitempty"`
 	Platform_version_known_codenames       *string  `json:",omitempty"`
 
-	DeviceName                            *string  `json:",omitempty"`
-	DeviceProduct                         *string  `json:",omitempty"`
+	DeviceName                            *string  `json:",omitempty" generic:"generic"`
+	DeviceProduct                         *string  `json:",omitempty" generic:"generic"`
 	DeviceArch                            *string  `json:",omitempty"`
 	DeviceArchVariant                     *string  `json:",omitempty"`
 	DeviceCpuVariant                      *string  `json:",omitempty"`
@@ -605,6 +599,8 @@ type ProductVariables struct {
 	OdmManifestFiles       []string `json:",omitempty"`
 
 	UseSoongNoticeXML *bool `json:",omitempty"`
+
+	StripByDefault *bool `json:",omitempty"`
 }
 
 type PartitionQualifiedVariablesType struct {
@@ -705,6 +701,7 @@ type PartitionVariables struct {
 	ProductUseDynamicPartitions       bool                                     `json:",omitempty"`
 	ProductRetrofitDynamicPartitions  bool                                     `json:",omitempty"`
 	ProductBuildSuperPartition        bool                                     `json:",omitempty"`
+	BuildingSuperEmptyImage           bool                                     `json:",omitempty"`
 	BoardSuperPartitionSize           string                                   `json:",omitempty"`
 	BoardSuperPartitionMetadataDevice string                                   `json:",omitempty"`
 	BoardSuperPartitionBlockDevices   []string                                 `json:",omitempty"`
@@ -719,6 +716,7 @@ type PartitionVariables struct {
 	AbOtaPartitions                   []string                                 `json:",omitempty"`
 	AbOtaKeys                         []string                                 `json:",omitempty"`
 	AbOtaPostInstallConfig            []string                                 `json:",omitempty"`
+	BoardSuperImageInUpdatePackage    bool                                     `json:",omitempty"`
 
 	// Avb (android verified boot) stuff
 	BoardAvbEnable          bool                                `json:",omitempty"`
@@ -767,6 +765,12 @@ type PartitionVariables struct {
 	ProductFsCompression string `json:",omitempty"`
 
 	ReleaseToolsExtensionDir string `json:",omitempty"`
+
+	BoardPartialOtaUpdatePartitionsList []string `json:",omitempty"`
+	BoardFlashBlockSize                 string   `json:",omitempty"`
+	BootloaderInUpdatePackage           bool     `json:",omitempty"`
+
+	BoardFastbootInfoFile string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {

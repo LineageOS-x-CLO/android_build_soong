@@ -138,6 +138,11 @@ type TestProperties struct {
 	// host test.
 	Device_first_data []string `android:"path_device_first"`
 
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the common arch variation. Useful for a device test that wants to depend on a host
+	// module, for example to include a custom Tradefed test runner.
+	Host_common_data []string `android:"path_host_common"`
+
 	// Add RootTargetPreparer to auto generated test config. This guarantees the test to run
 	// with root permission.
 	Require_root *bool
@@ -351,6 +356,8 @@ func (s *ShBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	for _, symlink := range s.Symlinks() {
 		ctx.InstallSymlink(installDir, symlink, s.installedFile)
 	}
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"EXECUTABLES"}
 }
 
 func (s *ShBinary) AndroidMkEntries() []android.AndroidMkEntries {
@@ -436,6 +443,7 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	expandedData := android.PathsForModuleSrc(ctx, s.testProperties.Data)
 	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, s.testProperties.Device_common_data)...)
 	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, s.testProperties.Device_first_data)...)
+	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, s.testProperties.Host_common_data)...)
 	// Emulate the data property for java_data dependencies.
 	for _, javaData := range ctx.GetDirectDepsProxyWithTag(shTestJavaDataTag) {
 		expandedData = append(expandedData, android.OutputFilesForModule(ctx, javaData, "")...)
@@ -502,7 +510,7 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 				// so that it's compatible with the default rpath values.
 				var relPath string
 				linkableInfo := android.OtherModuleProviderOrDefault(ctx, dep, cc.LinkableInfoProvider)
-				commonInfo := android.OtherModuleProviderOrDefault(ctx, dep, android.CommonModuleInfoKey)
+				commonInfo := android.OtherModulePointerProviderOrDefault(ctx, dep, android.CommonModuleInfoProvider)
 
 				if commonInfo.Target.Arch.ArchType.Multilib == "lib64" {
 					relPath = filepath.Join("lib64", linkableInfo.OutputFile.Path().Base())
@@ -566,6 +574,10 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, s.testConfig.String())
 	}
 	moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, s.extraTestConfigs.Strings()...)
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: s.testProperties.Test_suites,
+	})
 }
 
 func addArch(archType string, paths android.Paths) []string {
@@ -600,6 +612,8 @@ func (s *ShTest) AndroidMkEntries() []android.AndroidMkEntries {
 				if len(s.extraTestConfigs) > 0 {
 					entries.AddStrings("LOCAL_EXTRA_FULL_TEST_CONFIGS", s.extraTestConfigs.Strings()...)
 				}
+
+				entries.SetBoolIfTrue("LOCAL_DISABLE_AUTO_GENERATE_TEST_CONFIG", !proptools.BoolDefault(s.testProperties.Auto_gen_config, true))
 
 				s.testProperties.Test_options.SetAndroidMkEntries(entries)
 			},

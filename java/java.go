@@ -432,6 +432,9 @@ type JavaInfo struct {
 	DexJarBuildPath OptionalDexJarPath
 
 	DexpreopterInfo *DexpreopterInfo
+
+	XrefJavaFiles   android.Paths
+	XrefKotlinFiles android.Paths
 }
 
 var JavaInfoProvider = blueprint.NewProvider[*JavaInfo]()
@@ -575,6 +578,7 @@ var (
 	extraLintCheckTag       = dependencyTag{name: "extra-lint-check", toolchain: true}
 	jniLibTag               = dependencyTag{name: "jnilib", runtimeLinked: true}
 	r8LibraryJarTag         = dependencyTag{name: "r8-libraryjar", runtimeLinked: true}
+	traceReferencesTag      = dependencyTag{name: "trace-references"}
 	syspropPublicStubDepTag = dependencyTag{name: "sysprop public stub"}
 	javaApiContributionTag  = dependencyTag{name: "java-api-contribution"}
 	aconfigDeclarationTag   = dependencyTag{name: "aconfig-declaration"}
@@ -605,6 +609,7 @@ var (
 		kotlinPluginTag,
 		syspropPublicStubDepTag,
 		instrumentationForTag,
+		traceReferencesTag,
 	}
 )
 
@@ -665,12 +670,12 @@ func sdkDeps(ctx android.BottomUpMutatorContext, sdkContext android.SdkContext, 
 		ctx.AddVariationDependencies(nil, bootClasspathTag, sdkDep.bootclasspath...)
 		ctx.AddVariationDependencies(nil, java9LibTag, sdkDep.java9Classpath...)
 		ctx.AddVariationDependencies(nil, sdkLibTag, sdkDep.classpath...)
-		if d.effectiveOptimizeEnabled() && sdkDep.hasStandardLibs() {
+		if d.effectiveOptimizeEnabled(ctx) && sdkDep.hasStandardLibs() {
 			ctx.AddVariationDependencies(nil, proguardRaiseTag,
 				config.LegacyCorePlatformBootclasspathLibraries...,
 			)
 		}
-		if d.effectiveOptimizeEnabled() && sdkDep.hasFrameworkLibs() {
+		if d.effectiveOptimizeEnabled(ctx) && sdkDep.hasFrameworkLibs() {
 			ctx.AddVariationDependencies(nil, proguardRaiseTag, config.FrameworkLibraries...)
 		}
 	}
@@ -1172,6 +1177,16 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	buildComplianceMetadata(ctx)
 
 	j.createApiXmlFile(ctx)
+
+	if j.dexer.proguardDictionary.Valid() {
+		android.SetProvider(ctx, ProguardProvider, ProguardInfo{
+			ModuleName:         ctx.ModuleName(),
+			Class:              "JAVA_LIBRARIES",
+			ProguardDictionary: j.dexer.proguardDictionary.Path(),
+			ProguardUsageZip:   j.dexer.proguardUsageZip.Path(),
+			ClassesJar:         j.implementationAndResourcesJar,
+		})
+	}
 }
 
 func (j *Library) javaLibraryModuleInfoJSON(ctx android.ModuleContext) *android.ModuleInfoJSON {
@@ -1539,6 +1554,11 @@ type testProperties struct {
 	// host test.
 	Device_first_prefer32_data []string `android:"path_device_first_prefer32"`
 
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the common arch variation. Useful for a device test that wants to depend on a host
+	// module, for example to include a custom Tradefed test runner.
+	Host_common_data []string `android:"path_host_common"`
+
 	// Flag to indicate whether or not to create test config automatically. If AndroidTest.xml
 	// doesn't exist next to the Android.bp, this attribute doesn't need to be set to true
 	// explicitly.
@@ -1837,6 +1857,7 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Device_common_data)...)
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Device_first_data)...)
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Device_first_prefer32_data)...)
+	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Host_common_data)...)
 
 	j.extraTestConfigs = android.PathsForModuleSrc(ctx, j.testProperties.Test_options.Extra_test_configs)
 
@@ -1935,6 +1956,10 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 			ctx.InstallFile(pathInTestCases, ctx.ModuleName()+".jar", j.outputFile)
 		}
 	}
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: j.testProperties.Test_suites,
+	})
 }
 
 func (j *TestHelperLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -1951,6 +1976,10 @@ func (j *TestHelperLibrary) GenerateAndroidBuildActions(ctx android.ModuleContex
 	if optionalConfig.Valid() {
 		moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, optionalConfig.String())
 	}
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: j.testHelperLibraryProperties.Test_suites,
+	})
 }
 
 func (j *JavaTestImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -2206,7 +2235,7 @@ func (j *Binary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// install these alongside the java binary.
 	ctx.VisitDirectDepsProxyWithTag(jniInstallTag, func(jni android.ModuleProxy) {
 		// Use the BaseModuleName of the dependency (without any prebuilt_ prefix)
-		commonInfo, _ := android.OtherModuleProvider(ctx, jni, android.CommonModuleInfoKey)
+		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, jni, android.CommonModuleInfoProvider)
 		j.androidMkNamesOfJniLibs = append(j.androidMkNamesOfJniLibs, commonInfo.BaseModuleName+":"+commonInfo.Target.Arch.ArchType.Bitness())
 	})
 	// Check that native libraries are not listed in `required`. Prompt users to use `jni_libs` instead.
@@ -2511,6 +2540,7 @@ func (al *ApiLibrary) DepsMutator(ctx android.BottomUpMutatorContext) {
 	apiContributions := al.properties.Api_contributions
 	addValidations := !ctx.Config().IsEnvTrue("DISABLE_STUB_VALIDATION") &&
 		!ctx.Config().IsEnvTrue("WITHOUT_CHECK_API") &&
+		!ctx.Config().PartialCompileFlags().Disable_stub_validation &&
 		proptools.BoolDefault(al.properties.Enable_validation, true)
 	for _, apiContributionName := range apiContributions {
 		ctx.AddDependency(ctx.Module(), javaApiContributionTag, apiContributionName)
@@ -3072,12 +3102,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// file of the module to be named jarName.
 	var outputFile android.Path
 	combinedImplementationJar := android.PathForModuleOut(ctx, "combined", jarName)
-	var implementationJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		implementationJars = completeStaticLibsImplementationJars.ToList()
-	} else {
-		implementationJars = append(slices.Clone(localJars), staticJars...)
-	}
+	implementationJars := completeStaticLibsImplementationJars.ToList()
 	TransformJarsToJar(ctx, combinedImplementationJar, "combine prebuilt implementation jars", implementationJars, android.OptionalPath{},
 		false, j.properties.Exclude_files, j.properties.Exclude_dirs)
 	outputFile = combinedImplementationJar
@@ -3100,12 +3125,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	if reuseImplementationJarAsHeaderJar {
 		headerJar = outputFile
 	} else {
-		var headerJars android.Paths
-		if ctx.Config().UseTransitiveJarsInClasspath() {
-			headerJars = completeStaticLibsHeaderJars.ToList()
-		} else {
-			headerJars = append(slices.Clone(localJars), staticHeaderJars...)
-		}
+		headerJars := completeStaticLibsHeaderJars.ToList()
 		headerOutputFile := android.PathForModuleOut(ctx, "turbine-combined", jarName)
 		TransformJarsToJar(ctx, headerOutputFile, "combine prebuilt header jars", headerJars, android.OptionalPath{},
 			false, j.properties.Exclude_files, j.properties.Exclude_dirs)
@@ -3169,11 +3189,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	j.exportAidlIncludeDirs = android.PathsForModuleSrc(ctx, j.properties.Aidl.Export_include_dirs)
 
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		ctx.CheckbuildFile(localJars...)
-	} else {
-		ctx.CheckbuildFile(outputFile)
-	}
+	ctx.CheckbuildFile(localJars...)
 
 	if ctx.Device() {
 		// Shared libraries deapexed from prebuilt apexes are no longer supported.
@@ -3358,19 +3374,10 @@ func (j *Import) UseProfileGuidedDexpreopt() bool {
 
 // Add compile time check for interface implementation
 var _ android.IDEInfo = (*Import)(nil)
-var _ android.IDECustomizedModuleName = (*Import)(nil)
 
 // Collect information for opening IDE project files in java/jdeps.go.
-
 func (j *Import) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	dpInfo.Jars = append(dpInfo.Jars, j.combinedImplementationFile.String())
-}
-
-func (j *Import) IDECustomizedModuleName() string {
-	// TODO(b/113562217): Extract the base module name from the Import name, often the Import name
-	// has a prefix "prebuilt_". Remove the prefix explicitly if needed until we find a better
-	// solution to get the Import name.
-	return android.RemoveOptionalPrebuiltPrefix(j.Name())
 }
 
 var _ android.PrebuiltInterface = (*Import)(nil)
@@ -3647,10 +3654,10 @@ type kytheExtractJavaSingleton struct {
 func (ks *kytheExtractJavaSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 	var xrefTargets android.Paths
 	var xrefKotlinTargets android.Paths
-	ctx.VisitAllModules(func(module android.Module) {
-		if javaModule, ok := module.(xref); ok {
-			xrefTargets = append(xrefTargets, javaModule.XrefJavaFiles()...)
-			xrefKotlinTargets = append(xrefKotlinTargets, javaModule.XrefKotlinFiles()...)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if javaInfo, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
+			xrefTargets = append(xrefTargets, javaInfo.XrefJavaFiles...)
+			xrefKotlinTargets = append(xrefKotlinTargets, javaInfo.XrefKotlinFiles...)
 		}
 	})
 	// TODO(asmundak): perhaps emit a rule to output a warning if there were no xrefTargets
@@ -3850,5 +3857,10 @@ func setExtraJavaInfo(ctx android.ModuleContext, module android.Module, javaInfo
 			ApexSystemServerDexpreoptInstalls: di.ApexSystemServerDexpreoptInstalls(),
 			ApexSystemServerDexJars:           di.ApexSystemServerDexJars(),
 		}
+	}
+
+	if xr, ok := module.(xref); ok {
+		javaInfo.XrefJavaFiles = xr.XrefJavaFiles()
+		javaInfo.XrefKotlinFiles = xr.XrefKotlinFiles()
 	}
 }

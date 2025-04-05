@@ -37,7 +37,7 @@ type StubsAvailableModule interface {
 
 // Returns true if the dependency module is a stubs module
 var depIsStubsModule exceptionHandleFunc = func(mctx ModuleContext, _ Module, dep ModuleProxy) bool {
-	return OtherModuleProviderOrDefault(mctx, dep, CommonModuleInfoKey).IsStubsModule
+	return OtherModulePointerProviderOrDefault(mctx, dep, CommonModuleInfoProvider).IsStubsModule
 }
 
 // Returns true if the dependency module belongs to any of the apexes.
@@ -413,7 +413,7 @@ func generateContainerInfo(ctx ModuleContext) ContainersInfo {
 }
 
 func getContainerModuleInfo(ctx ModuleContext, module Module) (ContainersInfo, bool) {
-	if ctx.EqualModules(ctx.Module(), module) {
+	if EqualModules(ctx.Module(), module) {
 		return ctx.getContainersInfo(), true
 	}
 

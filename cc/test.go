@@ -94,6 +94,11 @@ type TestBinaryProperties struct {
 	// of a host test.
 	Device_first_data []string `android:"path_device_first"`
 
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the common arch variation. Useful for a device test that wants to depend on a host
+	// module, for example to include a custom Tradefed test runner.
+	Host_common_data []string `android:"path_host_common"`
+
 	// list of shared library modules that should be installed alongside the test
 	Data_libs []string `android:"arch_variant"`
 
@@ -269,6 +274,12 @@ func (test *testDecorator) moduleInfoJSON(ctx android.ModuleContext, moduleInfoJ
 	}
 }
 
+func (test *testDecorator) testSuiteInfo(ctx ModuleContext) {
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: test.InstallerProperties.Test_suites,
+	})
+}
+
 func NewTestInstaller() *baseInstaller {
 	return NewBaseInstaller("nativetest", "nativetest64", InstallInData)
 }
@@ -337,6 +348,10 @@ func (test *testBinary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *androi
 
 }
 
+func (test *testBinary) testSuiteInfo(ctx ModuleContext) {
+	test.testDecorator.testSuiteInfo(ctx)
+}
+
 func (test *testBinary) installerProps() []interface{} {
 	return append(test.baseInstaller.installerProps(), test.testDecorator.installerProps()...)
 }
@@ -345,6 +360,7 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 	dataSrcPaths := android.PathsForModuleSrc(ctx, test.Properties.Data)
 	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_common_data)...)
 	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_first_data)...)
+	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Host_common_data)...)
 
 	for _, dataSrcPath := range dataSrcPaths {
 		test.data = append(test.data, android.DataPath{SrcPath: dataSrcPath})
@@ -446,6 +462,9 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 				continue
 			}
 			if standaloneTestDep.SkipInstall() {
+				continue
+			}
+			if standaloneTestDep.Partition() == "data" {
 				continue
 			}
 			test.binaryDecorator.baseInstaller.installStandaloneTestDep(ctx, standaloneTestDep)
@@ -568,6 +587,10 @@ func (test *testLibrary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *andro
 	test.testDecorator.moduleInfoJSON(ctx, moduleInfoJSON)
 }
 
+func (test *testLibrary) testSuiteInfo(ctx ModuleContext) {
+	test.testDecorator.testSuiteInfo(ctx)
+}
+
 func (test *testLibrary) installerProps() []interface{} {
 	return append(test.baseInstaller.installerProps(), test.testDecorator.installerProps()...)
 }
@@ -680,6 +703,12 @@ func (benchmark *benchmarkDecorator) moduleInfoJSON(ctx ModuleContext, moduleInf
 		}
 		moduleInfoJSON.TestConfig = []string{benchmark.testConfig.String()}
 	}
+}
+
+func (benchmark *benchmarkDecorator) testSuiteInfo(ctx ModuleContext) {
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: benchmark.Properties.Test_suites,
+	})
 }
 
 func NewBenchmark(hod android.HostOrDeviceSupported) *Module {

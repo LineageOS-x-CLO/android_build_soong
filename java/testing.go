@@ -232,29 +232,6 @@ func FixtureWithPrebuiltApisAndExtensions(apiLevel2Modules map[string][]string, 
 	)
 }
 
-func FixtureWithPrebuiltIncrementalApis(apiLevel2Modules map[string][]string) android.FixturePreparer {
-	mockFS := android.MockFS{}
-	path := "prebuilts/sdk/Android.bp"
-
-	bp := fmt.Sprintf(`
-			prebuilt_apis {
-				name: "sdk",
-				api_dirs: ["%s"],
-				allow_incremental_platform_api: true,
-				imports_sdk_version: "none",
-				imports_compile_dex: true,
-			}
-		`, strings.Join(android.SortedKeys(apiLevel2Modules), `", "`))
-
-	for release, modules := range apiLevel2Modules {
-		mockFS.Merge(prebuiltApisFilesForModules([]string{release}, modules))
-	}
-	return android.GroupFixturePreparers(
-		android.FixtureAddTextFile(path, bp),
-		android.FixtureMergeMockFs(mockFS),
-	)
-}
-
 func prebuiltApisFilesForModules(apiLevels []string, modules []string) map[string][]byte {
 	libs := append([]string{"android"}, modules...)
 
@@ -822,5 +799,3 @@ func FixtureSetBootImageInstallDirOnDevice(name string, installDir string) andro
 		config.installDir = installDir
 	})
 }
-
-var PrepareForTestWithTransitiveClasspathEnabled = android.PrepareForTestWithBuildFlag("RELEASE_USE_TRANSITIVE_JARS_IN_CLASSPATH", "true")

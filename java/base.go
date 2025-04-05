@@ -622,7 +622,7 @@ func CheckStableSdkVersion(ctx android.BaseModuleContext, module android.ModuleP
 			return nil
 		}
 		if info.SdkVersion.Kind == android.SdkCorePlatform {
-			if useLegacyCorePlatformApi(ctx, android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoKey).BaseModuleName) {
+			if useLegacyCorePlatformApi(ctx, android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).BaseModuleName) {
 				return fmt.Errorf("non stable SDK %v - uses legacy core platform", info.SdkVersion)
 			} else {
 				// Treat stable core platform as stable.
@@ -880,6 +880,10 @@ func (j *Module) deps(ctx android.BottomUpMutatorContext) {
 
 	// Add dependency on libraries that provide additional hidden api annotations.
 	ctx.AddVariationDependencies(nil, hiddenApiAnnotationsTag, j.properties.Hiddenapi_additional_annotations...)
+
+	// Add dependency on (soft) downstream libs from which to trace references during optimization.
+	traceRefs := j.dexProperties.Optimize.Trace_references_from.GetOrDefault(ctx, []string{})
+	ctx.AddVariationDependencies(nil, traceReferencesTag, traceRefs...)
 
 	// For library dependencies that are component libraries (like stubs), add the implementation
 	// as a dependency (dexpreopt needs to be against the implementation library, not stubs).
@@ -1291,15 +1295,11 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		}
 		j.headerJarFile = combinedHeaderJarFile
 
-		if ctx.Config().UseTransitiveJarsInClasspath() {
-			if len(localHeaderJars) > 0 {
-				ctx.CheckbuildFile(localHeaderJars...)
-			} else {
-				// There are no local sources or resources in this module, so there is nothing to checkbuild.
-				ctx.UncheckedModule()
-			}
+		if len(localHeaderJars) > 0 {
+			ctx.CheckbuildFile(localHeaderJars...)
 		} else {
-			ctx.CheckbuildFile(j.headerJarFile)
+			// There are no local sources or resources in this module, so there is nothing to checkbuild.
+			ctx.UncheckedModule()
 		}
 
 		j.outputFile = j.headerJarFile
@@ -1597,12 +1597,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 	completeStaticLibsResourceJars := depset.New(depset.PREORDER, localResourceJars, deps.transitiveStaticLibsResourceJars)
 
 	var combinedResourceJar android.Path
-	var resourceJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		resourceJars = completeStaticLibsResourceJars.ToList()
-	} else {
-		resourceJars = append(slices.Clone(localResourceJars), deps.staticResourceJars...)
-	}
+	resourceJars := completeStaticLibsResourceJars.ToList()
 	if len(resourceJars) == 1 {
 		combinedResourceJar = resourceJars[0]
 	} else if len(resourceJars) > 0 {
@@ -1623,12 +1618,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	completeStaticLibsImplementationJars := depset.New(depset.PREORDER, localImplementationJars, deps.transitiveStaticLibsImplementationJars)
 
-	var jars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		jars = completeStaticLibsImplementationJars.ToList()
-	} else {
-		jars = append(slices.Clone(localImplementationJars), deps.staticJars...)
-	}
+	jars := completeStaticLibsImplementationJars.ToList()
 
 	jars = append(jars, extraDepCombinedJars...)
 
@@ -1759,7 +1749,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		headerJarFile := android.PathForModuleOut(ctx, "javac-header", jarName)
 		convertImplementationJarToHeaderJar(ctx, j.implementationJarFile, headerJarFile)
 		j.headerJarFile = headerJarFile
-		if len(localImplementationJars) == 1 && ctx.Config().UseTransitiveJarsInClasspath() {
+		if len(localImplementationJars) == 1 {
 			localHeaderJarFile := android.PathForModuleOut(ctx, "local-javac-header", jarName)
 			convertImplementationJarToHeaderJar(ctx, localImplementationJars[0], localHeaderJarFile)
 			localHeaderJars = append(localHeaderJars, localHeaderJarFile)
@@ -1789,16 +1779,10 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	// merge implementation jar with resources if necessary
 	var implementationAndResourcesJarsToCombine android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		resourceJars := completeStaticLibsResourceJars.ToList()
-		if len(resourceJars) > 0 {
-			implementationAndResourcesJarsToCombine = append(resourceJars, completeStaticLibsImplementationJarsToCombine.ToList()...)
-			implementationAndResourcesJarsToCombine = append(implementationAndResourcesJarsToCombine, extraDepCombinedJars...)
-		}
-	} else {
-		if combinedResourceJar != nil {
-			implementationAndResourcesJarsToCombine = android.Paths{combinedResourceJar, outputFile}
-		}
+	combinedResourceJars := completeStaticLibsResourceJars.ToList()
+	if len(combinedResourceJars) > 0 {
+		implementationAndResourcesJarsToCombine = slices.Concat(combinedResourceJars,
+			completeStaticLibsImplementationJarsToCombine.ToList(), extraDepCombinedJars)
 	}
 
 	if len(implementationAndResourcesJarsToCombine) > 0 {
@@ -1825,7 +1809,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				classesJar:    outputFile,
 				jarName:       jarName,
 			}
-			if j.GetProfileGuided(ctx) && j.optimizeOrObfuscateEnabled() && !j.EnableProfileRewriting(ctx) {
+			if j.GetProfileGuided(ctx) && j.optimizeOrObfuscateEnabled(ctx) && !j.EnableProfileRewriting(ctx) {
 				ctx.PropertyErrorf("enable_profile_rewriting",
 					"Enable_profile_rewriting must be true when profile_guided dexpreopt and R8 optimization/obfuscation is turned on. The attached profile should be sourced from an unoptimized/unobfuscated APK.",
 				)
@@ -1848,18 +1832,9 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			}
 
 			// merge dex jar with resources if necessary
-			var dexAndResourceJarsToCombine android.Paths
-			if ctx.Config().UseTransitiveJarsInClasspath() {
-				resourceJars := completeStaticLibsResourceJars.ToList()
-				if len(resourceJars) > 0 {
-					dexAndResourceJarsToCombine = append(android.Paths{dexOutputFile}, resourceJars...)
-				}
-			} else {
-				if combinedResourceJar != nil {
-					dexAndResourceJarsToCombine = android.Paths{dexOutputFile, combinedResourceJar}
-				}
-			}
-			if len(dexAndResourceJarsToCombine) > 0 {
+			if len(combinedResourceJars) > 0 {
+				dexAndResourceJarsToCombine := append(android.Paths{dexOutputFile}, combinedResourceJars...)
+
 				combinedJar := android.PathForModuleOut(ctx, "dex-withres", jarName)
 				TransformJarsToJar(ctx, combinedJar, "for dex resources", dexAndResourceJarsToCombine, android.OptionalPath{},
 					false, nil, nil)
@@ -1931,18 +1906,13 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 	j.collectTransitiveSrcFiles(ctx, srcFiles)
 
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		if len(localImplementationJars) > 0 || len(localResourceJars) > 0 || len(localHeaderJars) > 0 {
-			ctx.CheckbuildFile(localImplementationJars...)
-			ctx.CheckbuildFile(localResourceJars...)
-			ctx.CheckbuildFile(localHeaderJars...)
-		} else {
-			// There are no local sources or resources in this module, so there is nothing to checkbuild.
-			ctx.UncheckedModule()
-		}
+	if len(localImplementationJars) > 0 || len(localResourceJars) > 0 || len(localHeaderJars) > 0 {
+		ctx.CheckbuildFile(localImplementationJars...)
+		ctx.CheckbuildFile(localResourceJars...)
+		ctx.CheckbuildFile(localHeaderJars...)
 	} else {
-		ctx.CheckbuildFile(j.implementationJarFile)
-		ctx.CheckbuildFile(j.headerJarFile)
+		// There are no local sources or resources in this module, so there is nothing to checkbuild.
+		ctx.UncheckedModule()
 	}
 
 	// Save the output file with no relative path so that it doesn't end up in a subdirectory when used as a resource
@@ -2109,13 +2079,8 @@ func (j *Module) compileJavaHeader(ctx android.ModuleContext, srcFiles, srcJars 
 
 	// Combine any static header libraries into classes-header.jar. If there is only
 	// one input jar this step will be skipped.
-	var jars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		depSet := depset.New(depset.PREORDER, localHeaderJars, deps.transitiveStaticLibsHeaderJars)
-		jars = depSet.ToList()
-	} else {
-		jars = append(slices.Clone(localHeaderJars), deps.staticHeaderJars...)
-	}
+	depSet := depset.New(depset.PREORDER, localHeaderJars, deps.transitiveStaticLibsHeaderJars)
+	jars := depSet.ToList()
 
 	// we cannot skip the combine step for now if there is only one jar
 	// since we have to strip META-INF/TRANSITIVE dir from turbine.jar
@@ -2627,14 +2592,12 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 	deps.transitiveStaticLibsImplementationJars = transitiveStaticJarsImplementationLibs
 	deps.transitiveStaticLibsResourceJars = transitiveStaticJarsResourceLibs
 
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		depSet := depset.New(depset.PREORDER, nil, transitiveClasspathHeaderJars)
-		deps.classpath = depSet.ToList()
-		depSet = depset.New(depset.PREORDER, nil, transitiveBootClasspathHeaderJars)
-		deps.bootClasspath = depSet.ToList()
-		depSet = depset.New(depset.PREORDER, nil, transitiveJava9ClasspathHeaderJars)
-		deps.java9Classpath = depSet.ToList()
-	}
+	depSet := depset.New(depset.PREORDER, nil, transitiveClasspathHeaderJars)
+	deps.classpath = depSet.ToList()
+	depSet = depset.New(depset.PREORDER, nil, transitiveBootClasspathHeaderJars)
+	deps.bootClasspath = depSet.ToList()
+	depSet = depset.New(depset.PREORDER, nil, transitiveJava9ClasspathHeaderJars)
+	deps.java9Classpath = depSet.ToList()
 
 	if ctx.Device() {
 		sdkDep := decodeSdkDep(ctx, android.SdkContext(j))

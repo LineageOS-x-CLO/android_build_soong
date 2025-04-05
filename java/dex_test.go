@@ -70,16 +70,17 @@ func TestR8(t *testing.T) {
 	appR8 := app.Rule("r8")
 	stableAppR8 := stableApp.Rule("r8")
 	corePlatformAppR8 := corePlatformApp.Rule("r8")
-	libHeader := lib.Output("turbine-combined/lib.jar").Output
-	staticLibHeader := staticLib.Output("turbine-combined/static_lib.jar").Output
+	libHeader := lib.Output("turbine/lib.jar").Output
+	libCombinedHeader := lib.Output("turbine-combined/lib.jar").Output
+	staticLibHeader := staticLib.Output("turbine/static_lib.jar").Output
 
 	android.AssertStringDoesContain(t, "expected lib header jar in app javac classpath",
 		appJavac.Args["classpath"], libHeader.String())
 	android.AssertStringDoesContain(t, "expected static_lib header jar in app javac classpath",
 		appJavac.Args["classpath"], staticLibHeader.String())
 
-	android.AssertStringDoesContain(t, "expected lib header jar in app r8 classpath",
-		appR8.Args["r8Flags"], libHeader.String())
+	android.AssertStringDoesContain(t, "expected lib combined header jar in app r8 classpath",
+		appR8.Args["r8Flags"], libCombinedHeader.String())
 	android.AssertStringDoesNotContain(t, "expected no static_lib header jar in app r8 classpath",
 		appR8.Args["r8Flags"], staticLibHeader.String())
 	android.AssertStringDoesContain(t, "expected -ignorewarnings in app r8 flags",
@@ -331,16 +332,17 @@ func TestD8(t *testing.T) {
 	fooJavac := foo.Rule("javac")
 	fooD8 := foo.Rule("d8")
 	appD8 := app.Rule("d8")
-	libHeader := lib.Output("turbine-combined/lib.jar").Output
-	staticLibHeader := staticLib.Output("turbine-combined/static_lib.jar").Output
+	libHeader := lib.Output("turbine/lib.jar").Output
+	libCombinedHeader := lib.Output("turbine-combined/lib.jar").Output
+	staticLibHeader := staticLib.Output("turbine/static_lib.jar").Output
 
 	android.AssertStringDoesContain(t, "expected lib header jar in foo javac classpath",
 		fooJavac.Args["classpath"], libHeader.String())
 	android.AssertStringDoesContain(t, "expected static_lib header jar in foo javac classpath",
 		fooJavac.Args["classpath"], staticLibHeader.String())
 
-	android.AssertStringDoesContain(t, "expected lib header jar in foo d8 classpath",
-		fooD8.Args["d8Flags"], libHeader.String())
+	android.AssertStringDoesContain(t, "expected lib combined header jar in foo d8 classpath",
+		fooD8.Args["d8Flags"], libCombinedHeader.String())
 	android.AssertStringDoesNotContain(t, "expected no  static_lib header jar in foo javac classpath",
 		fooD8.Args["d8Flags"], staticLibHeader.String())
 
@@ -795,12 +797,14 @@ func TestDebugReleaseFlags(t *testing.T) {
 		},
 		{
 			name:          "app_eng",
+			useD8:         true,
 			isEng:         true,
 			expectedFlags: "--debug",
 		},
 		{
 			name:    "app_release_eng",
 			isEng:   true,
+			useD8:   true,
 			dxFlags: "--release",
 			// Eng mode does *not* override explicit dxflags.
 			expectedFlags: "--release",
@@ -863,4 +867,47 @@ func TestDebugReleaseFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTraceReferences(t *testing.T) {
+	t.Parallel()
+	bp := `
+		android_app {
+			name: "app",
+			libs: ["lib.impl"],
+			srcs: ["foo.java"],
+			platform_apis: true,
+		}
+
+		java_library {
+			name: "lib",
+			optimize: {
+				enabled: true,
+				trace_references_from: ["app"],
+			},
+			srcs: ["bar.java"],
+			static_libs: ["lib.impl"],
+			installable: true,
+		}
+
+		java_library {
+			name: "lib.impl",
+			srcs: ["baz.java"],
+		}
+	`
+	result := android.GroupFixturePreparers(
+		PrepareForTestWithJavaDefaultModules,
+	).RunTestWithBp(t, bp)
+
+	appJar := result.ModuleForTests(t, "app", "android_common").Output("combined/app.jar").Output
+	libJar := result.ModuleForTests(t, "lib", "android_common").Output("combined/lib.jar").Output
+	libTraceRefs := result.ModuleForTests(t, "lib", "android_common").Rule("traceReferences")
+	libR8 := result.ModuleForTests(t, "lib", "android_common").Rule("r8")
+
+	android.AssertStringDoesContain(t, "expected trace reference source from app jar",
+		libTraceRefs.Args["sources"], "--source "+appJar.String())
+	android.AssertStringEquals(t, "expected trace reference target into lib jar",
+		libJar.String(), libTraceRefs.Input.String())
+	android.AssertStringDoesContain(t, "expected trace reference proguard flags in lib r8 flags",
+		libR8.Args["r8Flags"], "trace_references.flags")
 }
