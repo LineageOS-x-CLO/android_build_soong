@@ -28,6 +28,7 @@ import (
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/gobtools"
+	"github.com/google/blueprint/pathtools"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -44,14 +45,6 @@ type Module interface {
 	// but GenerateAndroidBuildActions also has access to Android-specific information.
 	// For more information, see Module.GenerateBuildActions within Blueprint's module_ctx.go
 	GenerateAndroidBuildActions(ModuleContext)
-
-	// CleanupAfterBuildActions is called after ModuleBase.GenerateBuildActions is finished.
-	// If all interactions with this module are handled via providers instead of direct access
-	// to the module then it can free memory attached to the module.
-	// This is a temporary measure to reduce memory usage, eventually blueprint's reference
-	// to the Module should be dropped after GenerateAndroidBuildActions once all accesses
-	// can be done through providers.
-	CleanupAfterBuildActions()
 
 	// Add dependencies to the components of a module, i.e. modules that are created
 	// by the module and which are considered to be part of the creating module.
@@ -140,6 +133,8 @@ type Module interface {
 
 	// If this is true, the module must not read product-specific configurations.
 	UseGenericConfig() bool
+
+	NoFullInstall() bool
 }
 
 // Qualified id for a module
@@ -1315,6 +1310,10 @@ func (m *ModuleBase) IsCommonOSVariant() bool {
 	return m.commonProperties.CompileOS == CommonOS
 }
 
+func (m *ModuleBase) NoFullInstall() bool {
+	return proptools.Bool(m.commonProperties.No_full_install)
+}
+
 // supportsTarget returns true if the given Target is supported by the current module.
 func (m *ModuleBase) supportsTarget(target Target) bool {
 	switch target.Os.Class {
@@ -1838,14 +1837,27 @@ func (m *ModuleBase) archModuleContextFactory(ctx archModuleContextFactoryContex
 	} else {
 		primaryArch = target.Arch.ArchType == config.Targets[target.Os][0].Arch.ArchType
 	}
+	primaryNativeBridgeArch := false
+	if target.NativeBridge {
+		for _, t := range config.Targets[target.Os] {
+			if t.NativeBridge {
+				if target.Arch.ArchType == t.Arch.ArchType {
+					primaryNativeBridgeArch = true
+				}
+				// Don't consider further nativebridge targets
+				break
+			}
+		}
+	}
 
 	return archModuleContext{
-		ready:         m.commonProperties.ArchReady,
-		os:            m.commonProperties.CompileOS,
-		target:        m.commonProperties.CompileTarget,
-		targetPrimary: m.commonProperties.CompilePrimary,
-		multiTargets:  m.commonProperties.CompileMultiTargets,
-		primaryArch:   primaryArch,
+		ready:                   m.commonProperties.ArchReady,
+		os:                      m.commonProperties.CompileOS,
+		target:                  m.commonProperties.CompileTarget,
+		targetPrimary:           m.commonProperties.CompilePrimary,
+		multiTargets:            m.commonProperties.CompileMultiTargets,
+		primaryArch:             primaryArch,
+		primaryNativeBridgeArch: primaryNativeBridgeArch,
 	}
 
 }
@@ -1951,6 +1963,9 @@ type CommonModuleInfo struct {
 	ExportedToMake                               bool
 	Team                                         string
 	PartitionTag                                 string
+	IsPrebuilt                                   bool
+	PrebuiltSourceExists                         bool
+	UsePrebuilt                                  bool
 }
 
 type ApiLevelOrPlatform struct {
@@ -1959,13 +1974,6 @@ type ApiLevelOrPlatform struct {
 }
 
 var CommonModuleInfoProvider = blueprint.NewProvider[*CommonModuleInfo]()
-
-type PrebuiltModuleInfo struct {
-	SourceExists bool
-	UsePrebuilt  bool
-}
-
-var PrebuiltModuleInfoProvider = blueprint.NewProvider[PrebuiltModuleInfo]()
 
 type HostToolProviderInfo struct {
 	HostToolPath OptionalPath
@@ -2182,6 +2190,10 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	SetProvider(ctx, InstallFilesProvider, installFiles)
 	buildLicenseMetadata(ctx, ctx.licenseMetadataFile)
 
+	if ctx.testSuiteInfoSet {
+		m.setupTestSuites(ctx, ctx.testSuiteInfo)
+	}
+
 	if len(ctx.moduleInfoJSON) > 0 {
 		for _, moduleInfoJSON := range ctx.moduleInfoJSON {
 			if moduleInfoJSON.Disabled {
@@ -2202,8 +2214,8 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			}
 			hostRequired = append(hostRequired, moduleInfoJSON.ExtraHostRequired...)
 
-        		var data []string
-        		// QC removed m.testData, data remains nil
+			var data []string
+			// QC removed m.testData, data remains nil
 
 			if moduleInfoJSON.Uninstallable {
 				installedStrings = nil
@@ -2360,13 +2372,13 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
 		commonData.BaseModuleName = mm.BaseModuleName()
 	}
-	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
 	if p, ok := m.module.(PrebuiltInterface); ok && p.Prebuilt() != nil {
-		SetProvider(ctx, PrebuiltModuleInfoProvider, PrebuiltModuleInfo{
-			SourceExists: p.Prebuilt().SourceExists(),
-			UsePrebuilt:  p.Prebuilt().UsePrebuilt(),
-		})
+		commonData.IsPrebuilt = true
+		commonData.PrebuiltSourceExists = p.Prebuilt().SourceExists()
+		commonData.UsePrebuilt = p.Prebuilt().UsePrebuilt()
 	}
+	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
+
 	if h, ok := m.module.(HostToolProvider); ok {
 		SetProvider(ctx, HostToolProviderInfoProvider, HostToolProviderInfo{
 			HostToolPath: h.HostToolPath()})
@@ -2395,11 +2407,169 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			})
 		}
 	}
-
-	m.module.CleanupAfterBuildActions()
 }
 
 func (m *ModuleBase) CleanupAfterBuildActions() {}
+
+func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) {
+	if shouldSkipAndroidMkProcessing(ctx, m) || m.IsSkipInstall() {
+		return
+	}
+	overriddenBy := ""
+	if b, ok := ctx.Module().(OverridableModule); ok {
+		overriddenBy = b.GetOverriddenBy()
+	}
+
+	// M(C)TS supports a full test suite and partial per-module MTS test suites, with naming mts-${MODULE}.
+	// To reduce repetition, if we find a partial M(C)TS test suite without an full M(C)TS test suite,
+	// we add the full test suite to our list.
+	if PrefixInList(info.TestSuites, "mts-") && !InList("mts", info.TestSuites) {
+		info.TestSuites = append(info.TestSuites, "mts")
+	}
+	if PrefixInList(info.TestSuites, "mcts-") && !InList("mcts", info.TestSuites) {
+		info.TestSuites = append(info.TestSuites, "mcts")
+	}
+
+	if len(info.TestSuites) == 0 {
+		info.TestSuites = []string{"null-suite"}
+	}
+	info.TestSuites = SortedUniqueStrings(info.TestSuites)
+
+	name := ctx.ModuleName()
+	if overriddenBy != "" {
+		name = overriddenBy
+	}
+	name += info.NameSuffix
+
+	type testSuiteInfo struct {
+		name                string
+		dir                 WritablePath
+		includeModuleFolder bool
+	}
+
+	suites := []testSuiteInfo{{
+		dir:                 PathForModuleInPartitionInstall(ctx, "testcases", name),
+		includeModuleFolder: true,
+	}}
+	for _, suite := range info.TestSuites {
+		if suiteInfo, ok := ctx.Config().productVariables.CompatibilityTestcases[suite]; ok {
+			rel, err := filepath.Rel(ctx.Config().OutDir(), suiteInfo.OutDir)
+			if err != nil {
+				panic(fmt.Sprintf("Could not make COMPATIBILITY_TESTCASES_OUT_%s (%s) relative to the out dir (%s)", suite, suiteInfo.OutDir, ctx.Config().OutDir()))
+			}
+			if suiteInfo.IncludeModuleFolder || info.PerTestcaseDirectory {
+				rel = filepath.Join(rel, name)
+			}
+			suites = append(suites, testSuiteInfo{
+				name:                suite,
+				dir:                 PathForArbitraryOutput(ctx, rel),
+				includeModuleFolder: suiteInfo.IncludeModuleFolder || info.PerTestcaseDirectory,
+			})
+		}
+	}
+
+	var archDir string
+	if info.NeedsArchFolder {
+		archDir = ctx.Arch().ArchType.Name
+		if archDir == "common" {
+			archDir = ctx.DeviceConfig().DeviceArch()
+		}
+		if ctx.Target().NativeBridge {
+			archDir = ctx.Target().NativeBridgeHostArchName
+		}
+	}
+
+	var installs []filePair
+
+	for _, suite := range suites {
+		mainFileName := name
+		if info.MainFileStem != "" {
+			mainFileName = info.MainFileStem
+		}
+		mainFileName += info.MainFileExt
+		mainFileInstall := joinWriteablePath(ctx, suite.dir, archDir, mainFileName)
+		if !suite.includeModuleFolder {
+			mainFileInstall = joinWriteablePath(ctx, suite.dir, mainFileName)
+		}
+		if info.MainFile == nil {
+			panic("mainfile was nil")
+		}
+
+		installs = append(installs, filePair{
+			src: info.MainFile,
+			dst: mainFileInstall,
+		})
+
+		for _, data := range info.Data {
+			dataOut := joinWriteablePath(ctx, suite.dir, archDir, data.ToRelativeInstallPath())
+			if !suite.includeModuleFolder {
+				dataOut = joinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
+			}
+			installs = append(installs, filePair{
+				src: data.SrcPath,
+				dst: dataOut,
+			})
+		}
+		for _, data := range info.NonArchData {
+			dataOut := joinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
+			installs = append(installs, filePair{
+				src: data.SrcPath,
+				dst: dataOut,
+			})
+		}
+		for _, data := range info.CompatibilitySupportFiles {
+			dataOut := joinWriteablePath(ctx, suite.dir, data.Rel())
+			installs = append(installs, filePair{
+				src: data,
+				dst: dataOut,
+			})
+		}
+
+		if ctx.TargetPrimary() || ctx.PrimaryNativeBridgeArch() {
+			if info.ConfigFile != nil {
+				installs = append(installs, filePair{
+					src: info.ConfigFile,
+					dst: joinWriteablePath(ctx, suite.dir, name+".config"+info.ConfigFileSuffix),
+				})
+			} else if config := ExistentPathForSource(ctx, ctx.ModuleDir(), "AndroidTest.xml"); config.Valid() {
+				installs = append(installs, filePair{
+					src: config.Path(),
+					dst: joinWriteablePath(ctx, suite.dir, name+".config"),
+				})
+			}
+			dynamicConfig := ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
+			if dynamicConfig.Valid() {
+				installs = append(installs, filePair{
+					src: dynamicConfig.Path(),
+					dst: joinWriteablePath(ctx, suite.dir, name+".dynamic"),
+				})
+			}
+			for _, extraTestConfig := range info.ExtraConfigs {
+				if extraTestConfig == nil {
+					panic("ExtraTestConfig was nil")
+				}
+				installs = append(installs, filePair{
+					src: extraTestConfig,
+					dst: joinWriteablePath(ctx, suite.dir, pathtools.ReplaceExtension(extraTestConfig.Base(), "config")),
+				})
+			}
+		}
+	}
+
+	SetProvider(ctx, TestSuiteInfoProvider, info)
+	SetProvider(ctx, testSuiteInstallsInfoProvider, testSuiteInstallsInfo{installs})
+}
+
+func joinWriteablePath(ctx PathContext, path WritablePath, toJoin ...string) WritablePath {
+	switch p := path.(type) {
+	case InstallPath:
+		return p.Join(ctx, toJoin...)
+	case OutputPath:
+		return p.Join(ctx, toJoin...)
+	default:
+		panic("unhandled path type")
+	}
+}
 
 func SetJarJarPrefixHandler(handler func(ModuleContext)) {
 	if jarJarPrefixHandler != nil {
