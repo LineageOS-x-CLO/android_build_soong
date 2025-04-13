@@ -304,11 +304,13 @@ func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.Depend
 	// Collect metadata from deps
 	filesContained := make([]string, 0)
 	prebuiltFilesCopied := make([]string, 0)
+	platformGeneratedFiles := make([]string, 0)
 	for _, tag := range tags {
 		ctx.VisitDirectDepsProxyWithTag(tag, func(m android.ModuleProxy) {
 			if complianceMetadataInfo, ok := android.OtherModuleProvider(ctx, m, android.ComplianceMetadataProvider); ok {
 				filesContained = append(filesContained, complianceMetadataInfo.GetFilesContained()...)
 				prebuiltFilesCopied = append(prebuiltFilesCopied, complianceMetadataInfo.GetPrebuiltFilesCopied()...)
+				platformGeneratedFiles = append(platformGeneratedFiles, complianceMetadataInfo.GetPlatformGeneratedFiles()...)
 			}
 		})
 	}
@@ -321,32 +323,51 @@ func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.Depend
 	prebuiltFilesCopied = append(prebuiltFilesCopied, complianceMetadataInfo.GetPrebuiltFilesCopied()...)
 	sort.Strings(prebuiltFilesCopied)
 	complianceMetadataInfo.SetPrebuiltFilesCopied(prebuiltFilesCopied)
+
+	platformGeneratedFiles = append(platformGeneratedFiles, complianceMetadataInfo.GetPlatformGeneratedFiles()...)
+	sort.Strings(platformGeneratedFiles)
+	complianceMetadataInfo.SetPlatformGeneratedFiles(platformGeneratedFiles)
+}
+
+type installedOwnerInfo struct {
+	Variation string
+	Prebuilt  bool
 }
 
 // Returns a list of modules that are installed, which are collected from the dependency
 // filesystem and super_image modules.
 func (a *androidDevice) allInstalledModules(ctx android.ModuleContext) []android.Module {
 	fsInfoMap := a.getFsInfos(ctx)
-	allOwners := make(map[string][]string)
+	allOwners := make(map[string][]installedOwnerInfo)
+
 	for _, partition := range android.SortedKeys(fsInfoMap) {
 		fsInfo := fsInfoMap[partition]
-		for _, owner := range fsInfo.Owners {
-			allOwners[owner.Name] = append(allOwners[owner.Name], owner.Variation)
+		for _, owner := range fsInfo.Owners.ToList() {
+			allOwners[owner.Name] = append(allOwners[owner.Name], installedOwnerInfo{
+				Variation: owner.Variation,
+				Prebuilt:  owner.Prebuilt,
+			})
 		}
 	}
 
 	ret := []android.Module{}
 	ctx.WalkDepsProxy(func(mod, _ android.ModuleProxy) bool {
-		if variations, ok := allOwners[ctx.OtherModuleName(mod)]; ok && android.InList(ctx.OtherModuleSubDir(mod), variations) {
+		commonInfo, ok := android.OtherModuleProvider(ctx, mod, android.CommonModuleInfoProvider)
+		if !(ok && commonInfo.ExportedToMake) {
+			return false
+		}
+		if variations, ok := allOwners[ctx.OtherModuleName(mod)]; ok &&
+			android.InList(installedOwnerInfo{
+				Variation: ctx.OtherModuleSubDir(mod),
+				Prebuilt:  commonInfo.IsPrebuilt,
+			}, variations) {
 			ret = append(ret, mod)
 		}
 		return true
 	})
 
 	// Remove duplicates
-	ret = android.FirstUniqueFunc(ret, func(a, b android.Module) bool {
-		return a.String() == b.String()
-	})
+	ret = android.FirstUniqueInPlace(ret)
 
 	// Sort the modules by their names and variants
 	slices.SortFunc(ret, func(a, b android.Module) int {
@@ -1149,6 +1170,8 @@ func (a *androidDevice) buildApkCertsInfo(ctx android.ModuleContext, allInstalle
 			}
 		} else if info, ok := android.OtherModuleProvider(ctx, installedModule, java.RuntimeResourceOverlayInfoProvider); ok {
 			apkCerts = append(apkCerts, formatLine(info.Certificate, info.OutputFile.Base(), partition))
+		} else if info, ok := android.OtherModuleProvider(ctx, installedModule, ApkCertsInfoProvider); ok {
+			apkCertsFiles = append(apkCertsFiles, info.ApkCertsFile)
 		}
 	}
 	slices.Sort(apkCerts) // sort by name
@@ -1165,10 +1188,16 @@ func (a *androidDevice) buildApkCertsInfo(ctx android.ModuleContext, allInstalle
 	android.WriteFileRuleVerbatim(ctx, apkCertsInfoWithoutAppSets, strings.Join(apkCerts, "\n")+"\n")
 	apkCertsInfo := android.PathForModuleOut(ctx, "apkcerts.txt")
 	ctx.Build(pctx, android.BuildParams{
-		Rule:        android.Cat,
+		Rule:        android.CatAndSort,
 		Description: "combine apkcerts.txt",
 		Output:      apkCertsInfo,
 		Inputs:      append(apkCertsFiles, apkCertsInfoWithoutAppSets),
 	})
 	return apkCertsInfo
 }
+
+type ApkCertsInfo struct {
+	ApkCertsFile android.Path
+}
+
+var ApkCertsInfoProvider = blueprint.NewProvider[ApkCertsInfo]()

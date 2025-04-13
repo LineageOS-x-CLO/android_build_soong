@@ -640,7 +640,7 @@ type BenchmarkProperties struct {
 type benchmarkDecorator struct {
 	*binaryDecorator
 	Properties BenchmarkProperties
-	data       android.Paths
+	data       []android.DataPath
 	testConfig android.Path
 }
 
@@ -661,7 +661,9 @@ func (benchmark *benchmarkDecorator) linkerDeps(ctx DepsContext, deps Deps) Deps
 }
 
 func (benchmark *benchmarkDecorator) install(ctx ModuleContext, file android.Path) {
-	benchmark.data = android.PathsForModuleSrc(ctx, benchmark.Properties.Data)
+	for _, d := range android.PathsForModuleSrc(ctx, benchmark.Properties.Data) {
+		benchmark.data = append(benchmark.data, android.DataPath{SrcPath: d})
+	}
 
 	var configs []tradefed.Config
 	if Bool(benchmark.Properties.Require_root) {
