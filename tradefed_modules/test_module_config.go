@@ -435,8 +435,18 @@ func (m *testModuleConfigModule) generateManifestAndConfig(ctx android.ModuleCon
 		IsUnitTest:              m.provider.IsUnitTest,
 	})
 
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: m.tradefedProperties.Test_suites,
+	mainFileExt := ".apk"
+	if m.provider.MkAppClass == "JAVA_LIBRARIES" {
+		mainFileExt = ".jar"
+	}
+
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:      m.tradefedProperties.Test_suites,
+		MainFile:        m.manifest,
+		MainFileStem:    fmt.Sprintf("UNUSED-%s", *m.Base),
+		MainFileExt:     mainFileExt,
+		ConfigFile:      m.testConfig,
+		NeedsArchFolder: ctx.Device(),
 	})
 }
 
