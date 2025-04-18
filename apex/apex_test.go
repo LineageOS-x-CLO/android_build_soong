@@ -9252,7 +9252,8 @@ func TestCompressedApex(t *testing.T) {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
-			updatable: false,
+			updatable: true,
+			min_sdk_version: "29",
 		}
 		apex_key {
 			name: "myapex.key",
@@ -9283,6 +9284,40 @@ func TestCompressedApex(t *testing.T) {
 	ensureContains(t, androidMk, "LOCAL_MODULE_STEM := myapex.capex\n")
 }
 
+func TestCompressedApex_NonUpdatable(t *testing.T) {
+	t.Parallel()
+
+	testApexError(t, `do not compress non-updatable`, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			compressible: true,
+			updatable: false,
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`)
+
+	testApexError(t, `do not compress non-system`, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			compressible: true,
+			updatable: true,
+			min_sdk_version: "29",
+			vendor: true,
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`)
+}
+
 func TestCompressedApexIsDisabledWhenUsingErofs(t *testing.T) {
 	t.Parallel()
 	ctx := testApex(t, `
@@ -9290,7 +9325,8 @@ func TestCompressedApexIsDisabledWhenUsingErofs(t *testing.T) {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
-			updatable: false,
+			updatable: true,
+			min_sdk_version: "29",
 			payload_fs_type: "erofs",
 		}
 		apex_key {
@@ -9870,7 +9906,8 @@ func TestApexOutputFileProducer(t *testing.T) {
 						name: "myapex",
 						key: "myapex.key",
 						compressible: true,
-						updatable: false,
+						updatable: true,
+						min_sdk_version: "29",
 					}
 
 					apex_key {
