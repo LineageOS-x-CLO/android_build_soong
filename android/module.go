@@ -2155,6 +2155,8 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			return
 		}
 
+		m.module.base().hooks.runPostGenerateAndroidBuildActionsHooks(ctx)
+
 		if x, ok := m.module.(IDEInfo); ok {
 			var result IdeInfo
 			x.IDEInfo(ctx, &result)
