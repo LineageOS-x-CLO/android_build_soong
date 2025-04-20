@@ -69,15 +69,26 @@ type TestSuiteInfo struct {
 	NonArchData []DataPath
 
 	CompatibilitySupportFiles []Path
+
+	// Eqivalent of LOCAL_DISABLE_TEST_CONFIG in make
+	DisableTestConfig bool
 }
 
 var TestSuiteInfoProvider = blueprint.NewProvider[TestSuiteInfo]()
 
-type SupportFilesInfo struct {
-	SupportFiles InstallPaths
+// TestSuiteSharedLibsInfo is a provider of AndroidMk names of shared lib modules, for packaging
+// shared libs into test suites. It's not intended as a general-purpose shared lib tracking
+// mechanism. It's added to both test modules (to track their shared libs) and also shared lib
+// modules (to track their transitive shared libs).
+type TestSuiteSharedLibsInfo struct {
+	MakeNames []string
 }
 
-var SupportFilesInfoProvider = blueprint.NewProvider[SupportFilesInfo]()
+var TestSuiteSharedLibsInfoProvider = blueprint.NewProvider[TestSuiteSharedLibsInfo]()
+
+// MakeNameInfoProvider records the AndroidMk name for the module. This will match the names
+// referenced in TestSuiteSharedLibsInfo
+var MakeNameInfoProvider = blueprint.NewProvider[string]()
 
 type filePair struct {
 	src Path
@@ -91,26 +102,42 @@ type testSuiteInstallsInfo struct {
 
 var testSuiteInstallsInfoProvider = blueprint.NewProvider[testSuiteInstallsInfo]()
 
-type testModulesInstallsMap map[Module]InstallPaths
+type testModulesInstallsMap map[ModuleProxy]InstallPaths
 
-func (t testModulesInstallsMap) testModules() []Module {
+func (t testModulesInstallsMap) testModules() []ModuleProxy {
 	return slices.Collect(maps.Keys(t))
 }
 
 func (t *testSuiteFiles) GenerateBuildActions(ctx SingletonContext) {
+	hostOutTestCases := pathForInstall(ctx, ctx.Config().BuildOSTarget.Os, ctx.Config().BuildOSTarget.Arch.ArchType, "testcases")
 	files := make(map[string]testModulesInstallsMap)
+	sharedLibRoots := make(map[string][]string)
+	sharedLibGraph := make(map[string][]string)
 	allTestSuiteInstalls := make(map[string][]Path)
 	var toInstall []filePair
 	var oneVariantInstalls []filePair
 
 	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		commonInfo := OtherModuleProviderOrDefault(ctx, m, CommonModuleInfoProvider)
+		testSuiteSharedLibsInfo := OtherModuleProviderOrDefault(ctx, m, TestSuiteSharedLibsInfoProvider)
+		makeName := OtherModuleProviderOrDefault(ctx, m, MakeNameInfoProvider)
+		if makeName != "" && commonInfo.Target.Os.Class == Host {
+			sharedLibGraph[makeName] = append(sharedLibGraph[makeName], testSuiteSharedLibsInfo.MakeNames...)
+		}
+
 		if tsm, ok := OtherModuleProvider(ctx, m, TestSuiteInfoProvider); ok {
+			installFilesProvider := OtherModuleProviderOrDefault(ctx, m, InstallFilesProvider)
+
 			for _, testSuite := range tsm.TestSuites {
 				if files[testSuite] == nil {
 					files[testSuite] = make(testModulesInstallsMap)
 				}
 				files[testSuite][m] = append(files[testSuite][m],
-					OtherModuleProviderOrDefault(ctx, m, InstallFilesProvider).InstallFiles...)
+					installFilesProvider.InstallFiles...)
+
+				if makeName != "" {
+					sharedLibRoots[testSuite] = append(sharedLibRoots[testSuite], makeName)
+				}
 			}
 
 			if testSuiteInstalls, ok := OtherModuleProvider(ctx, m, testSuiteInstallsInfoProvider); ok {
@@ -140,6 +167,12 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx SingletonContext) {
 		}
 	})
 
+	for suite, suiteInstalls := range allTestSuiteInstalls {
+		allTestSuiteInstalls[suite] = SortedUniquePaths(suiteInstalls)
+	}
+
+	hostSharedLibs := gatherHostSharedLibs(ctx, sharedLibRoots, sharedLibGraph)
+
 	if !ctx.Config().KatiEnabled() {
 		for _, testSuite := range SortedKeys(files) {
 			testSuiteSymbolsZipFile := pathForTestSymbols(ctx, fmt.Sprintf("%s-symbols.zip", testSuite))
@@ -152,8 +185,41 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx SingletonContext) {
 		}
 	}
 
-	for suite, suiteInstalls := range allTestSuiteInstalls {
-		allTestSuiteInstalls[suite] = SortedUniquePaths(suiteInstalls)
+	// https://source.corp.google.com/h/googleplex-android/platform/superproject/main/+/main:build/make/core/main.mk;l=674;drc=46bd04e115d34fd62b3167128854dfed95290eb0
+	testInstalledSharedLibs := make(map[string]Paths)
+	testInstalledSharedLibsDeduper := make(map[string]bool)
+	for _, install := range toInstall {
+		testInstalledSharedLibsDeduper[install.dst.String()] = true
+	}
+	for _, suite := range []string{"general-tests", "device-tests", "vts", "tvts", "art-host-tests", "host-unit-tests", "camera-hal-tests"} {
+		var myTestCases WritablePath = hostOutTestCases
+		switch suite {
+		case "vts", "tvts":
+			suiteInfo := ctx.Config().productVariables.CompatibilityTestcases[suite]
+			outDir := suiteInfo.OutDir
+			if outDir == "" {
+				continue
+			}
+			rel, err := filepath.Rel(ctx.Config().OutDir(), outDir)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				panic(fmt.Sprintf("Could not make COMPATIBILITY_TESTCASES_OUT_%s (%s) relative to the out dir (%s)", suite, suiteInfo.OutDir, ctx.Config().OutDir()))
+			}
+			myTestCases = PathForArbitraryOutput(ctx, rel)
+		}
+
+		for _, f := range hostSharedLibs[suite] {
+			dir := filepath.Base(filepath.Dir(f.String()))
+			out := joinWriteablePath(ctx, myTestCases, dir, filepath.Base(f.String()))
+			if _, ok := testInstalledSharedLibsDeduper[out.String()]; !ok {
+				ctx.Build(pctx, BuildParams{
+					Rule:   Cp,
+					Input:  f,
+					Output: out,
+				})
+			}
+			testInstalledSharedLibsDeduper[out.String()] = true
+			testInstalledSharedLibs[suite] = append(testInstalledSharedLibs[suite], out)
+		}
 	}
 
 	filePairSorter := func(arr []filePair) func(i, j int) bool {
@@ -201,14 +267,79 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx SingletonContext) {
 	ctx.Phony("ravenwood-tests", ravenwoodZip, ravenwoodListZip)
 	ctx.DistForGoal("ravenwood-tests", ravenwoodZip, ravenwoodListZip)
 
-	packageTestSuite(ctx, allTestSuiteInstalls["performance-tests"], performanceTests)
-	packageTestSuite(ctx, allTestSuiteInstalls["device-platinum-tests"], devicePlatinumTests)
+	packageTestSuite(ctx, allTestSuiteInstalls["performance-tests"], testInstalledSharedLibs["performance-tests"], performanceTests)
+	packageTestSuite(ctx, allTestSuiteInstalls["device-platinum-tests"], testInstalledSharedLibs["device-platinum-tests"], devicePlatinumTests)
+	// TODO: Enable in followup
+	// packageTestSuite(ctx, allTestSuiteInstalls["device-tests"], testInstalledSharedLibs["device-tests"], deviceTests)
+}
+
+// Get a mapping from testSuite -> list of host shared libraries, given:
+// - sharedLibRoots: Mapping from testSuite -> androidMk name of all test modules in the suite
+// - sharedLibGraph: Mapping from androidMk name of module -> androidMk names of its shared libs
+//
+// This mimics how make did it historically, which is filled with inaccuracies. Make didn't
+// track variants and treated all variants as if they were merged into one big module. This means
+// you can have a test that's only included in the "vts" test suite on the device variant, and
+// only has a shared library on the host variant, and that shared library will still be included
+// into the vts test suite.
+func gatherHostSharedLibs(ctx SingletonContext, sharedLibRoots, sharedLibGraph map[string][]string) map[string]Paths {
+	hostOutTestCases := pathForInstall(ctx, ctx.Config().BuildOSTarget.Os, ctx.Config().BuildOSTarget.Arch.ArchType, "testcases")
+	hostOut := filepath.Dir(hostOutTestCases.String())
+
+	for k, v := range sharedLibGraph {
+		sharedLibGraph[k] = SortedUniqueStrings(v)
+	}
+
+	suiteToSharedLibModules := make(map[string]map[string]bool)
+	for suite, modules := range sharedLibRoots {
+		suiteToSharedLibModules[suite] = make(map[string]bool)
+		var queue []string
+		for _, root := range SortedUniqueStrings(modules) {
+			queue = append(queue, sharedLibGraph[root]...)
+		}
+		for len(queue) > 0 {
+			mod := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			if suiteToSharedLibModules[suite][mod] {
+				continue
+			}
+			suiteToSharedLibModules[suite][mod] = true
+			queue = append(queue, sharedLibGraph[mod]...)
+		}
+	}
+
+	hostSharedLibs := make(map[string]Paths)
+
+	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		if makeName, ok := OtherModuleProvider(ctx, m, MakeNameInfoProvider); ok {
+			commonInfo := OtherModuleProviderOrDefault(ctx, m, CommonModuleInfoProvider)
+			if commonInfo.SkipInstall {
+				return
+			}
+			installFilesProvider := OtherModuleProviderOrDefault(ctx, m, InstallFilesProvider)
+			for suite, sharedLibModulesInSuite := range suiteToSharedLibModules {
+				if sharedLibModulesInSuite[makeName] {
+					for _, f := range installFilesProvider.InstallFiles {
+						if strings.HasSuffix(f.String(), ".so") && strings.HasPrefix(f.String(), hostOut) {
+							hostSharedLibs[suite] = append(hostSharedLibs[suite], f)
+						}
+					}
+				}
+			}
+		}
+	})
+	for suite, files := range hostSharedLibs {
+		hostSharedLibs[suite] = SortedUniquePaths(files)
+	}
+
+	return hostSharedLibs
 }
 
 type suiteKind int
 
 const (
 	performanceTests suiteKind = iota
+	deviceTests
 	devicePlatinumTests
 )
 
@@ -216,19 +347,26 @@ func (sk suiteKind) String() string {
 	switch sk {
 	case performanceTests:
 		return "performance-tests"
+	case deviceTests:
+		return "device-tests"
 	case devicePlatinumTests:
 		return "device-platinum-tests"
 	default:
 		panic(fmt.Sprintf("Unrecognized suite kind %d for use in packageTestSuite", sk))
 	}
-	return ""
 }
 
 func (sk suiteKind) buildHostSharedLibsZip() bool {
 	switch sk {
-	case performanceTests:
-		return false
 	case devicePlatinumTests:
+		return true
+	}
+	return false
+}
+
+func (sk suiteKind) includeHostSharedLibsInMainZip() bool {
+	switch sk {
+	case deviceTests:
 		return true
 	}
 	return false
@@ -305,7 +443,7 @@ func pathForTestSymbols(ctx PathContext, pathComponents ...string) InstallPath {
 	return pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "", pathComponents...)
 }
 
-func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
+func packageTestSuite(ctx SingletonContext, files Paths, sharedLibs Paths, sk suiteKind) {
 	hostOutTestCases := pathForInstall(ctx, ctx.Config().BuildOSTarget.Os, ctx.Config().BuildOSTarget.Arch.ArchType, "testcases")
 	targetOutTestCases := pathForInstall(ctx, ctx.Config().AndroidFirstDeviceTarget.Os, ctx.Config().AndroidFirstDeviceTarget.Arch.ArchType, "testcases")
 	hostOut := filepath.Dir(hostOutTestCases.String())
@@ -317,6 +455,11 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 	testsConfigsZip := pathForPackaging(ctx, sk.String()+"_configs.zip")
 	testsHostSharedLibsZip := pathForPackaging(ctx, sk.String()+"_host-shared-libs.zip")
 	var listLines []string
+
+	// use intermediate files to hold the file inputs, to prevent argument list from being too long
+	testsZipCmdHostFileInput := PathForIntermediates(ctx, sk.String()+"_host_list.txt")
+	testsZipCmdTargetFileInput := PathForIntermediates(ctx, sk.String()+"_target_list.txt")
+	var testsZipCmdHostFileInputContent, testsZipCmdTargetFileInputContent []string
 
 	testsZipBuilder := NewRuleBuilder(pctx, ctx)
 	testsZipCmd := testsZipBuilder.Command().
@@ -337,7 +480,8 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 
 	for _, f := range files {
 		if strings.HasPrefix(f.String(), hostOutTestCases.String()) {
-			testsZipCmd.FlagWithInput("-f ", f)
+			testsZipCmdHostFileInputContent = append(testsZipCmdHostFileInputContent, f.String())
+			testsZipCmd.Implicit(f)
 
 			if strings.HasSuffix(f.String(), ".config") {
 				testsConfigsZipCmd.FlagWithInput("-f ", f)
@@ -346,7 +490,19 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 		}
 	}
 
+	if sk.includeHostSharedLibsInMainZip() {
+		for _, f := range sharedLibs {
+			if strings.HasPrefix(f.String(), hostOutTestCases.String()) {
+				testsZipCmdHostFileInputContent = append(testsZipCmdHostFileInputContent, f.String())
+				testsZipCmd.Implicit(f)
+			}
+		}
+	}
+
+	WriteFileRule(ctx, testsZipCmdHostFileInput, strings.Join(testsZipCmdHostFileInputContent, " "))
+
 	testsZipCmd.
+		FlagWithInput("-l ", testsZipCmdHostFileInput).
 		FlagWithArg("-P ", "target").
 		FlagWithArg("-C ", targetOut)
 	testsConfigsZipCmd.
@@ -355,7 +511,8 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 
 	for _, f := range files {
 		if strings.HasPrefix(f.String(), targetOutTestCases.String()) {
-			testsZipCmd.FlagWithInput("-f ", f)
+			testsZipCmdTargetFileInputContent = append(testsZipCmdTargetFileInputContent, f.String())
+			testsZipCmd.Implicit(f)
 
 			if strings.HasSuffix(f.String(), ".config") {
 				testsConfigsZipCmd.FlagWithInput("-f ", f)
@@ -363,6 +520,9 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 			}
 		}
 	}
+
+	WriteFileRule(ctx, testsZipCmdTargetFileInput, strings.Join(testsZipCmdTargetFileInputContent, " "))
+	testsZipCmd.FlagWithInput("-l ", testsZipCmdTargetFileInput)
 
 	testsZipBuilder.Build(sk.String(), "building "+sk.String()+" zip")
 	testsConfigsZipBuilder.Build(sk.String()+"-configs", "building "+sk.String()+" configs zip")
@@ -376,7 +536,7 @@ func packageTestSuite(ctx SingletonContext, files Paths, sk suiteKind) {
 			FlagWithArg("-P ", "host").
 			FlagWithArg("-C ", hostOut)
 
-		for _, f := range files {
+		for _, f := range sharedLibs {
 			if strings.HasPrefix(f.String(), hostOutTestCases.String()) && strings.HasSuffix(f.String(), ".so") {
 				testsHostSharedLibsZipCmd.FlagWithInput("-f ", f)
 			}

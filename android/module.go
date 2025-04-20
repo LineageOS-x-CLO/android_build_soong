@@ -851,6 +851,7 @@ func InitCommonOSAndroidMultiTargetsArchModule(m Module, hod HostOrDeviceSupport
 //	    // ...
 //	}
 type ModuleBase struct {
+	blueprint.ModuleBase
 	// Putting the curiously recurring thing pointing to the thing that contains
 	// the thing pattern to good use.
 	// TODO: remove this
@@ -1709,7 +1710,7 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	var deps Paths
 	var info ModuleBuildTargetsInfo
 
-	if len(ctx.installFiles) > 0 {
+	if len(ctx.installFiles) > 0 && !shouldSkipAndroidMkProcessing(ctx, m) {
 		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-install"
 		installFiles := ctx.installFiles.Paths()
 		ctx.Phony(name, installFiles...)
@@ -1727,7 +1728,7 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 		deps = append(deps, ctx.checkbuildTarget)
 	}
 
-	if outputFiles, err := outputFilesForModule(ctx, ctx.Module(), ""); err == nil && len(outputFiles) > 0 {
+	if outputFiles, err := outputFilesForModule(ctx, ctx.Module(), ""); err == nil && len(outputFiles) > 0 && !shouldSkipAndroidMkProcessing(ctx, m) {
 		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-outputs"
 		ctx.Phony(name, outputFiles...)
 		deps = append(deps, outputFiles...)
@@ -2552,16 +2553,18 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []fi
 			})
 		}
 
-		if info.ConfigFile != nil {
-			oneVariantInstalls = append(oneVariantInstalls, filePair{
-				src: info.ConfigFile,
-				dst: joinWriteablePath(ctx, suite.dir, name+".config"+info.ConfigFileSuffix),
-			})
-		} else if config := ExistentPathForSource(ctx, ctx.ModuleDir(), "AndroidTest.xml"); config.Valid() {
-			oneVariantInstalls = append(oneVariantInstalls, filePair{
-				src: config.Path(),
-				dst: joinWriteablePath(ctx, suite.dir, name+".config"),
-			})
+		if !info.DisableTestConfig {
+			if info.ConfigFile != nil {
+				oneVariantInstalls = append(oneVariantInstalls, filePair{
+					src: info.ConfigFile,
+					dst: joinWriteablePath(ctx, suite.dir, name+".config"+info.ConfigFileSuffix),
+				})
+			} else if config := ExistentPathForSource(ctx, ctx.ModuleDir(), "AndroidTest.xml"); config.Valid() {
+				oneVariantInstalls = append(oneVariantInstalls, filePair{
+					src: config.Path(),
+					dst: joinWriteablePath(ctx, suite.dir, name+".config"),
+				})
+			}
 		}
 
 		dynamicConfig := ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
@@ -2817,7 +2820,7 @@ type ConfigContext interface {
 type ConfigurableEvaluatorContext interface {
 	OtherModuleProviderContext
 	Config() Config
-	OtherModulePropertyErrorf(module Module, property string, fmt string, args ...interface{})
+	OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt string, args ...interface{})
 	HasMutatorFinished(mutatorName string) bool
 }
 
@@ -3115,7 +3118,7 @@ type SourceFileProducer interface {
 
 // OutputFilesForModule returns the output file paths with the given tag. On error, including if the
 // module produced zero paths, it reports errors to the ctx and returns nil.
-func OutputFilesForModule(ctx PathContext, module Module, tag string) Paths {
+func OutputFilesForModule(ctx PathContext, module ModuleOrProxy, tag string) Paths {
 	paths, err := outputFilesForModule(ctx, module, tag)
 	if err != nil {
 		reportPathError(ctx, err)
@@ -3128,7 +3131,7 @@ func OutputFilesForModule(ctx PathContext, module Module, tag string) Paths {
 // module produced zero or multiple paths, it reports errors to the ctx and returns nil.
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func OutputFileForModule(ctx PathContext, module Module, tag string) Path {
+func OutputFileForModule(ctx PathContext, module ModuleOrProxy, tag string) Path {
 	paths, err := outputFilesForModule(ctx, module, tag)
 	if err != nil {
 		reportPathError(ctx, err)
@@ -3137,7 +3140,7 @@ func OutputFileForModule(ctx PathContext, module Module, tag string) Path {
 	if len(paths) == 0 {
 		type addMissingDependenciesIntf interface {
 			AddMissingDependencies([]string)
-			OtherModuleName(blueprint.Module) string
+			OtherModuleName(ModuleOrProxy) string
 		}
 		if mctx, ok := ctx.(addMissingDependenciesIntf); ok && ctx.Config().AllowMissingDependencies() {
 			mctx.AddMissingDependencies([]string{mctx.OtherModuleName(module)})
@@ -3169,7 +3172,7 @@ type OutputFilesProviderModuleContext interface {
 
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func outputFilesForModule(ctx PathContext, module Module, tag string) (Paths, error) {
+func outputFilesForModule(ctx PathContext, module ModuleOrProxy, tag string) (Paths, error) {
 	outputFilesFromProvider, err := outputFilesForModuleFromProvider(ctx, module, tag)
 	if outputFilesFromProvider != nil || err != OutputFilesProviderNotSet {
 		return outputFilesFromProvider, err
@@ -3199,7 +3202,7 @@ func outputFilesForModule(ctx PathContext, module Module, tag string) (Paths, er
 // from outputFiles property of module base, to avoid both setting and
 // reading OutputFilesProvider before GenerateBuildActions is finished.
 // If a module doesn't have the OutputFilesProvider, nil is returned.
-func outputFilesForModuleFromProvider(ctx PathContext, module Module, tag string) (Paths, error) {
+func outputFilesForModuleFromProvider(ctx PathContext, module ModuleOrProxy, tag string) (Paths, error) {
 	var outputFiles OutputFilesInfo
 
 	if mctx, isMctx := ctx.(OutputFilesProviderModuleContext); isMctx {

@@ -179,7 +179,7 @@ type DepInSameApexInfo struct {
 
 var DepInSameApexInfoProvider = blueprint.NewMutatorProvider[DepInSameApexInfo]("apex_unique")
 
-func IsDepInSameApex(ctx BaseModuleContext, module, dep Module) bool {
+func IsDepInSameApex(ctx BaseModuleContext, module, dep ModuleOrProxy) bool {
 	depTag := ctx.OtherModuleDependencyTag(dep)
 	if _, ok := depTag.(ExcludeFromApexContentsTag); ok {
 		// The tag defines a dependency that never requires the child module to be part of the same
@@ -515,10 +515,6 @@ func CheckAvailableForApex(what string, apex_available []string) bool {
 		if strings.HasSuffix(apex_name, ".*") && strings.HasPrefix(what, strings.TrimSuffix(apex_name, "*")) {
 			return true
 		}
-		// TODO b/383863941: Remove once legacy name is no longer used
-		if (apex_name == "com.android.btservices" && what == "com.android.bt") || (apex_name == "com.android.bt" && what == "com.android.btservices") {
-			return true
-		}
 	}
 	return false
 }
@@ -760,7 +756,7 @@ type MinSdkVersionFromValueContext interface {
 // error if not. No default implementation is provided for this method. A module type
 // implementing this interface should provide an implementation. A module supports an sdk
 // version when the module's min_sdk_version is equal to or less than the given sdk version.
-func ShouldSupportSdkVersion(ctx BaseModuleContext, module Module, sdkVersion ApiLevel) error {
+func ShouldSupportSdkVersion(ctx BaseModuleContext, module ModuleOrProxy, sdkVersion ApiLevel) error {
 	info, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider)
 	if !ok || info.MinSdkVersionSupported.IsNone() {
 		return fmt.Errorf("min_sdk_version is not specified")

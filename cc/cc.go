@@ -2702,6 +2702,17 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	}
 	android.SetProvider(ctx, CcInfoProvider, &ccInfo)
 
+	android.SetProvider(ctx, android.TestSuiteSharedLibsInfoProvider, android.TestSuiteSharedLibsInfo{
+		MakeNames: c.Properties.AndroidMkSharedLibs,
+	})
+
+	// TODO: Refactor MakeLibName so we don't have to fake CommonModuleInfo like this
+	myCommonInfo := android.CommonModuleInfo{
+		BaseModuleName: c.BaseModuleName(),
+		Target:         ctx.Target(),
+	}
+	android.SetProvider(ctx, android.MakeNameInfoProvider, MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()))
+
 	c.setOutputFiles(ctx)
 
 	if c.makeVarsInfo != nil {
@@ -3738,7 +3749,8 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 
 		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, dep, android.CommonModuleInfoProvider)
 		if commonInfo.Target.Os != ctx.Os() {
-			ctx.ModuleErrorf("OS mismatch between %q (%s) and %q (%s)", ctx.ModuleName(), ctx.Os().Name, depName, dep.Target().Os.Name)
+			ctx.ModuleErrorf("OS mismatch between %q (%s) and %q (%s)", ctx.ModuleName(), ctx.Os().Name, depName,
+				commonInfo.Target.Os.Name)
 			return
 		}
 		if commonInfo.Target.Arch.ArchType != ctx.Arch().ArchType {
@@ -4058,11 +4070,11 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 	return depPaths
 }
 
-func ShouldUseStubForApex(ctx android.ModuleContext, parent android.Module, dep android.ModuleProxy) bool {
+func ShouldUseStubForApex(ctx android.ModuleContext, parent android.ModuleOrProxy, dep android.ModuleProxy) bool {
 	inVendorOrProduct := false
 	bootstrap := false
 	if android.EqualModules(ctx.Module(), parent) {
-		if linkable, ok := parent.(LinkableInterface); !ok {
+		if linkable, ok := ctx.Module().(LinkableInterface); !ok {
 			ctx.ModuleErrorf("Not a Linkable module: %q", ctx.ModuleName())
 		} else {
 			inVendorOrProduct = linkable.InVendorOrProduct()

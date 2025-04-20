@@ -418,6 +418,9 @@ type partialCompileFlags struct {
 	// To run the validation checks, use `m {MODULE_NAME}-stub-validation`.
 	Disable_stub_validation bool
 
+	// Whether to enable incremental java compilation.
+	Enable_inc_javac bool
+
 	// Add others as needed.
 }
 
@@ -428,12 +431,14 @@ var defaultPartialCompileFlags = partialCompileFlags{}
 var enabledPartialCompileFlags = partialCompileFlags{
 	Use_d8:                  true,
 	Disable_stub_validation: true,
+	Enable_inc_javac:        false,
 }
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=all`.
 var allPartialCompileFlags = partialCompileFlags{
 	Use_d8:                  true,
 	Disable_stub_validation: true,
+	Enable_inc_javac:        true,
 }
 
 type deviceConfig struct {
@@ -517,6 +522,11 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			ret = allPartialCompileFlags
 
 		// Individual flags.
+		case "inc_javac", "enable_inc_javac":
+			ret.Enable_inc_javac = makeVal(state, !defaultPartialCompileFlags.Enable_inc_javac)
+		case "disable_inc_javac":
+			ret.Enable_inc_javac = !makeVal(state, defaultPartialCompileFlags.Enable_inc_javac)
+
 		case "stub_validation", "enable_stub_validation":
 			ret.Disable_stub_validation = !makeVal(state, !defaultPartialCompileFlags.Disable_stub_validation)
 		case "disable_stub_validation":
@@ -2138,16 +2148,16 @@ func (c *deviceConfig) BoardSepolicyVers() string {
 	return c.PlatformSepolicyVersion()
 }
 
-func (c *deviceConfig) SystemExtSepolicyPrebuiltApiDir() string {
-	return String(c.config.productVariables.SystemExtSepolicyPrebuiltApiDir)
+func (c *deviceConfig) SystemExtSepolicyPrebuiltApiDirs() []string {
+	return c.config.productVariables.SystemExtSepolicyPrebuiltApiDirs
 }
 
-func (c *deviceConfig) ProductSepolicyPrebuiltApiDir() string {
-	return String(c.config.productVariables.ProductSepolicyPrebuiltApiDir)
+func (c *deviceConfig) ProductSepolicyPrebuiltApiDirs() []string {
+	return c.config.productVariables.ProductSepolicyPrebuiltApiDirs
 }
 
 func (c *deviceConfig) IsPartnerTrebleSepolicyTestEnabled() bool {
-	return c.SystemExtSepolicyPrebuiltApiDir() != "" || c.ProductSepolicyPrebuiltApiDir() != ""
+	return len(c.SystemExtSepolicyPrebuiltApiDirs()) > 0 || len(c.ProductSepolicyPrebuiltApiDirs()) > 0
 }
 
 func (c *deviceConfig) DirectedRamdiskSnapshot() bool {

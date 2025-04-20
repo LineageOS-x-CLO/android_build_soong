@@ -445,6 +445,7 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 		NeedsArchFolder:      true,
 		NonArchData:          data,
 		PerTestcaseDirectory: proptools.Bool(a.appTestHelperAppProperties.Per_testcase_directory),
+		DisableTestConfig:    true,
 	})
 }
 

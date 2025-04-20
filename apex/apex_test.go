@@ -27,7 +27,6 @@ import (
 
 	"android/soong/aconfig/codegen"
 
-	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -9252,7 +9251,8 @@ func TestCompressedApex(t *testing.T) {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
-			updatable: false,
+			updatable: true,
+			min_sdk_version: "29",
 		}
 		apex_key {
 			name: "myapex.key",
@@ -9283,6 +9283,40 @@ func TestCompressedApex(t *testing.T) {
 	ensureContains(t, androidMk, "LOCAL_MODULE_STEM := myapex.capex\n")
 }
 
+func TestCompressedApex_NonUpdatable(t *testing.T) {
+	t.Parallel()
+
+	testApexError(t, `do not compress non-updatable`, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			compressible: true,
+			updatable: false,
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`)
+
+	testApexError(t, `do not compress non-system`, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			compressible: true,
+			updatable: true,
+			min_sdk_version: "29",
+			vendor: true,
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`)
+}
+
 func TestCompressedApexIsDisabledWhenUsingErofs(t *testing.T) {
 	t.Parallel()
 	ctx := testApex(t, `
@@ -9290,7 +9324,8 @@ func TestCompressedApexIsDisabledWhenUsingErofs(t *testing.T) {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
-			updatable: false,
+			updatable: true,
+			min_sdk_version: "29",
 			payload_fs_type: "erofs",
 		}
 		apex_key {
@@ -9870,7 +9905,8 @@ func TestApexOutputFileProducer(t *testing.T) {
 						name: "myapex",
 						key: "myapex.key",
 						compressible: true,
-						updatable: false,
+						updatable: true,
+						min_sdk_version: "29",
 					}
 
 					apex_key {
@@ -11740,19 +11776,6 @@ func TestApexMinSdkVersionOverride(t *testing.T) {
 		}
 	}
 
-	checkHasDep := func(t *testing.T, ctx *android.TestContext, m android.Module, wantDep android.Module) {
-		t.Helper()
-		found := false
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		if !found {
-			t.Errorf("Could not find a dependency from %v to %v\n", m, wantDep)
-		}
-	}
-
 	ctx := testApex(t, `
 		apex {
 			name: "com.android.apex30",
@@ -11799,13 +11822,13 @@ func TestApexMinSdkVersionOverride(t *testing.T) {
 	overridingModuleSameMinSdkVersion := ctx.ModuleForTests(t, "com.android.apex30", "android_common_com.mycompany.android.apex30_com.mycompany.android.apex30")
 	javalibApex30Variant := ctx.ModuleForTests(t, "javalib", "android_common_apex30")
 	checkMinSdkVersion(t, overridingModuleSameMinSdkVersion, "30")
-	checkHasDep(t, ctx, overridingModuleSameMinSdkVersion.Module(), javalibApex30Variant.Module())
+	android.AssertHasDirectDep(t, ctx, overridingModuleSameMinSdkVersion.Module(), javalibApex30Variant.Module())
 
 	// Override module, uses different min_sdk_version
 	overridingModuleDifferentMinSdkVersion := ctx.ModuleForTests(t, "com.android.apex30", "android_common_com.mycompany.android.apex31_com.mycompany.android.apex31")
 	javalibApex31Variant := ctx.ModuleForTests(t, "javalib", "android_common_apex31")
 	checkMinSdkVersion(t, overridingModuleDifferentMinSdkVersion, "31")
-	checkHasDep(t, ctx, overridingModuleDifferentMinSdkVersion.Module(), javalibApex31Variant.Module())
+	android.AssertHasDirectDep(t, ctx, overridingModuleDifferentMinSdkVersion.Module(), javalibApex31Variant.Module())
 }
 
 func TestOverrideApexWithPrebuiltApexPreferred(t *testing.T) {
