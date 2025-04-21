@@ -814,6 +814,10 @@ func (mod *Module) CoverageOutputFile() android.OptionalPath {
 	return android.OptionalPath{}
 }
 
+func (c *Module) LinkCoverage() bool {
+	return false
+}
+
 func (mod *Module) IsNdk(config android.Config) bool {
 	return false
 }
@@ -1125,7 +1129,13 @@ func (mod *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		if buildOutput.kytheFile != nil {
 			mod.kytheFiles = append(mod.kytheFiles, buildOutput.kytheFile)
 		}
-		bloaty.MeasureSizeForPaths(ctx, mod.compiler.strippedOutputFilePath(), android.OptionalPathForPath(mod.compiler.unstrippedOutputFilePath()))
+		if _, ok := mod.compiler.(*objectDecorator); !ok && !ctx.Windows() {
+			// Bloaty doesn't recognize Windows object files.
+			// Since objects are inputs to other binaries, if there's bloat
+			// in one it should be reflected in the outputs which take them
+			// as inputs, so skipping this check for them should be fine.
+			bloaty.MeasureSizeForPaths(ctx, mod.compiler.strippedOutputFilePath(), android.OptionalPathForPath(mod.compiler.unstrippedOutputFilePath()))
+		}
 
 		mod.docTimestampFile = mod.compiler.rustdoc(ctx, flags, deps)
 

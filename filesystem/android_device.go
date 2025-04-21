@@ -122,6 +122,9 @@ type androidDevice struct {
 	apkCertsInfo                android.Path
 	targetFilesZip              android.Path
 	updatePackage               android.Path
+	otaFilesZip                 android.Path
+	otaMetadata                 android.Path
+	partialOtaFilesZip          android.Path
 
 	symbolsZipFile     android.ModuleOutPath
 	symbolsMappingFile android.ModuleOutPath
@@ -447,11 +450,21 @@ func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 		}
 		if a.targetFilesZip != nil {
 			ctx.DistForGoalWithFilenameTag("target-files-package", a.targetFilesZip, namePrefix+a.targetFilesZip.Base())
+			ctx.DistForGoalWithFilenameTag("droidcore-unbundled", a.targetFilesZip, namePrefix+a.targetFilesZip.Base())
 		}
 		if a.updatePackage != nil {
 			ctx.DistForGoalWithFilenameTag("updatepackage", a.updatePackage, namePrefix+a.updatePackage.Base())
+			ctx.DistForGoalWithFilenameTag("droidcore-unbundled", a.updatePackage, namePrefix+a.updatePackage.Base())
 		}
-
+		if a.otaFilesZip != nil {
+			ctx.Phony("otapackage", a.otaFilesZip)
+			ctx.DistForGoalWithFilenameTag("droidcore-unbundled", a.otaFilesZip, namePrefix+a.otaFilesZip.Base())
+			ctx.DistForGoalWithFilenameTag("droidcore-unbundled", a.otaMetadata, namePrefix+a.otaMetadata.Base())
+		}
+		if a.partialOtaFilesZip != nil {
+			ctx.Phony("partialotapackage", a.partialOtaFilesZip)
+			ctx.DistForGoalWithFilenameTag("droidcore-unbundled", a.partialOtaFilesZip, namePrefix+a.partialOtaFilesZip.Base())
+		}
 	}
 }
 
@@ -526,7 +539,9 @@ type targetFilesystemZipCopy struct {
 func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstalledModules []android.ModuleProxy) {
 	targetFilesDir := android.PathForModuleOut(ctx, "target_files_dir")
 	targetFilesZip := android.PathForModuleOut(ctx, "target_files.zip")
-	var targetFilesDeps android.Paths
+	otaFilesZip := android.PathForModuleOut(ctx, "ota.zip")
+	otaMetadata := android.PathForModuleOut(ctx, "ota_metadata")
+	partialOtaFilesZip := android.PathForModuleOut(ctx, "partial-ota.zip")
 
 	builder := android.NewRuleBuilder(pctx, ctx)
 	builder.Command().Textf("rm -rf %s", targetFilesDir.String())
@@ -639,7 +654,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 	}
 
 	a.copyImagesToTargetZip(ctx, builder, targetFilesDir)
-	targetFilesDeps = append(targetFilesDeps, a.copyMetadataToTargetZip(ctx, builder, targetFilesDir, allInstalledModules)...)
+	a.copyMetadataToTargetZip(ctx, builder, targetFilesDir, allInstalledModules)
 
 	a.targetFilesZip = targetFilesZip
 	builder.Command().
@@ -648,8 +663,32 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 		FlagWithOutput("-o ", targetFilesZip).
 		FlagWithArg("-C ", targetFilesDir.String()).
 		FlagWithArg("-D ", targetFilesDir.String()).
-		Text("-sha256").
-		Implicits(targetFilesDeps)
+		Text("-sha256")
+
+	pem, _ := ctx.Config().DefaultAppCertificate(ctx)
+	pemWithoutFileExt := strings.TrimSuffix(pem.String(), ".x509.pem")
+	builder.Command().
+		BuiltTool("ota_from_target_files").
+		Flag("--verbose").
+		FlagWithArg("-k ", pemWithoutFileExt).
+		FlagWithOutput("--output_metadata_path ", otaMetadata).
+		Text(targetFilesDir.String()).
+		Output(otaFilesZip)
+	a.otaFilesZip = otaFilesZip
+	a.otaMetadata = otaMetadata
+
+	// Partial ota
+	if len(a.deviceProps.Partial_ota_update_partitions) > 0 {
+		builder.Command().
+			BuiltTool("ota_from_target_files").
+			Flag("--verbose").
+			FlagWithArg("-k ", pemWithoutFileExt).
+			FlagForEachArg("--partial ", a.deviceProps.Partial_ota_update_partitions).
+			Text(targetFilesDir.String()).
+			Output(partialOtaFilesZip)
+		a.partialOtaFilesZip = partialOtaFilesZip
+	}
+
 	builder.Build("target_files_"+ctx.ModuleName(), "Build target_files.zip")
 }
 
@@ -709,7 +748,7 @@ func writeFileWithNewLines(ctx android.ModuleContext, path android.WritablePath,
 	android.WriteFileRule(ctx, path, builder.String())
 }
 
-func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir android.ModuleOutPath, allInstalledModules []android.ModuleProxy) (deps android.Paths) {
+func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir android.ModuleOutPath, allInstalledModules []android.ModuleProxy) {
 	// Create a META/ subdirectory
 	builder.Command().Textf("mkdir -p %s/META", targetFilesDir.String())
 	if proptools.Bool(a.deviceProps.Ab_ota_updater) {
@@ -724,18 +763,18 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 		}
 		// ab_partitions.txt
 		abPartitionsSorted := android.SortedUniqueStrings(a.deviceProps.Ab_ota_partitions)
-		abPartitionsFilePath := targetFilesDir.Join(ctx, "META", "ab_partitions.txt")
+		abPartitionsFilePath := android.PathForModuleOut(ctx, "target_files_tmp", "ab_partitions.txt")
 		writeFileWithNewLines(ctx, abPartitionsFilePath, abPartitionsSorted)
-		deps = append(deps, abPartitionsFilePath)
+		builder.Command().Textf("cp").Input(abPartitionsFilePath).Textf(" %s/META/", targetFilesDir)
 		// otakeys.txt
 		abOtaKeysSorted := android.SortedUniqueStrings(a.deviceProps.Ab_ota_keys)
-		abOtaKeysFilePath := targetFilesDir.Join(ctx, "META", "otakeys.txt")
+		abOtaKeysFilePath := android.PathForModuleOut(ctx, "target_files_tmp", "otakeys.txt")
 		writeFileWithNewLines(ctx, abOtaKeysFilePath, abOtaKeysSorted)
-		deps = append(deps, abOtaKeysFilePath)
+		builder.Command().Textf("cp").Input(abOtaKeysFilePath).Textf(" %s/META/", targetFilesDir)
 		// postinstall_config.txt
-		abOtaPostInstallConfigFilePath := targetFilesDir.Join(ctx, "META", "postinstall_config.txt")
+		abOtaPostInstallConfigFilePath := android.PathForModuleOut(ctx, "target_files_tmp", "postinstall_config.txt")
 		writeFileWithNewLines(ctx, abOtaPostInstallConfigFilePath, a.deviceProps.Ab_ota_postinstall_config)
-		deps = append(deps, abOtaPostInstallConfigFilePath)
+		builder.Command().Textf("cp").Input(abOtaPostInstallConfigFilePath).Textf(" %s/META/", targetFilesDir)
 		// selinuxfc
 		if a.getFsInfos(ctx)["system"].SelinuxFc != nil {
 			builder.Command().Textf("cp").Input(a.getFsInfos(ctx)["system"].SelinuxFc).Textf(" %s/META/file_contexts.bin", targetFilesDir.String())
@@ -824,8 +863,6 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 			ctx.ModuleErrorf("Super partition %s does set SuperImageProvider\n", superPartition.Name())
 		}
 	}
-
-	return deps
 }
 
 var (

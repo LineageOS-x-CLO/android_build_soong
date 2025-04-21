@@ -29,8 +29,6 @@ import (
 	"sync"
 	"unicode"
 
-	"android/soong/shared"
-
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/bootstrap"
 	"github.com/google/blueprint/pathtools"
@@ -38,6 +36,7 @@ import (
 
 	"android/soong/android/soongconfig"
 	"android/soong/remoteexec"
+	"android/soong/shared"
 )
 
 // Bool re-exports proptools.Bool for the android package.
@@ -283,10 +282,6 @@ func (c Config) ReleaseHiddenApiExportableStubs() bool {
 }
 
 // Enable read flag from new storage
-func (c Config) ReleaseReadFromNewStorage() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_READ_FROM_NEW_STORAGE")
-}
-
 func (c Config) ReleaseCreateAconfigStorageFile() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_CREATE_ACONFIG_STORAGE_FILE")
 }
@@ -297,10 +292,6 @@ func (c Config) ReleaseUseSystemFeatureBuildFlags() bool {
 
 func (c Config) ReleaseFingerprintAconfigPackages() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_FINGERPRINT_ACONFIG_PACKAGES")
-}
-
-func (c Config) ReleaseAconfigCheckApiLevel() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_ACONFIG_CHECK_API_LEVEL")
 }
 
 func (c Config) ReleaseRustUseArmTargetArchVariant() bool {
@@ -406,6 +397,10 @@ type config struct {
 	// Copy of this config struct but some product-specific variables are
 	// replaced with the generic configuration values.
 	genericConfig *config
+
+	// modulesForTests stores the list of modules that exist during Soong tests.  It is nil
+	// when not running Soong tests.
+	modulesForTests *modulesForTests
 }
 
 type partialCompileFlags struct {

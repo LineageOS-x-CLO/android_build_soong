@@ -48,7 +48,6 @@ var (
 		"-Z remap-cwd-prefix=.",
 		"-C debuginfo=2",
 		"-C opt-level=3",
-		"-C relocation-model=pic",
 		"-C overflow-checks=on",
 		"-C force-unwind-tables=yes",
 		// Use v0 mangling to distinguish from C++ symbols
@@ -60,7 +59,9 @@ var (
 		// cfg flag to indicate that we are building in AOSP with Soong
 		"--cfg soong",
 	}
-
+	LinuxHostGlobalRustFlags = []string{
+		"-C relocation-model=pic",
+	}
 	LinuxHostGlobalLinkFlags = []string{
 		"-lc",
 		"-lrt",
@@ -76,6 +77,7 @@ var (
 		"-Z debug-info-for-profiling",
 		// Android has ELF TLS on platform
 		"-Z tls-model=global-dynamic",
+		"-C relocation-model=pic",
 	}
 
 	deviceGlobalLinkFlags = []string{
@@ -128,6 +130,7 @@ func init() {
 	pctx.StaticVariable("RUST_DEFAULT_VERSION", RustDefaultVersion)
 	pctx.StaticVariable("GLOBAL_RUSTC_FLAGS", strings.Join(GlobalRustFlags, " "))
 	pctx.StaticVariable("LINUX_HOST_GLOBAL_LINK_FLAGS", strings.Join(LinuxHostGlobalLinkFlags, " "))
+	pctx.StaticVariable("LINUX_HOST_GLOBAL_RUST_FLAGS", strings.Join(LinuxHostGlobalRustFlags, " "))
 
 	pctx.StaticVariable("DEVICE_GLOBAL_RUSTC_FLAGS", strings.Join(deviceGlobalRustFlags, " "))
 	pctx.StaticVariable("DEVICE_GLOBAL_LINK_FLAGS",
