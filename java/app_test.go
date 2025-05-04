@@ -3472,9 +3472,6 @@ func TestUsesLibraries(t *testing.T) {
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("runtime-library", "foo", "quuz", "qux", "bar", "fred"),
-		android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
-			variables.BuildWarningBadOptionalUsesLibsAllowlist = []string{"app", "prebuilt"}
-		}),
 	).RunTestWithBp(t, bp)
 
 	app := result.ModuleForTests(t, "app", "android_common")
@@ -4942,7 +4939,7 @@ func TestResourcesWithFlagDirectories(t *testing.T) {
 		t,
 		"Expected to generate flag path when it is a subdirectory of resource type subdirectory",
 		compileOutputPaths,
-		"out/soong/.intermediates/foo/android_common/aapt2/res/drawable/_qs_flashlight_icon_off.(test.package.flag1).xml.flat",
+		"out/soong/.intermediates/foo/android_common/aapt2/res/drawable_qs_flashlight_icon_off.(test.package.flag1).xml.flat",
 	)
 }
 

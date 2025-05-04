@@ -1045,6 +1045,9 @@ func (m *ModuleBase) baseOverridablePropertiesDepsMutator(ctx BottomUpMutatorCon
 // addRequiredDeps adds required, target_required, and host_required as dependencies.
 func addRequiredDeps(ctx BottomUpMutatorContext) {
 	addDep := func(target Target, depName string) {
+		if !blueprint.IsValidModuleName(depName) {
+			ctx.PropertyErrorf("required", "%s is not a valid module", depName)
+		}
 		if !ctx.OtherModuleExists(depName) {
 			if ctx.Config().AllowMissingDependencies() {
 				return
@@ -1684,20 +1687,6 @@ func (m *ModuleBase) VintfFragments(ctx ConfigurableEvaluatorContext) []string {
 	return m.base().baseProperties.Vintf_fragments.GetOrDefault(m.ConfigurableEvaluator(ctx), nil)
 }
 
-func (m *ModuleBase) generateVariantTarget(ctx *moduleContext) {
-	namespacePrefix := ctx.Namespace().id
-	if namespacePrefix != "" {
-		namespacePrefix = namespacePrefix + "-"
-	}
-
-	if !ctx.uncheckedModule && !shouldSkipAndroidMkProcessing(ctx, m) {
-		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-" + ctx.ModuleSubDir() + "-checkbuild"
-		ctx.Phony(name, ctx.checkbuildFiles...)
-		ctx.checkbuildTarget = PathForPhony(ctx, name)
-	}
-
-}
-
 // generateModuleTarget generates phony targets so that you can do `m <module-name>`.
 // It will be run on every variant of the module, so it relies on the fact that phony targets
 // are deduped to merge all the deps from different variants together.
@@ -1707,15 +1696,38 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	if nameSpace != "." {
 		namespacePrefix = strings.ReplaceAll(nameSpace, "/", ".") + "-"
 	}
+	shouldSkipAndroidMk := shouldSkipAndroidMkProcessing(ctx, m)
+
+	phony := func(suffix string, deps Paths) string {
+		if ctx.Config().KatiEnabled() {
+			suffix += "-soong"
+		}
+		var ret string
+		// Create a target without the namespace prefix if it's exported to make. One of the
+		// conditions for being exported to make is that the namespace is in
+		// PRODUCT_SOONG_NAMESPACES, so historically that would mean that make would create the
+		// phonies for those modules as if they weren't in any namespace.
+		if !shouldSkipAndroidMk {
+			ret = ctx.module.base().BaseModuleName() + suffix
+			ctx.Phony(ret, deps...)
+		}
+		// Create another phony for building with the namespace specified. This can be used
+		// regardless of if the namespace is in PRODUCT_SOONG_NAMESPACES or not.
+		if nameSpace != "." {
+			ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+suffix, deps...)
+		}
+		return ret
+	}
 
 	var deps Paths
 	var info ModuleBuildTargetsInfo
 
-	if len(ctx.installFiles) > 0 && !shouldSkipAndroidMkProcessing(ctx, m) {
-		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-install"
+	if len(ctx.installFiles) > 0 && !shouldSkipAndroidMk {
 		installFiles := ctx.installFiles.Paths()
-		ctx.Phony(name, installFiles...)
-		info.InstallTarget = PathForPhony(ctx, name)
+		name := phony("-install", installFiles)
+		if name != "" {
+			info.InstallTarget = PathForPhony(ctx, name)
+		}
 		deps = append(deps, installFiles...)
 	}
 
@@ -1723,15 +1735,17 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	// not be created if the module is not exported to make.
 	// Those could depend on the build target and fail to compile
 	// for the current build target.
-	if (!ctx.Config().KatiEnabled() || !shouldSkipAndroidMkProcessing(ctx, m)) && !ctx.uncheckedModule && ctx.checkbuildTarget != nil {
-		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-checkbuild"
-		ctx.Phony(name, ctx.checkbuildTarget)
-		deps = append(deps, ctx.checkbuildTarget)
+	if !shouldSkipAndroidMk && !ctx.uncheckedModule {
+		phony("-checkbuild", ctx.checkbuildFiles)
+		checkbuildTarget := phony("-"+ctx.ModuleSubDir()+"-checkbuild", ctx.checkbuildFiles)
+		if checkbuildTarget != "" {
+			info.CheckbuildTarget = PathForPhony(ctx, checkbuildTarget)
+		}
+		deps = append(deps, ctx.checkbuildFiles...)
 	}
 
-	if outputFiles, err := outputFilesForModule(ctx, ctx.Module(), ""); err == nil && len(outputFiles) > 0 && !shouldSkipAndroidMkProcessing(ctx, m) {
-		name := namespacePrefix + ctx.module.base().BaseModuleName() + "-outputs"
-		ctx.Phony(name, outputFiles...)
+	if outputFiles, err := outputFilesForModule(ctx, ctx.Module(), ""); err == nil && len(outputFiles) > 0 && !shouldSkipAndroidMk {
+		phony("-outputs", outputFiles)
 		deps = append(deps, outputFiles...)
 	}
 
@@ -1740,21 +1754,16 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	}
 
 	if len(deps) > 0 {
-		suffix := ""
-		if ctx.Config().KatiEnabled() {
-			suffix = "-soong"
-		}
-
-		ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+suffix, deps...)
+		phony("", deps)
 		if ctx.Device() {
 			// Generate a target suffix for use in atest etc.
-			ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+"-target"+suffix, deps...)
+			phony("-target", deps)
 		} else {
 			// Generate a host suffix for use in atest etc.
-			ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+"-host"+suffix, deps...)
+			phony("-host", deps)
 			if ctx.Target().HostCross {
 				// Generate a host-cross suffix for use in atest etc.
-				ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+"-host-cross"+suffix, deps...)
+				phony("-host-cross", deps)
 			}
 		}
 
@@ -1877,11 +1886,10 @@ func (m *ModuleBase) archModuleContextFactory(ctx archModuleContextFactoryContex
 }
 
 type InstallFilesInfo struct {
-	InstallFiles     InstallPaths
-	CheckbuildFiles  Paths
-	CheckbuildTarget Path
-	UncheckedModule  bool
-	PackagingSpecs   []PackagingSpec
+	InstallFiles    InstallPaths
+	CheckbuildFiles Paths
+	UncheckedModule bool
+	PackagingSpecs  []PackagingSpec
 	// katiInstalls tracks the install rules that were created by Soong but are being exported
 	// to Make to convert to ninja rules so that Make can add additional dependencies.
 	KatiInstalls             katiInstalls
@@ -1926,8 +1934,6 @@ var ModuleBuildTargetsProvider = blueprint.NewProvider[ModuleBuildTargetsInfo]()
 
 type CommonModuleInfo struct {
 	Enabled bool
-	// Whether the module has been replaced by a prebuilt
-	ReplacedByPrebuilt bool
 	// The Target of artifacts that this module variant is responsible for creating.
 	Target                  Target
 	SkipAndroidMkProcessing bool
@@ -1976,9 +1982,6 @@ type CommonModuleInfo struct {
 	ExportedToMake                               bool
 	Team                                         string
 	PartitionTag                                 string
-	IsPrebuilt                                   bool
-	PrebuiltSourceExists                         bool
-	UsePrebuilt                                  bool
 	ApexAvailable                                []string
 	// This field is different from the above one as it can have different values
 	// for cc, java library and sdkLibraryXml.
@@ -2173,12 +2176,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			return
 		}
 
-		m.generateVariantTarget(ctx)
-
 		installFiles.LicenseMetadataFile = ctx.licenseMetadataFile
 		installFiles.InstallFiles = ctx.installFiles
 		installFiles.CheckbuildFiles = ctx.checkbuildFiles
-		installFiles.CheckbuildTarget = ctx.checkbuildTarget
 		installFiles.UncheckedModule = ctx.uncheckedModule
 		installFiles.PackagingSpecs = ctx.packagingSpecs
 		installFiles.KatiInstalls = ctx.katiInstalls
@@ -2324,7 +2324,6 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 
 	commonData := CommonModuleInfo{
 		Enabled:                          m.Enabled(ctx),
-		ReplacedByPrebuilt:               m.commonProperties.ReplacedByPrebuilt,
 		Target:                           m.commonProperties.CompileTarget,
 		SkipAndroidMkProcessing:          shouldSkipAndroidMkProcessing(ctx, m),
 		UninstallableApexPlatformVariant: m.commonProperties.UninstallableApexPlatformVariant,
@@ -2399,11 +2398,6 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
 		commonData.BaseModuleName = mm.BaseModuleName()
 	}
-	if p, ok := m.module.(PrebuiltInterface); ok && p.Prebuilt() != nil {
-		commonData.IsPrebuilt = true
-		commonData.PrebuiltSourceExists = p.Prebuilt().SourceExists()
-		commonData.UsePrebuilt = p.Prebuilt().UsePrebuilt()
-	}
 	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
 
 	if h, ok := m.module.(HostToolProvider); ok {
@@ -2434,6 +2428,14 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			})
 		}
 	}
+
+	if mm, ok := m.module.(RequiredFilesFromPrebuiltApex); ok {
+		SetProvider(ctx, RequiredFilesFromPrebuiltApexInfoProvider, RequiredFilesFromPrebuiltApexInfo{
+			RequiredFilesFromPrebuiltApex: mm.RequiredFilesFromPrebuiltApex(ctx),
+			UseProfileGuidedDexpreopt:     mm.UseProfileGuidedDexpreopt(),
+		})
+	}
+
 	m.module.CleanupAfterBuildActions()
 }
 
@@ -3375,9 +3377,10 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 		hostCross bool
 	}
 	osDeps := map[osAndCross]Paths{}
-	ctx.VisitAllModules(func(module Module) {
-		if module.Enabled(ctx) {
-			key := osAndCross{os: module.Target().Os, hostCross: module.Target().HostCross}
+	ctx.VisitAllModuleProxies(func(module ModuleProxy) {
+		info := OtherModuleProviderOrDefault(ctx, module, CommonModuleInfoProvider)
+		if info.Enabled {
+			key := osAndCross{os: info.Target.Os, hostCross: info.Target.HostCross}
 			osDeps[key] = append(osDeps[key], OtherModuleProviderOrDefault(ctx, module, InstallFilesProvider).CheckbuildFiles...)
 		}
 	})

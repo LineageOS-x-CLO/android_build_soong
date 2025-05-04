@@ -135,26 +135,21 @@ def move_artifacts_to_subfolder(product: Product, soong_only: bool):
 
     files_to_move = [
         os.path.join(dist_dir, f'{product.product}-target_files-{build_id}.zip'), # target_files.zip
+        os.path.join(out_dir, 'build.log'),
     ]
 
     for file in files_to_move:
         shutil.move(file, subdistdir)
 
 SHA_DIFF_ALLOWLIST = {
-    "IMAGES/init_boot.img",
     "IMAGES/system.img",
-    "IMAGES/system_other.img",
+    "IMAGES/system_ext.img", # TODO: b/406045340 - Remove from the allowlist once it's fixed
     "IMAGES/userdata.img",
-    "IMAGES/vbmeta.img",
-    "IMAGES/vbmeta_system_dlkm.img",
     "IMAGES/vbmeta_system.img",
-    "IMAGES/vbmeta_vendor_dlkm.img",
-    "IMAGES/vendor_boot.img",
-    "META/file_contexts.bin",
-    "META/kernel_version.txt",
     "META/misc_info.txt",
     "META/vbmeta_digest.txt",
     "SYSTEM_EXT/etc/vm/trusty_vm/trusty_security_vm.elf", # TODO: b/406045340 - Remove from the allowlist once it's fixed
+    "SYSTEM/apex/com.android.resolv.capex", # TODO: b/411514418 - Remove once nondeterminism is fixed
 }
 
 def compare_sha_maps(soong_only_map: dict[str, bytes], soong_plus_make_map: dict[str, bytes]) -> bool:
@@ -163,17 +158,18 @@ def compare_sha_maps(soong_only_map: dict[str, bytes], soong_plus_make_map: dict
     all_keys = list(soong_only_map.keys() | soong_plus_make_map.keys())
     all_identical = True
     for key in all_keys:
-        if key in SHA_DIFF_ALLOWLIST:
-            continue
+        allowlisted = key in SHA_DIFF_ALLOWLIST
+        allowlisted_str = "ALLOWLISTED" if allowlisted else "NOT ALLOWLISTED"
+        file = None if allowlisted else sys.stderr
         if key not in soong_only_map:
-            print(f'{key} not found in soong only build target_files.zip', file=sys.stderr)
-            all_identical = False
+            print(f'{key} not found in soong only build target_files.zip ({allowlisted_str})', file=file)
+            all_identical = all_identical and allowlisted
         elif key not in soong_plus_make_map:
-            print(f'{key} not found in soong plus make build target_files.zip', file=sys.stderr)
-            all_identical = False
+            print(f'{key} not found in soong plus make build target_files.zip ({allowlisted_str})', file=file)
+            all_identical = all_identical and allowlisted
         elif soong_only_map[key] != soong_plus_make_map[key]:
-            print(f'{key} sha value differ between soong only build and soong plus make build', file=sys.stderr)
-            all_identical = False
+            print(f'{key} sha value differ between soong only build and soong plus make build ({allowlisted_str})', file=file)
+            all_identical = all_identical and allowlisted
 
     return all_identical
 
