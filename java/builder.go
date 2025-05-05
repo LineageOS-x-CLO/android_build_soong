@@ -481,10 +481,10 @@ type javaBuilderFlags struct {
 	errorProneExtraJavacFlags string
 	errorProneProcessorPath   classpath
 
-	kotlincFlags     string
-	kotlincClasspath classpath
-	kotlincDeps      android.Paths
-	kSnapshotFiles   map[string]android.Path
+	kotlincFlags       string
+	kotlincPluginFlags string
+	kotlincClasspath   classpath
+	kotlincDeps        android.Paths
 
 	proto android.ProtoFlags
 }
