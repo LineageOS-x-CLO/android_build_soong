@@ -595,15 +595,16 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			ret.Enable_inc_javac = makeVal(state)
 		case "disable_inc_javac":
 			ret.Enable_inc_javac = !makeVal(state)
+
 		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
 			ret.Enable_inc_kotlin_java_dep = makeVal(state)
 		case "disable_inc_kotlin_java_dep":
 			ret.Enable_inc_kotlin_java_dep = !makeVal(state)
 
 		case "inc_kotlin", "enable_inc_kotlin":
-			ret.Enable_inc_kotlin = makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin)
+			ret.Enable_inc_kotlin = makeVal(state)
 		case "disable_inc_kotlin":
-			ret.Enable_inc_kotlin = !makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin)
+			ret.Enable_inc_kotlin = !makeVal(state)
 
 		case "stub_validation", "enable_stub_validation":
 			ret.Disable_stub_validation = !makeVal(state)

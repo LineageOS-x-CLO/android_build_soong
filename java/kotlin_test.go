@@ -490,7 +490,7 @@ func TestKotlinCompose(t *testing.T) {
 		withCompose.Rule("kotlinc").Implicits.Strings(), composeCompiler.String())
 
 	android.AssertStringDoesContain(t, "missing compose compiler plugin",
-		withCompose.VariablesForTestsRelativeToTop()["kotlincPluginFlags"], "-Xplugin="+composeCompiler.String())
+		withCompose.VariablesForTestsRelativeToTop()["composePluginFlag"], "-Xplugin="+composeCompiler.String())
 
 	android.AssertStringListContains(t, "missing kapt compose compiler dependency",
 		withCompose.Rule("kapt").Implicits.Strings(), composeCompiler.String())
@@ -499,7 +499,7 @@ func TestKotlinCompose(t *testing.T) {
 		noCompose.Rule("kotlinc").Implicits.Strings(), composeCompiler.String())
 
 	android.AssertStringDoesNotContain(t, "unexpected compose compiler plugin",
-		noCompose.VariablesForTestsRelativeToTop()["kotlincFlags"], "-Xplugin="+composeCompiler.String())
+		noCompose.VariablesForTestsRelativeToTop()["composePluginFlag"], "-Xplugin="+composeCompiler.String())
 }
 
 func TestKotlinPlugin(t *testing.T) {

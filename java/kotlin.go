@@ -26,7 +26,16 @@ import (
 	"github.com/google/blueprint"
 )
 
-const NonIncKotlinCmd = `rm -rf "$classesDir" "$headerClassesDir" "$srcJarDir" "$kotlinBuildFile" "$emptyDir" && ` +
+type KotlinCompileData struct {
+	pcStateFileNew   android.OutputPath
+	pcStateFilePrior android.OutputPath
+	diffFile         android.OutputPath
+}
+
+const inputDeltaCmd = `${config.FindInputDeltaCmd} --target "$out" ` +
+	`--inputs_file "$out.rsp" --new_state "$newStateFile" --prior_state "$priorStateFile" > $sourceDeltaFile`
+
+const nonIncKotlinCmd = `rm -rf "$classesDir" "$headerClassesDir" "$srcJarDir" "$kotlinBuildFile" "$emptyDir" && ` +
 	`mkdir -p "$classesDir" "$headerClassesDir" "$srcJarDir" "$emptyDir" && ` +
 	`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" -f "*.kt" $srcJars && ` +
 	`${config.GenKotlinBuildFileCmd} --classpath "$classpath" --name "$name"` +
@@ -34,7 +43,7 @@ const NonIncKotlinCmd = `rm -rf "$classesDir" "$headerClassesDir" "$srcJarDir" "
 	` $commonSrcFilesArg --out "$kotlinBuildFile" && ` +
 	`${config.KotlincCmd} ${config.KotlincGlobalFlags} ` +
 	` ${config.KotlincSuppressJDK9Warnings} ${config.JavacHeapFlags} ` +
-	` $kotlincFlags -jvm-target $kotlinJvmTarget $kotlincPluginFlags -Xbuild-file=$kotlinBuildFile ` +
+	` $kotlincFlags -jvm-target $kotlinJvmTarget $composePluginFlag $kotlincPluginFlags -Xbuild-file=$kotlinBuildFile ` +
 	` -kotlin-home $emptyDir ` +
 	` -Xplugin=${config.KotlinAbiGenPluginJar} ` +
 	` -P plugin:org.jetbrains.kotlin.jvm.abi:outputDir=$headerClassesDir && ` +
@@ -42,9 +51,11 @@ const NonIncKotlinCmd = `rm -rf "$classesDir" "$headerClassesDir" "$srcJarDir" "
 	`${config.SoongZipCmd} -jar -o $headerJar -C $headerClassesDir -D $headerClassesDir -write_if_changed && ` +
 	`rm -rf "$srcJarDir" "$classesDir" "$headerClassesDir" `
 
-var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports{Goma: true},
+const moveDeltaStateFile = `mv $newStateFile $priorStateFile && rm $sourceDeltaFile`
+
+var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
-		Command: NonIncKotlinCmd,
+		Command: inputDeltaCmd + ` && ` + nonIncKotlinCmd + ` && ` + moveDeltaStateFile,
 		CommandDeps: []string{
 			"${config.FindInputDeltaCmd}",
 			"${config.KotlincCmd}",
@@ -64,15 +75,18 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 		RspfileContent: `$in`,
 		Restat:         true,
 	},
-	"kotlincFlags", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir",
+	"kotlincFlags", "composePluginFlag", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir",
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
-	"name")
+	"newStateFile", "priorStateFile", "sourceDeltaFile", "name")
 
 // TODO: does incremental work with RBE?
-var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", android.RemoteRuleSupports{Goma: false},
+var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
 		Command: // Incremental
-		`if [ -n $$(SOONG_USE_PARTIAL_COMPILE" ]; then ` +
+
+		inputDeltaCmd + ` && ` +
+
+			`if [ "$$SOONG_USE_PARTIAL_COMPILE" = "true" ]; then ` +
 			`rm -rf "$srcJarDir" "$kotlinBuildFile" "$emptyDir" && ` +
 			`mkdir -p "$headerClassesDir" "$srcJarDir" "$emptyDir" && ` +
 			`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" -f "*.kt" $srcJars && ` +
@@ -81,22 +95,25 @@ var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", andro
 			` $commonSrcFilesArg --out "$kotlinBuildFile" && ` +
 			`${config.KotlinIncrementalClientBinary} ${config.KotlincGlobalFlags} ` +
 			` ${config.KotlincSuppressJDK9Warnings} ${config.JavacHeapFlags} ` +
-			` $kotlincFlags $kotlincPluginFlags -jvm-target $kotlinJvmTarget -build-file=$kotlinBuildFile ` +
+			` $kotlincFlags $composeEmbeddablePluginFlag $kotlincPluginFlags ` +
+			` -jvm-target $kotlinJvmTarget -build-file=$kotlinBuildFile ` +
+			` -source-delta-file=$sourceDeltaFile` +
 			` -kotlin-home=$emptyDir ` +
 			` -root-dir=$incrementalRootDir` +
 			` -output-dir=$outputDir` +
 			` -build-dir=$buildDir ` +
-			` -work-dir=$workDir ` +
+			` -working-dir=$workDir ` +
 			` -Xplugin=${config.KotlinAbiGenPluginJar} ` +
 			` -P plugin:org.jetbrains.kotlin.jvm.abi:outputDir=$headerClassesDir && ` +
 			`${config.SoongZipCmd} -jar -o $out -C $classesDir -D $classesDir -write_if_changed && ` +
 			`${config.SoongZipCmd} -jar -o $headerJar -C $headerClassesDir -D $headerClassesDir -write_if_changed && ` +
-			`rm -rf "$srcJarDir" ` +
+			`rm -rf "$srcJarDir" ; ` +
 
 			// Else non incremental
-			` else ` +
-			NonIncKotlinCmd +
-			` fi`,
+			`else ` +
+			nonIncKotlinCmd + ` ; ` +
+			`fi && ` +
+			moveDeltaStateFile,
 
 		CommandDeps: []string{
 			"${config.KotlincCmd}",
@@ -117,9 +134,9 @@ var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", andro
 		RspfileContent: `$in`,
 		Restat:         true,
 	},
-	"kotlincFlags", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "incrementalRootDir",
+	"kotlincFlags", "composeEmbeddablePluginFlag", "composePluginFlag", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "incrementalRootDir",
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
-	"name", "outputDir", "buildDir", "workDir")
+	"name", "outputDir", "buildDir", "workDir", "newStateFile", "priorStateFile", "sourceDeltaFile")
 
 var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
@@ -151,6 +168,13 @@ var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 		RspfileContent: "$in",
 	},
 	"classpath", "kotlincFlags", "kotlincPluginFlags", "commonSrcFilesList", "kotlinJvmTarget", "outJar", "srcJars", "srcJarDir",
+)
+
+var kotlinIncrementalClean = pctx.AndroidStaticRule("kotlin-partialcompileclean",
+	blueprint.RuleParams{
+		Command: `rm -rf "$cpSnapshot" "$outDir" "$buildDir" "$workDir"`,
+	},
+	"cpSnapshot", "outDir", "buildDir", "workDir",
 )
 
 func kotlinCommonSrcsList(ctx android.ModuleContext, commonSrcFiles android.Paths) android.OptionalPath {
@@ -187,10 +211,10 @@ func SnapshotJarForKotlin(ctx android.ModuleContext, jarFile android.WritablePat
 
 // kotlinCompile takes .java and .kt sources and srcJars, and compiles the .kt sources into a classes jar in outputFile.
 func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutputFile android.WritablePath,
-	srcFiles, commonSrcFiles, srcJars android.Paths,
-	flags javaBuilderFlags, incremental bool) {
+	srcFiles, commonSrcFiles, srcJars android.Paths, flags javaBuilderFlags, compileData KotlinCompileData, incremental bool) {
 
 	var deps android.Paths
+	var orderOnlyDeps android.Paths
 	deps = append(deps, flags.kotlincClasspath...)
 	deps = append(deps, flags.kotlincDeps...)
 	deps = append(deps, srcJars...)
@@ -242,29 +266,49 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 		"emptyDir":           android.PathForModuleOut(ctx, "kotlinc", "empty").String(),
 		"kotlinJvmTarget":    flags.javaVersion.StringForKotlinc(),
 		"name":               kotlinName,
+		"newStateFile":       compileData.pcStateFileNew.String(),
+		"priorStateFile":     compileData.pcStateFilePrior.String(),
+		"sourceDeltaFile":    compileData.diffFile.String(),
+		"composePluginFlag":  flags.composePluginFlag,
 	}
 	if incremental {
 		rule = kotlinIncremental
 		description = "kotlin-incremental"
-		// TODO: add this cp snapshot as a param to the incremental compiler.
-		ctx.Phony("partialCompileClean", incrementalRootDir.Join(ctx, "shrunk-classpath-snapshot.bin"))
-		ctx.Phony("partialCompileClean", incrementalRootDir.Join(ctx, outputDir))
-		ctx.Phony("partialCompileClean", incrementalRootDir.Join(ctx, buildDir))
-		ctx.Phony("partialCompileClean", incrementalRootDir.Join(ctx, workDir))
-		args["incrementalRootDir"] = incrementalRootDir.String()
 		args["outputDir"] = outputDir
 		args["buildDir"] = buildDir
 		args["workDir"] = workDir
+		args["incrementalRootDir"] = incrementalRootDir.String()
+		args["sourceDeltaFile"] = compileData.diffFile.String()
+		args["composeEmbeddablePluginFlag"] = flags.composeEmbeddablePluginFlag
 	}
+
 	ctx.Build(pctx, android.BuildParams{
-		Rule:           rule,
-		Description:    description,
-		Output:         outputFile,
-		ImplicitOutput: headerOutputFile,
-		Inputs:         srcFiles,
-		Implicits:      deps,
-		Args:           args,
+		Rule:            rule,
+		Description:     description,
+		Inputs:          srcFiles,
+		Implicits:       deps,
+		OrderOnly:       orderOnlyDeps,
+		Output:          outputFile,
+		ImplicitOutputs: []android.WritablePath{headerOutputFile, compileData.pcStateFilePrior},
+		Args:            args,
 	})
+
+	cleanPhonyPath := android.PathForModuleOut(ctx, "partialcompileclean", kotlinName)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        kotlinIncrementalClean,
+		Description: "kotlin-partialcompileclean",
+		Output:      cleanPhonyPath,
+		Inputs:      android.Paths{},
+		Args: map[string]string{
+			// TODO: add this cp snapshot as a param to the incremental compiler.
+			"cpSnapshot": incrementalRootDir.Join(ctx, "shrunk-classpath-snapshot.bin").String(),
+			"outDir":     incrementalRootDir.Join(ctx, outputDir).String(),
+			"buildDir":   incrementalRootDir.Join(ctx, buildDir).String(),
+			"workDir":    incrementalRootDir.Join(ctx, workDir).String(),
+		},
+		PhonyOutput: true,
+	})
+	ctx.Phony("partialcompileclean", cleanPhonyPath)
 
 	// Emit kythe xref rule
 	if (ctx.Config().EmitXrefRules()) && ctx.Module() == ctx.PrimaryModule() {
@@ -358,7 +402,6 @@ var kaptStubs = pctx.AndroidRemoteStaticRule("kaptStubs", android.RemoteRuleSupp
 			`$kaptProcessor ` +
 			`-Xbuild-file=$kotlinBuildFile && ` +
 			`${config.SoongZipCmd} -jar -write_if_changed -o $out -C $kaptDir/stubs -D $kaptDir/stubs && ` +
-			`if [ -f "$out.pc_state.new" ]; then mv "$out.pc_state.new" "$out.pc_state"; fi && ` +
 			`rm -rf "$srcJarDir"`,
 		CommandDeps: []string{
 			"${config.FindInputDeltaCmd}",
