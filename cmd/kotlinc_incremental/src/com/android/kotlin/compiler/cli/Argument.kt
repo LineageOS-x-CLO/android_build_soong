@@ -32,7 +32,6 @@ fun <O : Options> parseArgs(
     var hasError = false
     var showHelp = args.isEmpty()
     val iter = args.iterator()
-
     while (iter.hasNext()) {
         val arg = iter.next()
         matched = false
