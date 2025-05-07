@@ -102,7 +102,7 @@ func (installer *baseInstaller) install(ctx ModuleContext, file android.Path) {
 
 func (installer *baseInstaller) installStandaloneTestDep(ctx ModuleContext, standaloneTestDep android.PackagingSpec) {
 	// test data installation removed by QC
-	// installer.installTestData(ctx, []android.DataPath{{SrcPath: standaloneTestDep.ToGob().SrcPath, RelativeInstallPath: "standalone-libs"}})
+	// installer.installTestData(ctx, []android.DataPath{{SrcPath: standaloneTestDep.SrcPath(), RelativeInstallPath: "standalone-libs"}})
 }
 
 func (installer *baseInstaller) everInstallable() bool {

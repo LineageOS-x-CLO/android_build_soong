@@ -15,8 +15,9 @@
 package config
 
 import (
-	"android/soong/android"
 	"strings"
+
+	"android/soong/android"
 )
 
 var (
@@ -53,6 +54,7 @@ var (
 
 		// Use the device gcc toolchain
 		"--gcc-toolchain=${LinuxBionicGccRoot}",
+
 	}
 
 	// Embed the linker into host bionic binaries. This is needed to support host bionic,
@@ -73,7 +75,6 @@ const (
 func init() {
 	pctx.StaticVariable("LinuxBionicCflags", strings.Join(linuxBionicCflags, " "))
 	pctx.StaticVariable("LinuxBionicLdflags", strings.Join(linuxBionicLdflags, " "))
-	pctx.StaticVariable("LinuxBionicLldflags", strings.Join(linuxBionicLdflags, " "))
 
 	// Use the device gcc toolchain for now
 	pctx.StaticVariable("LinuxBionicGccVersion", x86_64GccVersion)
@@ -109,10 +110,6 @@ func (t *toolchainLinuxBionic) Cppflags() string {
 
 func (t *toolchainLinuxBionic) Ldflags() string {
 	return "${config.LinuxBionicLdflags}"
-}
-
-func (t *toolchainLinuxBionic) Lldflags() string {
-	return "${config.LinuxBionicLldflags}"
 }
 
 func (t *toolchainLinuxBionic) ToolchainCflags() string {
