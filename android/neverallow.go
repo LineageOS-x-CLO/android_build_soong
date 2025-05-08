@@ -732,7 +732,7 @@ func (r *rule) appliesToDirectDeps(ctx BottomUpMutatorContext) bool {
 	}
 
 	matches := false
-	ctx.VisitDirectDeps(func(m Module) {
+	ctx.VisitDirectDepsProxy(func(m ModuleProxy) {
 		if !matches {
 			name := ctx.OtherModuleName(m)
 			matches = r.directDeps[name]

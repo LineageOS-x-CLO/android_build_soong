@@ -194,7 +194,7 @@ var (
 		"-nostdlibinc",
 	}
 
-	commonGlobalLldflags = []string{
+	commonGlobalLdflags = []string{
 		"-fuse-ld=lld",
 		"-Wl,--icf=safe",
 		"-Xclang -opaque-pointers",
@@ -205,7 +205,7 @@ var (
 	}
 
 	// Linking flags for device code; not applied to host binaries.
-	deviceGlobalLdflags = []string{
+	deviceGlobalLdflags = slices.Concat([]string{
 		"-Wl,-z,noexecstack",
 		"-Wl,-z,relro",
 		"-Wl,-z,now",
@@ -218,17 +218,13 @@ var (
 		"-Wl,--exclude-libs,libgcc_stripped.a",
 		"-Wl,--exclude-libs,libunwind_llvm.a",
 		"-Wl,--exclude-libs,libunwind.a",
-	}
-
-	deviceGlobalLldflags = append(deviceGlobalLdflags, commonGlobalLldflags...)
+	}, commonGlobalLdflags)
 
 	hostGlobalCflags = []string{}
 
 	hostGlobalCppflags = []string{}
 
-	hostGlobalLdflags = []string{}
-
-	hostGlobalLldflags = commonGlobalLldflags
+	hostGlobalLdflags = commonGlobalLdflags
 
 	commonGlobalCppflags = []string{
 		// -Wimplicit-fallthrough is not enabled by -Wall.
@@ -450,6 +446,7 @@ var (
 		"-pedantic",
 		"-pedantic-errors",
 		"-Werror=pedantic",
+		"-Wno-all",
 		"-Wno-everything",
 	}
 
@@ -499,10 +496,8 @@ func init() {
 	pctx.StaticVariable("CommonGlobalAsflags", strings.Join(commonGlobalAsflags, " "))
 	pctx.StaticVariable("DeviceGlobalCppflags", strings.Join(deviceGlobalCppflags, " "))
 	pctx.StaticVariable("DeviceGlobalLdflags", strings.Join(deviceGlobalLdflags, " "))
-	pctx.StaticVariable("DeviceGlobalLldflags", strings.Join(deviceGlobalLldflags, " "))
 	pctx.StaticVariable("HostGlobalCppflags", strings.Join(hostGlobalCppflags, " "))
 	pctx.StaticVariable("HostGlobalLdflags", strings.Join(hostGlobalLdflags, " "))
-	pctx.StaticVariable("HostGlobalLldflags", strings.Join(hostGlobalLldflags, " "))
 
 	pctx.VariableFunc("CommonGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := slices.Clone(commonGlobalCflags)
