@@ -59,6 +59,8 @@ type baseInstaller struct {
 	relative string
 	location installLocation
 
+	installDeps android.InstallPaths
+
 	path android.InstallPath
 }
 
