@@ -236,8 +236,5 @@ func (fuzz *fuzzDecorator) AndroidMk(ctx AndroidMkContext, ret *android.AndroidM
 		if len(fuzzFiles) > 0 {
 			entries.AddStrings("LOCAL_TEST_DATA", fuzzFiles...)
 		}
-		if fuzz.installedSharedDeps != nil {
-			entries.AddStrings("LOCAL_FUZZ_INSTALLED_SHARED_DEPS", fuzz.installedSharedDeps...)
-		}
 	})
 }

@@ -416,9 +416,6 @@ func (fuzz *fuzzBinary) prepareAndroidMKProviderInfo(config android.Config, ctx 
 	if len(fuzzFiles) > 0 {
 		entries.AddStrings("LOCAL_TEST_DATA", fuzzFiles...)
 	}
-	if fuzz.installedSharedDeps != nil {
-		entries.AddStrings("LOCAL_FUZZ_INSTALLED_SHARED_DEPS", fuzz.installedSharedDeps...)
-	}
 }
 
 func (test *testLibrary) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {

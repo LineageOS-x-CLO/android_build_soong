@@ -259,6 +259,8 @@ type baseCompiler struct {
 	location installLocation
 	sanitize *sanitize
 
+	installDeps android.InstallPaths
+
 	// unstripped output file.
 	unstrippedOutputFile android.Path
 
