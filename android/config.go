@@ -443,6 +443,7 @@ var defaultPartialCompileFlags = partialCompileFlags{}
 var enabledPartialCompileFlags = partialCompileFlags{
 	Use_d8:                  true,
 	Disable_stub_validation: true,
+	Enable_inc_javac:        false,
 }
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=all`.

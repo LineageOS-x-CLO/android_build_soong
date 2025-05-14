@@ -897,24 +897,7 @@ func (j *Module) deps(ctx android.BottomUpMutatorContext) {
 	traceRefs := j.dexProperties.Optimize.Trace_references_from.GetOrDefault(ctx, []string{})
 	ctx.AddVariationDependencies(nil, traceReferencesTag, traceRefs...)
 
-	// For library dependencies that are component libraries (like stubs), add the implementation
-	// as a dependency (dexpreopt needs to be against the implementation library, not stubs).
-	for _, dep := range libDeps {
-		if dep != nil {
-			if component, ok := dep.(SdkLibraryComponentDependency); ok {
-				if lib := component.OptionalSdkLibraryImplementation(); lib != nil {
-					// Add library as optional if it's one of the optional compatibility libs or it's
-					// explicitly listed in the optional_uses_libs property.
-					tag := usesLibReqTag
-					if android.InList(*lib, dexpreopt.OptionalCompatUsesLibs) ||
-						android.InList(*lib, j.usesLibrary.usesLibraryProperties.Optional_uses_libs.GetOrDefault(ctx, nil)) {
-						tag = usesLibOptTag
-					}
-					ctx.AddVariationDependencies(nil, tag, *lib)
-				}
-			}
-		}
-	}
+	j.usesLibrary.depsFromLibs(ctx, libDeps)
 
 	ctx.AddFarVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(), pluginTag, j.properties.Plugins...)
 	ctx.AddFarVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(), kotlinPluginTag, j.properties.Kotlin_plugins...)
@@ -952,6 +935,8 @@ func (j *Module) deps(ctx android.BottomUpMutatorContext) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(), kotlinPluginTag,
 			"kotlin-compose-compiler-plugin")
 	}
+
+	j.EmbeddableSdkLibraryComponent.setComponentDependencyInfoProvider(ctx)
 }
 
 func hasSrcExt(srcs []string, ext string) bool {
@@ -1482,19 +1467,19 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 		// turbine is disabled when API generating APs are present, in which case,
 		// we would want to process annotations before moving to incremental javac
+		var genAnnoSrcJar android.Path
 		if ctx.Device() && ctx.Config().PartialCompileFlags().Enable_inc_javac && disableTurbine {
+			srcJarsForTurbine := slices.Clone(srcJars)
 			if len(flags.processorPath) > 0 {
-				annoSrcJars, classes := j.generateJavaAnnotations(ctx, jarName, -1, uniqueJavaFiles, srcJars, flags, nil)
-				srcJars = append(srcJars, annoSrcJars)
-				localImplementationJars = append(localImplementationJars, classes)
+				genAnnoSrcJar, _ = j.generateJavaAnnotations(ctx, jarName, -1, uniqueJavaFiles, srcJars, flags, nil)
 				flags.processorPath = nil
 				flags.processors = nil
+				srcJarsForTurbine = append(srcJarsForTurbine, genAnnoSrcJar)
 			}
 			// turbine was disabled, lets run it now
-			extraJars1 := slices.Clone(kotlinHeaderJars)
-			extraJars1 = append(extraJars1, extraCombinedJars...)
-			localHeaderJars, _ = j.compileJavaHeader(ctx, uniqueJavaFiles, srcJars, deps, flags, jarName, extraJars1)
-			shardingHeaderJars = localHeaderJars
+			turbineExtraJars := slices.Clone(kotlinHeaderJars)
+			turbineExtraJars = append(turbineExtraJars, extraCombinedJars...)
+			shardingHeaderJars, _ = j.compileJavaHeader(ctx, uniqueJavaFiles, srcJarsForTurbine, deps, flags, jarName, turbineExtraJars)
 		}
 
 		var extraJarDeps android.Paths
@@ -1536,7 +1521,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				shardSrcs = android.ShardPaths(uniqueJavaFiles, shardSize)
 				for idx, shardSrc := range shardSrcs {
 					classes := j.compileJavaClasses(ctx, jarName, idx, shardSrc,
-						nil, nil, flags, extraJarDeps)
+						nil, nil, flags, extraJarDeps, nil)
 					classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac-"+strconv.Itoa(idx))
 					localImplementationJars = append(localImplementationJars, classes)
 				}
@@ -1549,13 +1534,13 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				shardSrcJarsList := android.ShardPaths(srcJars, shardSize/5)
 				for idx, shardSrcJars := range shardSrcJarsList {
 					classes := j.compileJavaClasses(ctx, jarName, startIdx+idx,
-						nil, shardSrcJars, nil, flags, extraJarDeps)
+						nil, shardSrcJars, nil, flags, extraJarDeps, nil)
 					classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac-"+strconv.Itoa(startIdx+idx))
 					localImplementationJars = append(localImplementationJars, classes)
 				}
 			}
 		} else {
-			classes := j.compileJavaClasses(ctx, jarName, -1, uniqueJavaFiles, srcJars, shardingHeaderJars, flags, extraJarDeps)
+			classes := j.compileJavaClasses(ctx, jarName, -1, uniqueJavaFiles, srcJars, shardingHeaderJars, flags, extraJarDeps, genAnnoSrcJar)
 			classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac")
 			localImplementationJars = append(localImplementationJars, classes)
 		}
@@ -2059,7 +2044,7 @@ func enableErrorproneFlags(flags javaBuilderFlags) javaBuilderFlags {
 }
 
 func (j *Module) compileJavaClasses(ctx android.ModuleContext, jarName string, idx int,
-	srcFiles, srcJars, localHeaderJars android.Paths, flags javaBuilderFlags, extraJarDeps android.Paths) android.Path {
+	srcFiles, srcJars, localHeaderJars android.Paths, flags javaBuilderFlags, extraJarDeps android.Paths, genAnnoSrcJar android.Path) android.Path {
 
 	kzipName := pathtools.ReplaceExtension(jarName, "kzip")
 	annoSrcJar := android.PathForModuleOut(ctx, "javac", "anno.srcjar")
@@ -2073,7 +2058,7 @@ func (j *Module) compileJavaClasses(ctx android.ModuleContext, jarName string, i
 	// enable incremental javac when corresponding flags are enabled and
 	// header jars are present
 	if ctx.Config().PartialCompileFlags().Enable_inc_javac && len(localHeaderJars) > 0 {
-		TransformJavaToClassesInc(ctx, classes, srcFiles, srcJars, localHeaderJars, annoSrcJar, flags, extraJarDeps)
+		TransformJavaToClassesInc(ctx, classes, srcFiles, srcJars, localHeaderJars, annoSrcJar, flags, extraJarDeps, genAnnoSrcJar)
 	} else {
 		TransformJavaToClasses(ctx, classes, idx, srcFiles, srcJars, annoSrcJar, flags, extraJarDeps)
 	}
@@ -2102,10 +2087,6 @@ func (j *Module) generateJavaAnnotations(ctx android.ModuleContext, jarName stri
 
 	classes := android.PathForModuleOut(ctx, "javac-apt", jarName)
 	GenerateJavaAnnotations(ctx, classes, idx, srcFiles, srcJars, annoSrcJar, flags, extraJarDeps)
-
-	if len(flags.processorPath) > 0 {
-		j.annoSrcJars = append(j.annoSrcJars, annoSrcJar)
-	}
 	return annoSrcJar, classes
 }
 
