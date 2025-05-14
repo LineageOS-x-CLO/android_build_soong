@@ -297,6 +297,10 @@ func (c Config) ReleaseUseSparseEncoding() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_SPARSE_ENCODING")
 }
 
+func (c Config) ReleaseUseUncompressedFonts() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_UNCOMPRESSED_FONTS")
+}
+
 func (c Config) ReleaseAconfigStorageVersion() string {
 	if val, exists := c.GetBuildFlag("RELEASE_ACONFIG_STORAGE_VERSION"); exists {
 		return val
@@ -1466,10 +1470,6 @@ func (c *config) Android64() bool {
 	return false
 }
 
-func (c *config) UseGoma() bool {
-	return Bool(c.productVariables.UseGoma)
-}
-
 func (c *config) UseABFS() bool {
 	return Bool(c.productVariables.UseABFS)
 }
@@ -1491,7 +1491,7 @@ func (c *config) UseRBED8() bool {
 }
 
 func (c *config) UseRemoteBuild() bool {
-	return c.UseGoma() || c.UseRBE()
+	return c.UseRBE()
 }
 
 func (c *config) RunErrorProne() bool {
@@ -2582,4 +2582,13 @@ func (c *config) OdmManifestFiles() []string {
 
 func (c *config) EnforceSELinuxTrebleLabeling() bool {
 	return Bool(c.productVariables.EnforceSELinuxTrebleLabeling)
+}
+
+func (c *config) SELinuxTrebleLabelingTrackingListFile(ctx PathContext) Path {
+	path := String(c.productVariables.SELinuxTrebleLabelingTrackingListFile)
+	if path == "" {
+		return nil
+	}
+
+	return PathForSource(ctx, path)
 }
