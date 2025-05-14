@@ -182,7 +182,7 @@ var (
 		"-funwind-tables",
 		"-fstack-protector-strong",
 		"-Wa,--noexecstack",
-		"-D_FORTIFY_SOURCE=2",
+		"-D_FORTIFY_SOURCE=3",
 
 		"-Wstrict-aliasing=2",
 
