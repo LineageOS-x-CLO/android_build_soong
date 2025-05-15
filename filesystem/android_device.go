@@ -746,11 +746,13 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 		}
 	}
 	// Copy ramdisk_node_list
-	if ramdiskNodeList := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Ramdisk_node_list)); ramdiskNodeList != nil {
+	if proptools.String(a.deviceProps.Ramdisk_node_list) != "" {
+		ramdiskNodeList := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Ramdisk_node_list))
 		builder.Command().Textf("cp").Input(ramdiskNodeList).Textf(" %s/META/", targetFilesDir.String())
 	}
 	// Copy releasetools.py
-	if releaseTools := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Releasetools_extension)); releaseTools != nil {
+	if proptools.String(a.deviceProps.Releasetools_extension) != "" {
+		releaseTools := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Releasetools_extension))
 		builder.Command().Textf("cp").Input(releaseTools).Textf(" %s/META/", targetFilesDir.String())
 	}
 	// apexkeys.txt
@@ -766,7 +768,8 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	builder.Command().Textf("cp").Input(a.apkCertsInfo).Textf(" %s/META/", targetFilesDir.String())
 
 	// Copy fastboot-info.txt
-	if fastbootInfo := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.FastbootInfo)); fastbootInfo != nil {
+	if proptools.String(a.deviceProps.FastbootInfo) != "" {
+		fastbootInfo := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.FastbootInfo))
 		// TODO (b/399788523): Autogenerate fastboot-info.txt if there is no source fastboot-info.txt
 		// https://cs.android.com/android/_/android/platform/build/+/80b9546f8f69e78b8fe1870e0e745d70fc18dfcd:core/Makefile;l=5831-5893;drc=077490384423dff9eac954da5c001c6f0be3fa6e;bpv=0;bpt=0
 		builder.Command().Textf("cp").Input(fastbootInfo).Textf(" %s/META/fastboot-info.txt", targetFilesDir.String())
@@ -840,7 +843,11 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 				Textf("echo mkbootimg_args='--header_version %s' >> %s", a.getBootimgHeaderVersion(ctx, a.partitionProps.Boot_partition_name), miscInfo).
 				// TODO: Use boot's header version for recovery for now since cuttlefish does not set `BOARD_RECOVERY_MKBOOTIMG_ARGS`
 				Textf(" && echo recovery_mkbootimg_args='--header_version %s' >> %s", a.getBootimgHeaderVersion(ctx, a.partitionProps.Boot_partition_name), miscInfo)
+		} else if a.partitionProps.Vendor_boot_partition_name != nil {
+			builder.Command().
+				Textf("echo mkbootimg_args='--header_version %s' >> %s", a.getBootimgHeaderVersion(ctx, a.partitionProps.Vendor_boot_partition_name), miscInfo)
 		}
+
 		if a.partitionProps.Init_boot_partition_name != nil {
 			builder.Command().
 				Textf("echo mkbootimg_init_args='--header_version' %s >> %s", a.getBootimgHeaderVersion(ctx, a.partitionProps.Init_boot_partition_name), miscInfo)
@@ -857,7 +864,8 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 	if fsInfos["system"].ErofsCompressHints != nil {
 		builder.Command().Textf("echo erofs_default_compress_hints=%s >> %s", fsInfos["system"].ErofsCompressHints, miscInfo)
 	}
-	if releaseTools := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Releasetools_extension)); releaseTools != nil {
+	if proptools.String(a.deviceProps.Releasetools_extension) != "" {
+		releaseTools := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Releasetools_extension))
 		builder.Command().Textf("echo tool_extensions=%s >> %s", filepath.Dir(releaseTools.String()), miscInfo)
 	}
 	// ramdisk uses `compressed_cpio` fs_type
@@ -1319,7 +1327,7 @@ func (a *androidDevice) buildTrebleLabelingTest(ctx android.ModuleContext) andro
 			ImplicitOutput(testTimestamp)
 	} else {
 		precompiledSepolicyWithoutVendor := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Precompiled_sepolicy_without_vendor))
-		rule.Command().BuiltTool("treble_labeling_tests").
+		cmd := rule.Command().BuiltTool("treble_labeling_tests").
 			FlagWithInput("--platform_apks ", platformAppsList).
 			FlagWithInput("--vendor_apks ", vendorAppsList).
 			FlagWithInput("--precompiled_sepolicy_without_vendor ", precompiledSepolicyWithoutVendor).
@@ -1329,8 +1337,14 @@ func (a *androidDevice) buildTrebleLabelingTest(ctx android.ModuleContext) andro
 			FlagWithInputList("--vendor_file_contexts ", vendorFileContexts, " ").
 			FlagWithInput("--aapt2_path ", ctx.Config().HostToolPath(ctx, "aapt2")).
 			Implicits(platformApps).
-			Implicits(vendorApps).
-			FlagWithOutput("> ", testTimestamp)
+			Implicits(vendorApps)
+
+		trackingListFile := ctx.Config().SELinuxTrebleLabelingTrackingListFile(ctx)
+		if trackingListFile != nil {
+			cmd.FlagWithInput("--tracking_list_file ", trackingListFile)
+		}
+
+		cmd.FlagWithOutput("> ", testTimestamp)
 	}
 
 	rule.Build("treble_labeling_test", "SELinux Treble Labeling Test")

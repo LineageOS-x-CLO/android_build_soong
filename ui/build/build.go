@@ -314,10 +314,6 @@ func Build(ctx Context, config Config) {
 
 	what := evaluateWhatToRun(config, ctx.Verboseln)
 
-	if config.StartGoma() {
-		startGoma(ctx, config)
-	}
-
 	rbeCh := make(chan bool)
 	var rbePanic any
 	if config.StartRBE() {
@@ -335,7 +331,7 @@ func Build(ctx Context, config Config) {
 		close(rbeCh)
 	}
 
-	if config.RunCIPDProxyServer() {
+	if config.RunCIPDProxyServer() && shouldRunCIPDProxy(config) {
 		cipdProxy := startCIPDProxyServer(ctx, config)
 		defer cipdProxy.Stop()
 	}

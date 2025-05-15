@@ -129,7 +129,6 @@ const (
 	vendorVariant   = "android_vendor_arm64_armv8-a_shared"
 	productVariant  = "android_product_arm64_armv8-a_shared"
 	recoveryVariant = "android_recovery_arm64_armv8-a_shared"
-	ramdiskVariant  = "android_ramdisk_arm64_armv8-a_shared"
 )
 
 // Test that the PrepareForTestWithCcDefaultModules provides all the files that it uses by
@@ -1392,41 +1391,6 @@ func TestRecovery(t *testing.T) {
 	}
 }
 
-func TestRamdisk(t *testing.T) {
-	ctx := testCc(t, `
-		cc_library_shared {
-			name: "libramdisk",
-			ramdisk: true,
-		}
-		cc_library_shared {
-			name: "libramdisk32",
-			ramdisk: true,
-			compile_multilib:"32",
-		}
-		cc_library_shared {
-			name: "libHalInRamdisk",
-			ramdisk_available: true,
-			vendor: true,
-		}
-	`)
-
-	variants := ctx.ModuleVariantsForTests("libramdisk")
-	const arm64 = "android_ramdisk_arm64_armv8-a_shared"
-	if len(variants) != 1 || !android.InList(arm64, variants) {
-		t.Errorf("variants of libramdisk must be \"%s\" only, but was %#v", arm64, variants)
-	}
-
-	variants = ctx.ModuleVariantsForTests("libramdisk32")
-	if android.InList(arm64, variants) {
-		t.Errorf("multilib was set to 32 for libramdisk32, but its variants has %s.", arm64)
-	}
-
-	ramdiskModule := ctx.ModuleForTests("libHalInRamdisk", ramdiskVariant).Module().(*Module)
-	if !ramdiskModule.Platform() {
-		t.Errorf("ramdisk variant of libHalInRamdisk must not specific to device, soc, or product")
-	}
-}
-
 func TestDataLibsPrebuiltSharedTestLibrary(t *testing.T) {
 	t.Parallel()
 	bp := `
@@ -2660,6 +2624,11 @@ func TestIncludeDirsExporting(t *testing.T) {
 
 func TestIncludeDirectoryOrdering(t *testing.T) {
 	t.Parallel()
+
+	expectedPlatformFlags := []string{
+		"-nostdlibinc",
+	}
+
 	baseExpectedFlags := []string{
 		"${config.ArmThumbCflags}",
 		"${config.ArmCflags}",
@@ -2721,9 +2690,9 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 	cstd := []string{"-std=gnu23", "-std=conly"}
 	cppstd := []string{"-std=gnu++20", "-std=cpp", "-fno-rtti"}
 
-	lastNDKIncludes := []string{
-		"out/soong/ndk/sysroot/usr/include",
-		"out/soong/ndk/sysroot/usr/include/arm-linux-androideabi",
+	lastNDKFlags := []string{
+		"--sysroot",
+		"out/soong/ndk/sysroot",
 	}
 
 	lastPlatformIncludes := []string{
@@ -2747,10 +2716,11 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 				expectedNDKSTLIncludes,
 				cflags,
 				cstd,
-				lastNDKIncludes,
+				lastNDKFlags,
 				[]string{"${config.NoOverrideGlobalCflags}", "${config.NoOverrideExternalGlobalCflags}"},
 			),
 			expectedPlatform: slices.Concat(
+				expectedPlatformFlags,
 				baseExpectedFlags,
 				expectedTargetPlatformFlags,
 				conly,
@@ -2772,10 +2742,11 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 				expectedNDKSTLIncludes,
 				cflags,
 				cppstd,
-				lastNDKIncludes,
+				lastNDKFlags,
 				[]string{"${config.NoOverrideGlobalCflags}", "${config.NoOverrideExternalGlobalCflags}"},
 			),
 			expectedPlatform: slices.Concat(
+				expectedPlatformFlags,
 				baseExpectedFlags,
 				expectedTargetPlatformFlags,
 				cppOnly,
@@ -2795,9 +2766,10 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 				[]string{"${config.CommonGlobalAsflags}"},
 				expectedIncludes,
 				expectedNDKSTLIncludes,
-				lastNDKIncludes,
+				lastNDKFlags,
 			),
 			expectedPlatform: slices.Concat(
+				expectedPlatformFlags,
 				baseExpectedFlags,
 				expectedTargetPlatformFlags,
 				[]string{"${config.CommonGlobalAsflags}"},
@@ -2905,18 +2877,18 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 				).RunTest(t)
 				cflags := ctx.ModuleForTests(t, "libfoo", variant).Output("obj/external/foo/foo.o").Args["cFlags"]
 
-			var includes []string
-			flags := strings.Split(cflags, " ")
-			for _, flag := range flags {
-				if strings.HasPrefix(flag, "-I") {
-					includes = append(includes, strings.TrimPrefix(flag, "-I"))
-				} else if flag == "-isystem" {
-					// skip isystem, include next
-				} else if flag == "${config.SDClangFlags}" {
-					// skip config.SDClangFlags when sdclang is set
-				} else if len(flag) > 0 {
-					includes = append(includes, flag)
+				var includes []string
+				flags := strings.Split(cflags, " ")
+				for _, flag := range flags {
+					if strings.HasPrefix(flag, "-I") {
+						includes = append(includes, strings.TrimPrefix(flag, "-I"))
+					} else if flag == "-isystem" {
+						// skip isystem, include next
+					} else if len(flag) > 0 {
+						includes = append(includes, flag)
+					}
 				}
+
 				android.AssertArrayString(t, "includes", expected, includes)
 			}
 
@@ -2961,6 +2933,57 @@ func TestAddnoOverride64GlobalCflags(t *testing.T) {
 
 	if !strings.Contains(cFlags, "${config.NoOverride64GlobalCflags}") {
 		t.Errorf("expected %q in cflags, got %q", "${config.NoOverride64GlobalCflags}", cFlags)
+	}
+}
+
+func TestCcBuildBrokenClangProperty(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                     string
+		clang                    bool
+		BuildBrokenClangProperty bool
+		err                      string
+	}{
+		{
+			name:  "error when clang is set to false",
+			clang: false,
+			err:   "is no longer supported",
+		},
+		{
+			name:  "error when clang is set to true",
+			clang: true,
+			err:   "property is deprecated, see Changes.md",
+		},
+		{
+			name:                     "no error when BuildBrokenClangProperty is explicitly set to true",
+			clang:                    true,
+			BuildBrokenClangProperty: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bp := fmt.Sprintf(`
+			cc_library {
+			   name: "foo",
+			   clang: %t,
+			}`, test.clang)
+
+			if test.err == "" {
+				android.GroupFixturePreparers(
+					prepareForCcTest,
+					android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
+						if test.BuildBrokenClangProperty {
+							variables.BuildBrokenClangProperty = test.BuildBrokenClangProperty
+						}
+					}),
+				).RunTestWithBp(t, bp)
+			} else {
+				prepareForCcTest.
+					ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(test.err)).
+					RunTestWithBp(t, bp)
+			}
+		})
 	}
 }
 

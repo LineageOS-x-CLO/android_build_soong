@@ -225,15 +225,9 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 }
 
 func (a *apexBundle) writeRequiredModules(w io.Writer, moduleNames []string) {
-	var required []string
-	var targetRequired []string
-	var hostRequired []string
-	required = append(required, a.required...)
-	targetRequired = append(targetRequired, a.TargetRequiredModuleNames()...)
-	hostRequired = append(hostRequired, a.HostRequiredModuleNames()...)
-	android.AndroidMkEmitAssignList(w, "LOCAL_REQUIRED_MODULES", moduleNames, a.makeModulesToInstall, required)
-	android.AndroidMkEmitAssignList(w, "LOCAL_TARGET_REQUIRED_MODULES", targetRequired)
-	android.AndroidMkEmitAssignList(w, "LOCAL_HOST_REQUIRED_MODULES", hostRequired)
+	android.AndroidMkEmitAssignList(w, "LOCAL_REQUIRED_MODULES", moduleNames, a.makeModulesToInstall, a.required)
+	android.AndroidMkEmitAssignList(w, "LOCAL_TARGET_REQUIRED_MODULES", a.targetRequired)
+	android.AndroidMkEmitAssignList(w, "LOCAL_HOST_REQUIRED_MODULES", a.hostRequired)
 }
 
 func (a *apexBundle) androidMkForType() android.AndroidMkData {
@@ -303,6 +297,9 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 
 			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).SYMBOLIC_OUTPUT_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).SYMBOLIC_OUTPUT_PATH))\n", strings.Join(moduleNames, " "))
 			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).ELF_SYMBOL_MAPPING_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).ELF_SYMBOL_MAPPING_PATH))\n", strings.Join(moduleNames, " "))
+
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).JACOCO_REPORT_SOONG_ZIP_ARGUMENTS := $(foreach m,%s,$(ALL_MODULES.$(m).JACOCO_REPORT_SOONG_ZIP_ARGUMENTS))\n", strings.Join(moduleNames, " "))
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).JACOCO_REPORT_FILES := $(foreach m,%s,$(ALL_MODULES.$(m).JACOCO_REPORT_FILES))\n", strings.Join(moduleNames, " "))
 
 			distCoverageFiles(w, "ndk_apis_usedby_apex", a.nativeApisUsedByModuleFile.String())
 			distCoverageFiles(w, "ndk_apis_backedby_apex", a.nativeApisBackedByModuleFile.String())

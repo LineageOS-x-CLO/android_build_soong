@@ -43,7 +43,7 @@ var (
 	pctx = android.NewPackageContext("android/soong/cc")
 
 	// Rule to invoke gcc with given command, flags, and dependencies. Outputs a .d depfile.
-	cc = pctx.AndroidRemoteStaticRule("cc", android.RemoteRuleSupports{Goma: true, RBE: true},
+	cc = pctx.AndroidRemoteStaticRule("cc", android.RemoteRuleSupports{RBE: true},
 		blueprint.RuleParams{
 			Depfile:     "${out}.d",
 			Deps:        blueprint.DepsGCC,
@@ -304,8 +304,10 @@ var (
 	sAbiDiff = pctx.RuleFunc("sAbiDiff",
 		func(ctx android.PackageRuleContext) blueprint.RuleParams {
 			commandStr := "($sAbiDiffer ${extraFlags} -lib ${libName} -arch ${arch} -o ${out} -new ${in} -old ${referenceDump})"
-			commandStr += "|| (echo '${errorMessage}'"
-			commandStr += " && (mkdir -p $$DIST_DIR/abidiffs && cp ${out} $$DIST_DIR/abidiffs/)"
+			commandStr += "|| (echo 'First 50 lines of abidiff:'"
+			commandStr += " && head -n 50 ${out}"
+			commandStr += " && echo '${errorMessage}'"
+			commandStr += " && (test -n \"$$DIST_DIR\" && mkdir -p $$DIST_DIR/abidiffs && cp ${out} ${in} $$DIST_DIR/abidiffs/)"
 			commandStr += " && exit 1)"
 			return blueprint.RuleParams{
 				Command:     commandStr,

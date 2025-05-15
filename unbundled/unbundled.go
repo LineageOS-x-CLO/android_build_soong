@@ -25,12 +25,16 @@ import (
 )
 
 func init() {
-	android.InitRegistrationContext.RegisterModuleType("unbundled_builder", unbundledBuilderFactory)
+	registerUnbundledBuilder(android.InitRegistrationContext)
+}
+
+func registerUnbundledBuilder(ctx android.RegistrationContext) {
+	ctx.RegisterModuleType("unbundled_builder", unbundledBuilderFactory)
 }
 
 func unbundledBuilderFactory() android.Module {
 	m := &unbundledBuilder{}
-	android.InitAndroidArchModule(m, android.DeviceSupported, android.MultilibFirst)
+	android.InitAndroidModule(m)
 	return m
 }
 
@@ -49,6 +53,10 @@ func (unbundledDepTagType) ExcludeFromVisibilityEnforcement() {}
 
 var _ android.ExcludeFromVisibilityEnforcementTag = unbundledDepTagType{}
 
+func (unbundledDepTagType) UsesUnbundledVariant() {}
+
+var _ android.UsesUnbundledVariantDepTag = unbundledDepTagType{}
+
 var unbundledDepTag = unbundledDepTagType{}
 
 // We need to implement IsNativeCoverageNeeded so that in coverage builds we depend on the coverage
@@ -65,6 +73,11 @@ func (*unbundledBuilder) DepsMutator(ctx android.BottomUpMutatorContext) {
 	slices.Sort(apps)
 
 	for _, app := range apps {
+		// Add a dependency on the app so we can get its providers later.
+		// unbundledDepTag implements android.UsesUnbundledVariantDepTag, which causes the
+		// os, arch, and sdk mutators to pick the most appropriate variants to use for unbundled
+		// builds. unbundledBuilder itself also implements cc.UseCoverage, which forces coverage
+		// variants of deps.
 		ctx.AddDependency(ctx.Module(), unbundledDepTag, app)
 	}
 }

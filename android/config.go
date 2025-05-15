@@ -297,6 +297,10 @@ func (c Config) ReleaseUseSparseEncoding() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_SPARSE_ENCODING")
 }
 
+func (c Config) ReleaseUseUncompressedFonts() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_UNCOMPRESSED_FONTS")
+}
+
 func (c Config) ReleaseAconfigStorageVersion() string {
 	if val, exists := c.GetBuildFlag("RELEASE_ACONFIG_STORAGE_VERSION"); exists {
 		return val
@@ -433,6 +437,9 @@ type partialCompileFlags struct {
 	// Whether to enable incremental java compilation.
 	Enable_inc_javac bool
 
+	// Whether to enable incremental d8
+	Enable_inc_d8 bool
+
 	// Add others as needed.
 }
 
@@ -443,6 +450,8 @@ var defaultPartialCompileFlags = partialCompileFlags{}
 var enabledPartialCompileFlags = partialCompileFlags{
 	Use_d8:                  true,
 	Disable_stub_validation: true,
+	Enable_inc_javac:        false,
+	Enable_inc_d8:           false,
 }
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=all`.
@@ -450,6 +459,7 @@ var allPartialCompileFlags = partialCompileFlags{
 	Use_d8:                  true,
 	Disable_stub_validation: true,
 	Enable_inc_javac:        true,
+	Enable_inc_d8:           true,
 }
 
 type deviceConfig struct {
@@ -533,6 +543,11 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			ret = allPartialCompileFlags
 
 		// Individual flags.
+		case "inc_d8", "enable_inc_d8":
+			ret.Enable_inc_d8 = makeVal(state, !defaultPartialCompileFlags.Enable_inc_d8)
+		case "disable_inc_d8":
+			ret.Enable_inc_d8 = !makeVal(state, defaultPartialCompileFlags.Enable_inc_d8)
+
 		case "inc_javac", "enable_inc_javac":
 			ret.Enable_inc_javac = makeVal(state, !defaultPartialCompileFlags.Enable_inc_javac)
 		case "disable_inc_javac":
@@ -1465,10 +1480,6 @@ func (c *config) Android64() bool {
 	return false
 }
 
-func (c *config) UseGoma() bool {
-	return Bool(c.productVariables.UseGoma)
-}
-
 func (c *config) UseABFS() bool {
 	return Bool(c.productVariables.UseABFS)
 }
@@ -1490,7 +1501,7 @@ func (c *config) UseRBED8() bool {
 }
 
 func (c *config) UseRemoteBuild() bool {
-	return c.UseGoma() || c.UseRBE()
+	return c.UseRBE()
 }
 
 func (c *config) RunErrorProne() bool {
@@ -2581,4 +2592,13 @@ func (c *config) OdmManifestFiles() []string {
 
 func (c *config) EnforceSELinuxTrebleLabeling() bool {
 	return Bool(c.productVariables.EnforceSELinuxTrebleLabeling)
+}
+
+func (c *config) SELinuxTrebleLabelingTrackingListFile(ctx PathContext) Path {
+	path := String(c.productVariables.SELinuxTrebleLabelingTrackingListFile)
+	if path == "" {
+		return nil
+	}
+
+	return PathForSource(ctx, path)
 }
