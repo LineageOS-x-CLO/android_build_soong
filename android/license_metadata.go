@@ -23,6 +23,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 var (
 	_ = pctx.HostBinToolVariable("licenseMetadataCmd", "build_license_metadata")
 
@@ -196,6 +198,7 @@ func isContainerFromFileExtensions(installPaths InstallPaths, builtPaths Paths) 
 var LicenseMetadataProvider = blueprint.NewProvider[*LicenseMetadataInfo]()
 
 // LicenseMetadataInfo stores the license metadata path for a module.
+// @auto-generate: gob
 type LicenseMetadataInfo struct {
 	LicenseMetadataPath   Path
 	LicenseMetadataDepSet depset.DepSet[Path]
