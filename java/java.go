@@ -38,6 +38,8 @@ import (
 	"android/soong/tradefed"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 func init() {
 	registerJavaBuildComponents(android.InitRegistrationContext)
 
@@ -234,6 +236,7 @@ var (
 	}, "jar_name", "partition", "main_class")
 )
 
+// @auto-generate: gob
 type ProguardSpecInfo struct {
 	// If true, proguard flags files will be exported to reverse dependencies across libs edges
 	// If false, proguard flags files will only be exported to reverse dependencies across
@@ -351,9 +354,9 @@ type JavaInfo struct {
 	// requiring disbling turbine for any modules that depend on it.
 	ExportedPluginDisableTurbine bool
 
-	// JacocoReportClassesFile is the path to a jar containing uninstrumented classes that will be
+	// JacocoInfo contains the path to a jar containing uninstrumented classes that will be
 	// instrumented by jacoco.
-	JacocoReportClassesFile android.Path
+	JacocoInfo JacocoInfo
 
 	// StubsLinkType provides information about whether the provided jars are stub jars or
 	// implementation jars. If the provider is set by java_sdk_library, the link type is "unknown"
@@ -2292,11 +2295,11 @@ func (j *Binary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		j.androidMkNamesOfJniLibs = append(j.androidMkNamesOfJniLibs, commonInfo.BaseModuleName+":"+commonInfo.Target.Arch.ArchType.Bitness())
 	})
 	// Check that native libraries are not listed in `required`. Prompt users to use `jni_libs` instead.
-	for _, dep := range android.CollectRequiredDeps(ctx).AllRequiredDeps() {
+	ctx.VisitDirectDepsProxyWithTag(android.RequiredDepTag, func(dep android.ModuleProxy) {
 		if _, hasSharedLibraryInfo := android.OtherModuleProvider(ctx, dep, cc.SharedLibraryInfoProvider); hasSharedLibraryInfo {
 			ctx.ModuleErrorf("cc_library %s is no longer supported in `required` of java_binary modules. Please use jni_libs instead.", dep.Name())
 		}
-	}
+	})
 
 	// Compile the jar
 	if j.binaryProperties.Main_class != nil {
@@ -3073,10 +3076,6 @@ func (j *Import) CreatedByJavaSdkLibraryName() *string {
 	return j.properties.Created_by_java_sdk_library_name
 }
 
-func (a *Import) JacocoReportClassesFile() android.Path {
-	return nil
-}
-
 func (j *Import) DepsMutator(ctx android.BottomUpMutatorContext) {
 	ctx.AddVariationDependencies(nil, libTag, j.properties.Libs...)
 	ctx.AddVariationDependencies(nil, staticLibTag, j.properties.Static_libs.GetOrDefault(ctx, nil)...)
@@ -3551,10 +3550,6 @@ func (j *DexImport) Name() string {
 
 func (j *DexImport) Stem() string {
 	return proptools.StringDefault(j.properties.Stem, j.ModuleBase.Name())
-}
-
-func (a *DexImport) JacocoReportClassesFile() android.Path {
-	return nil
 }
 
 func (j *DexImport) IsInstallable() bool {

@@ -34,6 +34,8 @@ import (
 	"android/soong/remoteexec"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 const (
 	objectExtension        = ".o"
 	staticLibraryExtension = ".a"
@@ -452,6 +454,7 @@ type StripFlags struct {
 }
 
 // Objects is a collection of file paths corresponding to outputs for C++ related build statements.
+// @auto-generate: gob
 type Objects struct {
 	objFiles      android.Paths
 	tidyFiles     android.Paths
@@ -480,6 +483,17 @@ func (a Objects) Append(b Objects) Objects {
 		coverageFiles: append(a.coverageFiles, b.coverageFiles...),
 		sAbiDumpFiles: append(a.sAbiDumpFiles, b.sAbiDumpFiles...),
 		kytheFiles:    append(a.kytheFiles, b.kytheFiles...),
+	}
+}
+
+func (a Objects) Dedup() Objects {
+	return Objects{
+		objFiles:      android.FirstUniquePaths(a.objFiles),
+		tidyFiles:     android.FirstUniquePaths(a.tidyFiles),
+		tidyDepFiles:  android.FirstUniquePaths(a.tidyDepFiles),
+		coverageFiles: android.FirstUniquePaths(a.coverageFiles),
+		sAbiDumpFiles: android.FirstUniquePaths(a.sAbiDumpFiles),
+		kytheFiles:    android.FirstUniquePaths(a.kytheFiles),
 	}
 }
 

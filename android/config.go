@@ -1158,7 +1158,7 @@ func (c *config) PlatformVersionName() string {
 }
 
 func (c *config) PlatformSdkVersion() ApiLevel {
-	return uncheckedFinalApiLevel(*c.productVariables.Platform_sdk_version)
+	return UncheckedFinalApiLevel(*c.productVariables.Platform_sdk_version)
 }
 
 func (c *config) PlatformSdkVersionFull() string {
@@ -1214,13 +1214,13 @@ func (c *config) PlatformVersionKnownCodenames() string {
 }
 
 func (c *config) MinSupportedSdkVersion() ApiLevel {
-	return uncheckedFinalApiLevel(21)
+	return UncheckedFinalApiLevel(21)
 }
 
 func (c *config) FinalApiLevels() []ApiLevel {
 	var levels []ApiLevel
 	for i := 1; i <= c.PlatformSdkVersion().FinalOrFutureInt(); i++ {
-		levels = append(levels, uncheckedFinalApiLevel(i))
+		levels = append(levels, UncheckedFinalApiLevel(i))
 	}
 	return levels
 }
@@ -2254,7 +2254,7 @@ func (c *deviceConfig) ShippingApiLevel() ApiLevel {
 		return NoneApiLevel
 	}
 	apiLevel, _ := strconv.Atoi(*c.config.productVariables.Shipping_api_level)
-	return uncheckedFinalApiLevel(apiLevel)
+	return UncheckedFinalApiLevel(apiLevel)
 }
 
 func (c *deviceConfig) BuildBrokenPluginValidation() []string {
@@ -2327,10 +2327,6 @@ func (c *deviceConfig) GenerateAidlNdkPlatformBackend() bool {
 
 func (c *deviceConfig) AconfigContainerValidation() string {
 	return c.config.productVariables.AconfigContainerValidation
-}
-
-func (c *deviceConfig) ProductEnableLogcatPersistence() bool {
-	return c.config.productVariables.ProductEnableLogcatPersistence
 }
 
 func (c *config) IgnorePrefer32OnDevice() bool {

@@ -79,7 +79,7 @@ type AppInfo struct {
 	Privileged                    bool
 	OutputFile                    android.Path
 	InstallApkName                string
-	JacocoReportClassesFile       android.Path
+	JacocoInfo                    JacocoInfo
 	Certificate                   Certificate
 	PrivAppAllowlist              android.OptionalPath
 	OverriddenManifestPackageName *string
@@ -974,6 +974,8 @@ func (a *AndroidApp) createPrivappAllowlist(ctx android.ModuleContext) android.P
 }
 
 func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
+	a.jacocoInfo.Class = "APPS"
+
 	var apkDeps android.Paths
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
@@ -2325,7 +2327,7 @@ type androidApp interface {
 	Privileged() bool
 	InstallApkName() string
 	OutputFile() android.Path
-	JacocoReportClassesFile() android.Path
+	JacocoInfo() JacocoInfo
 	Certificate() Certificate
 	BaseModuleName() string
 	PrivAppAllowlist() android.OptionalPath
@@ -2339,7 +2341,7 @@ func setCommonAppInfo(appInfo *AppInfo, m androidApp) {
 	appInfo.Privileged = m.Privileged()
 	appInfo.OutputFile = m.OutputFile()
 	appInfo.InstallApkName = m.InstallApkName()
-	appInfo.JacocoReportClassesFile = m.JacocoReportClassesFile()
+	appInfo.JacocoInfo = m.JacocoInfo()
 	appInfo.Certificate = m.Certificate()
 	appInfo.PrivAppAllowlist = m.PrivAppAllowlist()
 }

@@ -23,6 +23,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // minApiLevelForSdkSnapshot provides access to the min_sdk_version for MinApiLevelForSdkSnapshot
 type minApiLevelForSdkSnapshot interface {
 	MinSdkVersion(ctx EarlyModuleContext) ApiLevel
@@ -38,7 +40,7 @@ func MinApiLevelForSdkSnapshot(commonInfo *CommonModuleInfo) ApiLevel {
 	}
 	if minApiLevel == NoneApiLevel {
 		// The default min API level is 1.
-		minApiLevel = uncheckedFinalApiLevel(1)
+		minApiLevel = UncheckedFinalApiLevel(1)
 	}
 	return minApiLevel
 }
@@ -611,6 +613,7 @@ type SdkDependencyContext interface {
 
 // SdkMemberTypeBase is the base type for SdkMemberType implementations and must be embedded in any
 // struct that implements SdkMemberType.
+// @auto-generate: gob
 type SdkMemberTypeBase struct {
 	PropertyName string
 

@@ -44,6 +44,7 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 			`${config.SoongZipCmd} -jar -o $headerJar -C $headerClassesDir -D $headerClassesDir -write_if_changed && ` +
 			`rm -rf "$srcJarDir" "$classesDir" "$headerClassesDir"`,
 		CommandDeps: []string{
+			"${config.FindInputDeltaCmd}",
 			"${config.KotlincCmd}",
 			"${config.KotlinCompilerJar}",
 			"${config.KotlinPreloaderJar}",
