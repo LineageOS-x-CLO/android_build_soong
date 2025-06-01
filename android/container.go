@@ -22,6 +22,8 @@ import (
 	"github.com/google/blueprint"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // ----------------------------------------------------------------------------
 // Start of the definitions of exception functions and the lookup table.
 //
@@ -186,6 +188,7 @@ var ctsContainerBoundaryFunc containerBoundaryFunc = func(mctx ModuleContext) bo
 	return false
 }
 
+// @auto-generate: gob
 type unstableInfo struct {
 	// Determines if the module contains the private APIs of the platform.
 	ContainsPlatformPrivateApis bool
