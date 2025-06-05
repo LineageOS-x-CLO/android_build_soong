@@ -3432,6 +3432,16 @@ func (j *Import) addKSnapshot(ctx android.ModuleContext, jarFile android.Path) {
 	}
 }
 
+func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) {
+	if !Bool(j.properties.Installable) {
+		return
+	}
+	if _, exists := j.kSnapshotFiles[jarFile.String()]; !exists {
+		snapshot := SnapshotJarForKotlin(ctx, jarFile.(android.WritablePath))
+		j.kSnapshotFiles[jarFile.String()] = snapshot
+	}
+}
+
 func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) android.Path {
 	if !Bool(j.properties.Installable) {
 		return nil

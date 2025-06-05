@@ -79,7 +79,16 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
 	"newStateFile", "priorStateFile", "sourceDeltaFile", "name")
 
-// TODO: does incremental work with RBE?
+var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
+	blueprint.RuleParams{
+		Command: `${config.KotlinJarSnapshotterBinary} -jar="$in"`,
+		CommandDeps: []string{
+			"${config.KotlinJarSnapshotterBinary}",
+		},
+		Restat: true,
+	},
+)
+
 var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
 		Command: // Incremental
@@ -137,16 +146,6 @@ var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", andro
 	"kotlincFlags", "composeEmbeddablePluginFlag", "composePluginFlag", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "incrementalRootDir",
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
 	"name", "outputDir", "buildDir", "workDir", "newStateFile", "priorStateFile", "sourceDeltaFile")
-
-var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
-	blueprint.RuleParams{
-		Command: `${config.KotlinJarSnapshotterBinary} -jar="$in"`,
-		CommandDeps: []string{
-			"${config.KotlinJarSnapshotterBinary}",
-		},
-		Restat: true,
-	},
-)
 
 var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 	blueprint.RuleParams{
@@ -245,6 +244,38 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 	classpathRspFile := android.PathForModuleOut(ctx, "kotlinc", "classpath.rsp")
 	android.WriteFileRule(ctx, classpathRspFile, strings.Join(flags.kotlincClasspath.Strings(), " "))
 	deps = append(deps, classpathRspFile)
+
+	if incremental {
+
+		var snapshotDeps android.Paths
+		// Check that we have a snapshot.bin for each jar, and include them as needed.
+		for _, dep := range deps.FilterByExt(".jar") {
+			if snf, exists := flags.kSnapshotFiles[dep.String()]; exists {
+				snapshotDeps = append(snapshotDeps, snf)
+			} else {
+				if _, ok := dep.(android.WritablePath); !ok {
+					// Some prebuilts fall through into here. This means updates to those
+					// won't cause proper kotlin recompilation. This is fixable by `m clean`
+					// The prebuilts that cause this are few in number, and updating them
+					// generally means _everything_ needs to be rebuilt anyways.
+					// TODO: figure out where to snapshot prebuilts.
+					//fmt.Printf("Not writable: %s\n", dep.String())
+				} else if strings.Contains(dep.String(), "/gen/") {
+					//fmt.Printf("No snapshots for java_genrule yet: %s\n", dep.String())
+				} else {
+					// This _should_ cause an error, since there is no rule to generate the snapshot
+					// file needed. If there was, we wouldn't be in this else block.
+					snapshotName := jarNameToKotlinSnapshotName(ctx, dep.(android.WritablePath))
+					//fmt.Printf("Wanted but not found: %s\n", dep.String())
+					ctx.ModuleErrorf("\nKotlin Snapshot for jar missing: %s\nWanted: %s", dep.String(), snapshotName)
+					// Track these deps to ensure that ninja will also fail.
+					snapshotDeps = append(snapshotDeps, snapshotName)
+				}
+			}
+		}
+
+		deps = append(deps, snapshotDeps...)
+	}
 
 	rule := kotlinc
 	description := "kotlinc"
