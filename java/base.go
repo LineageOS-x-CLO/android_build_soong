@@ -1143,14 +1143,6 @@ func (j *Module) collectJavacFlags(
 	return flags
 }
 
-func (j *Module) AddJSONData(d *map[string]interface{}) {
-	(&j.ModuleBase).AddJSONData(d)
-	(*d)["Java"] = map[string]interface{}{
-		"SourceExtensions": j.sourceExtensions,
-	}
-
-}
-
 func (j *Module) addGeneratedSrcJars(path android.Path) {
 	j.properties.Generated_srcjars = append(j.properties.Generated_srcjars, path)
 }
