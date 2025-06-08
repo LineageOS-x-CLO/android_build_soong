@@ -1162,7 +1162,7 @@ func (c *configImpl) RealDistDir() string {
 }
 
 func (c *configImpl) NinjaArgs() []string {
-	if c.skipKati {
+	if c.skipConfig {
 		return append(c.arguments, c.ninjaArgs...)
 	}
 	return c.ninjaArgs
