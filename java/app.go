@@ -91,6 +91,8 @@ type AppInfo struct {
 
 var AppInfoProvider = blueprint.NewProvider[*AppInfo]()
 
+type AppInfos []AppInfo
+
 // AndroidManifest.xml merging
 // package splits
 
@@ -424,6 +426,11 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 	}
 	setCommonAppInfo(appInfo, a)
 	android.SetProvider(ctx, AppInfoProvider, appInfo)
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: appInfo.Certificate,
+		Name:        appInfo.InstallApkName + ".apk",
+		Test:        true,
+	})
 
 	moduleInfoJSON := ctx.ModuleInfoJSON()
 	moduleInfoJSON.Tags = append(moduleInfoJSON.Tags, "tests")
@@ -495,6 +502,10 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	setCommonAppInfo(appInfo, a)
 	android.SetProvider(ctx, AppInfoProvider, appInfo)
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: appInfo.Certificate,
+		Name:        appInfo.InstallApkName + ".apk",
+	})
 
 	a.requiredModuleNames = a.getRequiredModuleNames(ctx)
 
@@ -982,6 +993,9 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	if !apexInfo.IsForPlatform() {
 		a.hideApexVariantFromMake = true
 	}
+	android.SetProvider(ctx, android.HideApexVariantFromMakeProvider, android.HideApexVariantFromMakeInfo{
+		HideApexVariantFromMake: a.hideApexVariantFromMake,
+	})
 
 	a.aapt.useEmbeddedNativeLibs = a.useEmbeddedNativeLibs(ctx)
 	a.aapt.useEmbeddedDex = Bool(a.appProperties.Use_embedded_dex)
@@ -1748,6 +1762,12 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	a.generateAndroidBuildActions(ctx)
 
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: a.Certificate(),
+		Name:        a.InstallApkName() + ".apk",
+		Test:        true,
+	})
+
 	for _, c := range a.testProperties.Test_options.Tradefed_options {
 		configs = append(configs, c)
 	}
@@ -2350,10 +2370,6 @@ func setCommonAppInfo(appInfo *AppInfo, m androidApp) {
 	appInfo.Certificate = m.Certificate()
 	appInfo.PrivAppAllowlist = m.PrivAppAllowlist()
 }
-
-type AppInfos []AppInfo
-
-var AppInfosProvider = blueprint.NewProvider[AppInfos]()
 
 type BundleInfo struct {
 	Bundle android.Path
