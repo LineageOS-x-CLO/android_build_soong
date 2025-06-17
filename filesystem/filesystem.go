@@ -104,6 +104,9 @@ type filesystem struct {
 	// Keeps the entries installed from this filesystem
 	entries []string
 
+	// List of subpartitions installed in this filesystem
+	subPartitions []string
+
 	filesystemBuilder filesystemBuilder
 
 	selinuxFc android.Path
@@ -349,6 +352,13 @@ var dependencyTagWithVisibilityEnforcementBypass = depTagWithVisibilityEnforceme
 // contains the description of dev nodes added to the CPIO archive for the ramdisk partition.
 const ramdiskDevNodesDescription = "ramdisk_node_list"
 
+func (f *filesystem) UseGenericConfig() bool {
+	if proptools.Bool(f.properties.Is_auto_generated) {
+		return false
+	}
+	return f.PartitionType() == "system"
+}
+
 func (f *filesystem) setDevNodesDescriptionProp() {
 	if proptools.String(f.properties.Partition_name) == "ramdisk" {
 		f.properties.Dev_nodes_description_file = proptools.StringPtr(":" + ramdiskDevNodesDescription)
@@ -579,6 +589,9 @@ func (f *filesystem) ModifyPackagingSpec(ps *android.PackagingSpec) {
 		subPartition := strings.TrimPrefix(ps.Partition(), prefix)
 		ps.SetPartition(f.PartitionType())
 		ps.SetRelPathInPackage(filepath.Join(subPartition, ps.RelPathInPackage()))
+		if !android.InList(subPartition, f.subPartitions) {
+			f.subPartitions = append(f.subPartitions, subPartition)
+		}
 	}
 }
 
@@ -647,6 +660,7 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	platformGeneratedFiles := []string{}
 	f.entries = f.copyPackagingSpecs(ctx, builder, specs, rootDir, rebasedDir)
+	f.verifyGenericConfig(ctx)
 	f.buildNonDepsFiles(ctx, builder, rootDir, rebasedDir, &fullInstallPaths, &platformGeneratedFiles)
 	f.buildFsverityMetadataFiles(ctx, builder, specs, rootDir, rebasedDir, &fullInstallPaths, &platformGeneratedFiles)
 	f.buildEventLogtagsFile(ctx, builder, rebasedDir, &fullInstallPaths, &platformGeneratedFiles)
@@ -1035,6 +1049,92 @@ func (f *filesystem) copyPackagingSpecs(ctx android.ModuleContext, builder *andr
 
 func (f *filesystem) rootDirString() string {
 	return f.partitionName()
+}
+
+func (f *filesystem) verifyGenericConfig(ctx android.ModuleContext) {
+	// This image is not bundled with the platform.
+	if ctx.Config().UnbundledBuild() {
+		return
+	}
+
+	// Verify that modules installed in the system partition use the generic configiguration. This
+	// also checks there are any unexpected dependencies from system modules to modules installed in
+	// non-system partitions.
+	if !f.UseGenericConfig() || f.partitionName() != "system" || proptools.Bool(f.properties.Is_auto_generated) {
+		return
+	}
+
+	allowedModules := []string{
+		// build_flag_system collects information from the metadata for each product.
+		"build_flag_system",
+		// microdroid_ramdisk is an android_filesystem included in the system image.
+		"microdroid_ramdisk",
+		// notice_xml_system collects information from the metadata for each product.
+		"notice_xml_system",
+		// product_config collects all product variables that are required in every partition.
+		"product_config",
+	}
+
+	nonGenericModules := make(map[string]string)
+	visitedModules := make(map[string]bool)
+
+	for _, m := range allowedModules {
+		visitedModules[m] = true
+	}
+
+	ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
+		moduleName := child.Name()
+		if visitedModules[moduleName] {
+			return false
+		}
+		visitedModules[moduleName] = true
+
+		moduleInfo := android.OtherModulePointerProviderOrDefault(ctx, child, android.CommonModuleInfoProvider)
+		if !moduleInfo.Enabled || moduleInfo.Target.Os.Class == android.Host {
+			return false
+		}
+
+		// Skip optional library deps which are mostly from a different partition.
+		// Java also can use classpath of libraries in a different partition.
+		depTag := ctx.OtherModuleDependencyTag(child)
+		if java.IsOptionalUsesLibraryDepTag(depTag) || java.IsLibDepTag(depTag) {
+			return false
+		}
+
+		installedInSubpartition := func() bool {
+			if moduleInfo.SystemExtSpecific {
+				// A system image must be independent on any other partitions. But partners modify
+				// system modules and implement the extended system features in the system_ext
+				// partition. This is allowed because it aligns with our definition of the
+				// system_ext partition.
+				return true
+			} else if moduleInfo.ProductSpecific {
+				return android.InList("product", f.subPartitions)
+			} else if moduleInfo.Vendor || moduleInfo.Proprietary || moduleInfo.SocSpecific {
+				return android.InList("vendor", f.subPartitions)
+			}
+			return false
+		}
+
+		// Modules requiring non-generic configuration must not be included in the system image.
+		// However, some targets install system_ext or product modules in the system partition.
+		// Allow those subpartition modules to use non-generic configuration.
+		if !moduleInfo.UseGenericConfig {
+			if !installedInSubpartition() {
+				nonGenericModules[moduleName] = parent.Name()
+			}
+			return false
+		}
+		return true
+	})
+
+	if len(nonGenericModules) > 0 {
+		errStr := "\n"
+		for _, m := range android.SortedKeys(nonGenericModules) {
+			errStr += fmt.Sprintf("\t%q from %q,\n", m, nonGenericModules[m])
+		}
+		ctx.ModuleErrorf("includes non-generic modules:%s", errStr)
+	}
 }
 
 type buildImageParams struct {

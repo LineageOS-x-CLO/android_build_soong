@@ -754,21 +754,24 @@ type PartitionVariables struct {
 
 	ProductCopyFiles []string `json:",omitempty"`
 
-	BuildingSystemDlkmImage   bool     `json:",omitempty"`
-	SystemKernelModules       []string `json:",omitempty"`
-	SystemKernelBlocklistFile string   `json:",omitempty"`
-	SystemKernelLoadModules   []string `json:",omitempty"`
-	BuildingVendorDlkmImage   bool     `json:",omitempty"`
-	VendorKernelModules       []string `json:",omitempty"`
-	VendorKernelBlocklistFile string   `json:",omitempty"`
-	BuildingOdmDlkmImage      bool     `json:",omitempty"`
-	OdmKernelModules          []string `json:",omitempty"`
-	OdmKernelBlocklistFile    string   `json:",omitempty"`
+	BuildingSystemDlkmImage             bool     `json:",omitempty"`
+	SystemKernelModules                 []string `json:",omitempty"`
+	SystemKernelBlocklistFile           string   `json:",omitempty"`
+	SystemKernelLoadModules             []string `json:",omitempty"`
+	BuildingVendorDlkmImage             bool     `json:",omitempty"`
+	VendorKernelModules                 []string `json:",omitempty"`
+	VendorKernelBlocklistFile           string   `json:",omitempty"`
+	VendorKernelModules2ndStage16kbMode []string `json:",omitempty"`
+	BuildingOdmDlkmImage                bool     `json:",omitempty"`
+	OdmKernelModules                    []string `json:",omitempty"`
+	OdmKernelBlocklistFile              string   `json:",omitempty"`
 
 	VendorRamdiskKernelModules       []string `json:",omitempty"`
 	VendorRamdiskKernelBlocklistFile string   `json:",omitempty"`
 	VendorRamdiskKernelLoadModules   []string `json:",omitempty"`
 	VendorRamdiskKernelOptionsFile   string   `json:",omitempty"`
+	DoNotStripVendorRamdiskModules   bool     `json:",omitempty"`
+	DoNotStripVendorModules          bool     `json:",omitempty"`
 
 	ProductFsverityGenerateMetadata bool `json:",omitempty"`
 
@@ -789,6 +792,8 @@ type PartitionVariables struct {
 	BootloaderInUpdatePackage           bool     `json:",omitempty"`
 
 	BoardFastbootInfoFile string `json:",omitempty"`
+
+	TargetRecoveryWipe string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {

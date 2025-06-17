@@ -148,11 +148,12 @@ func filesystemCreatorFactory() android.Module {
 			return
 		}
 		generatedPrebuiltEtcModuleNames := createPrebuiltEtcModules(ctx)
-		avbpubkeyGenerated := createAvbpubkeyModule(ctx)
-		createFsGenState(ctx, generatedPrebuiltEtcModuleNames, avbpubkeyGenerated)
+		createAvbpubkeyModule(ctx)
+		createFsGenState(ctx, generatedPrebuiltEtcModuleNames)
 		module.createAvbKeyFilegroups(ctx)
 		module.createMiscFilegroups(ctx)
 		module.createInternalModules(ctx)
+		module.createBackgroundPicturesForRecovery(ctx)
 	})
 
 	return module
@@ -167,6 +168,11 @@ func shouldEnableFilesystemCreator(ctx android.ConfigContext) bool {
 	// We create the filsystem modules even if soong-only mode isn't enabled, so we at least
 	// get analysis time checks running everywhere for more real-world coverage.
 	return true
+}
+
+// This is a build process. It must read all configuration values.
+func (f *filesystemCreator) UseGenericConfig() bool {
+	return false
 }
 
 func generatedPartitions(ctx android.EarlyModuleContext) allGeneratedPartitionData {
@@ -765,6 +771,30 @@ func (f *filesystemCreator) createAvbKeyFilegroups(ctx android.LoadHookContext) 
 	}
 }
 
+func (f *filesystemCreator) createBackgroundPicturesForRecovery(ctx android.LoadHookContext) {
+	name, width := getRecoveryBackgroundPicturesGeneratorModuleName(ctx)
+	if name == "" {
+		return
+	}
+	ctx.CreateModule(
+		filesystem.RecoveryBackgroundPicturesFactory,
+		&struct {
+			Name        *string
+			Image_width *int64
+			Fonts       []string
+			Resources   []string
+			Recovery    *bool
+		}{
+			Name:        proptools.StringPtr(name),
+			Image_width: proptools.Int64Ptr(width),
+			Fonts:       []string{":recovery_noto-fonts_dep", ":recovery_roboto-fonts_dep"},
+			Resources:   []string{":bootable_recovery_resources"},
+			Recovery:    proptools.BoolPtr(true),
+		},
+	)
+
+}
+
 // Creates filegroups for miscellaneous other files
 func (f *filesystemCreator) createMiscFilegroups(ctx android.LoadHookContext) {
 	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
@@ -794,9 +824,11 @@ func (f *filesystemCreator) createMiscFilegroups(ctx android.LoadHookContext) {
 func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookContext, partitionType string) {
 	fsGenState := ctx.Config().Get(fsGenStateOnceKey).(*FsGenState)
 	name := generatedModuleName(ctx.Config(), fmt.Sprintf("%s-kernel-modules", partitionType))
+	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
 	props := &struct {
 		Name                 *string
 		Srcs                 []string
+		Srcs_16k             []string
 		System_deps          []string
 		System_dlkm_specific *bool
 		Vendor_dlkm_specific *bool
@@ -807,44 +839,52 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		Options_file         *string
 		Strip_debug_symbols  *bool
 	}{
-		Name:                proptools.StringPtr(name),
-		Strip_debug_symbols: proptools.BoolPtr(false),
+		Name: proptools.StringPtr(name),
 	}
 	switch partitionType {
 	case "system_dlkm":
-		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelModules).Strings()
+		props.Srcs = android.ExistentPathsForSources(ctx, partitionVars.SystemKernelModules).Strings()
 		props.System_dlkm_specific = proptools.BoolPtr(true)
-		if len(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelLoadModules) == 0 {
+		if len(partitionVars.SystemKernelLoadModules) == 0 {
 			// Create empty modules.load file for system
 			// https://source.corp.google.com/h/googleplex-android/platform/build/+/ef55daac9954896161b26db4f3ef1781b5a5694c:core/Makefile;l=695-700;drc=549fe2a5162548bd8b47867d35f907eb22332023;bpv=1;bpt=0
 			props.Load_by_default = proptools.BoolPtr(false)
 		}
-		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelBlocklistFile; blocklistFile != "" {
+		if blocklistFile := partitionVars.SystemKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
+		props.Strip_debug_symbols = proptools.BoolPtr(false)
 	case "vendor_dlkm":
-		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorKernelModules).Strings()
-		if len(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.SystemKernelModules) > 0 {
+		props.Srcs = android.ExistentPathsForSources(ctx, partitionVars.VendorKernelModules).Strings()
+		props.Srcs_16k = android.ExistentPathsForSources(ctx, partitionVars.VendorKernelModules2ndStage16kbMode).Strings()
+		if len(partitionVars.SystemKernelModules) > 0 {
 			props.System_deps = []string{":" + generatedModuleName(ctx.Config(), "system_dlkm-kernel-modules") + "{.modules}"}
 		}
 		props.Vendor_dlkm_specific = proptools.BoolPtr(true)
-		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorKernelBlocklistFile; blocklistFile != "" {
+		if blocklistFile := partitionVars.VendorKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
+		}
+		if partitionVars.DoNotStripVendorModules {
+			props.Strip_debug_symbols = proptools.BoolPtr(false)
 		}
 	case "odm_dlkm":
-		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.OdmKernelModules).Strings()
+		props.Srcs = android.ExistentPathsForSources(ctx, partitionVars.OdmKernelModules).Strings()
 		props.Odm_dlkm_specific = proptools.BoolPtr(true)
-		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.OdmKernelBlocklistFile; blocklistFile != "" {
+		if blocklistFile := partitionVars.OdmKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
+		props.Strip_debug_symbols = proptools.BoolPtr(false)
 	case "vendor_ramdisk":
-		props.Srcs = android.ExistentPathsForSources(ctx, ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorRamdiskKernelModules).Strings()
+		props.Srcs = android.ExistentPathsForSources(ctx, partitionVars.VendorRamdiskKernelModules).Strings()
 		props.Vendor_ramdisk = proptools.BoolPtr(true)
-		if blocklistFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorRamdiskKernelBlocklistFile; blocklistFile != "" {
+		if blocklistFile := partitionVars.VendorRamdiskKernelBlocklistFile; blocklistFile != "" {
 			props.Blocklist_file = proptools.StringPtr(blocklistFile)
 		}
-		if optionsFile := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.VendorRamdiskKernelOptionsFile; optionsFile != "" {
+		if optionsFile := partitionVars.VendorRamdiskKernelOptionsFile; optionsFile != "" {
 			props.Options_file = proptools.StringPtr(optionsFile)
+		}
+		if partitionVars.DoNotStripVendorRamdiskModules {
+			props.Strip_debug_symbols = proptools.BoolPtr(false)
 		}
 
 	default:
