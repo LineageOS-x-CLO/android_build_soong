@@ -305,10 +305,12 @@ type ProductVariables struct {
 	AAPTPreferredConfig *string  `json:",omitempty"`
 	AAPTPrebuiltDPI     []string `json:",omitempty"`
 
-	DefaultAppCertificate           *string  `json:",omitempty"`
-	ExtraOtaKeys                    []string `json:",omitempty"`
-	ExtraOtaRecoveryKeys            []string `json:",omitempty"`
-	MainlineSepolicyDevCertificates *string  `json:",omitempty"`
+	DefaultAppCertificate                    *string  `json:",omitempty"`
+	DefaultSystemDevCertificate              *string  `json:",omitempty"`
+	ExtraOtaKeys                             []string `json:",omitempty"`
+	ExtraOtaRecoveryKeys                     []string `json:",omitempty"`
+	MainlineSepolicyDevCertificates          *string  `json:",omitempty"`
+	MainlineBluetoothSepolicyDevCertificates *string  `json:",omitempty"`
 
 	AppsDefaultVersionName *string `json:",omitempty"`
 
@@ -592,7 +594,9 @@ type ProductVariables struct {
 	SystemManifestFile     []string `json:",omitempty"`
 	SystemExtManifestFiles []string `json:",omitempty"`
 	DeviceManifestFiles    []string `json:",omitempty"`
+	DeviceManifestSkus     []string `json:",omitempty"`
 	OdmManifestFiles       []string `json:",omitempty"`
+	OdmManifestSkus        []string `json:",omitempty"`
 
 	UseSoongNoticeXML *bool `json:",omitempty"`
 
@@ -606,6 +610,8 @@ type ProductVariables struct {
 	EnforceSELinuxTrebleLabeling *bool `json:",omitempty"`
 
 	SELinuxTrebleLabelingTrackingListFile *string `json:",omitempty"`
+
+	BuildOTAPackage *bool `json:",omitempty"`
 }
 
 type CompatibilityTestcaseJSON struct {
@@ -707,6 +713,8 @@ type PartitionVariables struct {
 	InternalKernelCmdline             []string `json:",omitempty"`
 	InternalBootconfig                []string `json:",omitempty"`
 	InternalBootconfigFile            string   `json:",omitempty"`
+	BoardPrebuiltBootImage            string   `json:",omitempty"`
+	BoardKernelPath16k                string   `json:",omitempty"`
 
 	// Super image stuff
 	ProductUseDynamicPartitions       bool                                     `json:",omitempty"`

@@ -26,6 +26,11 @@ import zipfile
 
 from ninja_determinism_test import Product, get_top, transitively_included_ninja_files
 
+# Equivalent of soong's IsEnvTrue
+def is_env_true(e: str) -> bool:
+    value = os.environ.get(e, '').lower()
+    return value == '1' or value == 'y' or value == 'yes' or value == 'on' or value == 'true'
+
 def run_build_target_files_zip(product: Product, soong_only: bool) -> bool:
     """Runs a build and returns if it succeeded or not."""
     soong_only_arg = '--no-soong-only'
@@ -69,9 +74,8 @@ def get_local_file_sha256_fields(zip_filepath: os.PathLike) -> dict[str, bytes]:
         infolist = zip_ref.infolist()
 
         for member_info in infolist:
-            # Skip if the entry is a directory or does not contain the sha256 value, which
-            # is included in the extra field.
-            if member_info.is_dir() or len(member_info.extra) == 0:
+            # Skip if the entry is a directory.
+            if member_info.is_dir():
                 continue
 
             local_extra_data = member_info.extra
@@ -122,7 +126,10 @@ def find_build_id() -> str | None:
 def zip_ninja_files(subdistdir: str, product: Product):
     out_dir = os.getenv('OUT_DIR', 'out')
     root_dir = os.path.dirname(out_dir)
-    files_to_zip = transitively_included_ninja_files(out_dir, os.path.join(out_dir, f'combined-{product.product}.ninja'), {})
+    root_ninja_name = f'combined-{product.product}.ninja'
+    if is_env_true('EMMA_INSTRUMENT'):
+        root_ninja_name = f'combined-{product.product}.coverage.ninja'
+    files_to_zip = transitively_included_ninja_files(out_dir, os.path.join(out_dir, root_ninja_name), {})
 
     zip_filename = os.path.join(subdistdir, "ninja_files.zip")
     with zipfile.ZipFile(zip_filename, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
@@ -155,6 +162,7 @@ SHA_DIFF_ALLOWLIST = {
     "IMAGES/system_ext.img", # TODO: b/406045340 - Remove from the allowlist once it's fixed
     "IMAGES/userdata.img",
     "IMAGES/vbmeta_system.img",
+    "META/apkcerts.txt",
     "META/misc_info.txt",
     "META/vbmeta_digest.txt",
     "SYSTEM_EXT/etc/vm/trusty_vm/trusty_security_vm.elf", # TODO: b/406045340 - Remove from the allowlist once it's fixed
@@ -164,7 +172,7 @@ SHA_DIFF_ALLOWLIST = {
 def compare_sha_maps(soong_only_map: dict[str, bytes], soong_plus_make_map: dict[str, bytes]) -> bool:
     """Compares two sha maps and reports any missing or different entries."""
 
-    all_keys = list(soong_only_map.keys() | soong_plus_make_map.keys())
+    all_keys = sorted(list(soong_only_map.keys() | soong_plus_make_map.keys()))
     all_identical = True
     for key in all_keys:
         allowlisted = key in SHA_DIFF_ALLOWLIST
