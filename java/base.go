@@ -16,6 +16,7 @@ package java
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -505,6 +506,9 @@ type Module struct {
 	// args and dependencies to package source files into a srcjar
 	srcJarArgs []string
 	srcJarDeps android.Paths
+
+	kSnapshotFiles     map[string]android.Path
+	skipKSnapshotFiles map[string]bool
 
 	// the source files of this module and all its static dependencies
 	transitiveSrcFiles depset.DepSet[android.Path]
@@ -1087,6 +1091,8 @@ func (j *Module) collectBuilderFlags(ctx android.ModuleContext, deps deps) javaB
 	// systemModules
 	flags.systemModules = deps.systemModules
 
+	flags.kSnapshotFiles = deps.kSnapshotFiles
+
 	return flags
 }
 
@@ -1168,6 +1174,18 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 	}
 
 	deps := j.collectDeps(ctx)
+	j.kSnapshotFiles = deps.kSnapshotFiles
+	j.skipKSnapshotFiles = make(map[string]bool)
+	if extraClasspathJars != nil {
+		for _, jar := range extraClasspathJars {
+			j.addKSnapshot(ctx, jar)
+		}
+	}
+	if extraCombinedJars != nil {
+		for _, jar := range extraCombinedJars {
+			j.addKSnapshot(ctx, jar)
+		}
+	}
 	flags := j.collectBuilderFlags(ctx, deps)
 
 	if flags.javaVersion.usesJavaModules() {
@@ -1286,6 +1304,8 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		j.headerJarFile = combinedHeaderJarFile
 		if deps.headerJarOverride.Valid() {
 			j.headerJarFile = deps.headerJarOverride.Path()
+		} else {
+			j.addKSnapshot(ctx, j.headerJarFile)
 		}
 
 		if len(localHeaderJars) > 0 {
@@ -1293,6 +1313,10 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		} else {
 			// There are no local sources or resources in this module, so there is nothing to checkbuild.
 			ctx.UncheckedModule()
+		}
+
+		for _, hj := range localHeaderJars {
+			j.addKSnapshot(ctx, hj)
 		}
 
 		j.outputFile = j.headerJarFile
@@ -1312,7 +1336,13 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			SdkVersion:                          j.SdkVersion(ctx),
 			OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
 			Installable:                         BoolDefault(j.properties.Installable, true),
+			KSnapshotFiles:                      j.kSnapshotFiles,
 		}
+	}
+
+	var crossModuleHeaderJars android.Paths
+	if ctx.Config().PartialCompileFlags().Enable_inc_kotlin_java_dep {
+		crossModuleHeaderJars = android.Paths{}
 	}
 
 	if srcFiles.HasExt(".kt") {
@@ -1405,6 +1435,9 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			// Disable annotation processing in javac, it's already been handled by kapt
 			flags.processorPath = nil
 			flags.processors = nil
+
+			j.addKSnapshot(ctx, kaptSrcJar)
+			j.addKSnapshot(ctx, kaptResJar)
 		}
 
 		kotlinJar := android.PathForModuleOut(ctx, "kotlin", jarName)
@@ -1416,12 +1449,18 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 
 		kotlinJarPath, _ := j.repackageFlagsIfNecessary(ctx, kotlinJar, jarName, "kotlinc")
 
+		// Let java compile incrementally based on changes in the kotlin jar.
+		if crossModuleHeaderJars != nil {
+			crossModuleHeaderJars = append(crossModuleHeaderJars, kotlinHeaderJar)
+		}
+
 		// Make javac rule depend on the kotlinc rule
 		flags.classpath = append(classpath{kotlinHeaderJar}, flags.classpath...)
 
 		localImplementationJars = append(localImplementationJars, kotlinJarPath)
 
 		kotlinHeaderJars = append(kotlinHeaderJars, kotlinHeaderJar)
+		j.addKSnapshot(ctx, kotlinHeaderJar)
 	}
 
 	j.compiledSrcJars = srcJars
@@ -1531,7 +1570,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				shardSrcs = android.ShardPaths(uniqueJavaFiles, shardSize)
 				for idx, shardSrc := range shardSrcs {
 					classes := j.compileJavaClasses(ctx, jarName, idx, shardSrc,
-						nil, nil, flags, extraJarDeps, nil)
+						nil, nil, crossModuleHeaderJars, flags, extraJarDeps, nil)
 					classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac-"+strconv.Itoa(idx))
 					localImplementationJars = append(localImplementationJars, classes)
 				}
@@ -1544,13 +1583,13 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 				shardSrcJarsList := android.ShardPaths(srcJars, shardSize/5)
 				for idx, shardSrcJars := range shardSrcJarsList {
 					classes := j.compileJavaClasses(ctx, jarName, startIdx+idx,
-						nil, shardSrcJars, nil, flags, extraJarDeps, nil)
+						nil, shardSrcJars, nil, crossModuleHeaderJars, flags, extraJarDeps, nil)
 					classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac-"+strconv.Itoa(startIdx+idx))
 					localImplementationJars = append(localImplementationJars, classes)
 				}
 			}
 		} else {
-			classes := j.compileJavaClasses(ctx, jarName, -1, uniqueJavaFiles, srcJars, shardingHeaderJars, flags, extraJarDeps, genAnnoSrcJar)
+			classes := j.compileJavaClasses(ctx, jarName, -1, uniqueJavaFiles, srcJars, shardingHeaderJars, crossModuleHeaderJars, flags, extraJarDeps, genAnnoSrcJar)
 			classes, _ = j.repackageFlagsIfNecessary(ctx, classes, jarName, "javac")
 			localImplementationJars = append(localImplementationJars, classes)
 		}
@@ -1650,7 +1689,6 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 	// Combine the classes built from sources, any manifests, and any static libraries into
 	// classes.jar. If there is only one input jar this step will be skipped.
 	var outputFile android.Path
-
 	completeStaticLibsImplementationJars := depset.New(depset.PREORDER, localImplementationJars, deps.transitiveStaticLibsImplementationJars)
 
 	jars := completeStaticLibsImplementationJars.ToList()
@@ -1680,6 +1718,8 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 			outputFile = copiedJar
 		} else {
 			outputFile = jars[0]
+			// Don't ksnap this output. It was done elsewhere.
+			j.skipKSnapshot(jars[0])
 		}
 	} else {
 		combinedJar := android.PathForModuleOut(ctx, "combined", jarName)
@@ -1958,6 +1998,17 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		ctx.UncheckedModule()
 	}
 
+	j.addKSnapshot(ctx, outputFile)
+	for _, rJar := range localResourceJars {
+		j.addKSnapshot(ctx, rJar)
+	}
+	for _, hJar := range localHeaderJars {
+		j.addKSnapshot(ctx, hJar)
+	}
+	if combinedResourceJar != nil {
+		j.addKSnapshot(ctx, combinedResourceJar)
+	}
+
 	// Save the output file with no relative path so that it doesn't end up in a subdirectory when used as a resource
 	j.outputFile = outputFile.WithoutRel()
 
@@ -1983,6 +2034,7 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		AidlIncludeDirs:                     j.exportAidlIncludeDirs,
 		SrcJarArgs:                          j.srcJarArgs,
 		SrcJarDeps:                          j.srcJarDeps,
+		KSnapshotFiles:                      j.kSnapshotFiles,
 		TransitiveSrcFiles:                  j.transitiveSrcFiles,
 		ExportedPlugins:                     j.exportedPluginJars,
 		ExportedPluginClasses:               j.exportedPluginClasses,
@@ -1995,6 +2047,26 @@ func (j *Module) compile(ctx android.ModuleContext, extraSrcJars, extraClasspath
 		OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
 		Installable:                         BoolDefault(j.properties.Installable, true),
 	}
+}
+
+func (j *Module) addKSnapshot(ctx android.ModuleContext, jarFile android.Path) {
+	if jarFile == nil {
+		return
+	}
+	if skip, exists := j.skipKSnapshotFiles[jarFile.String()]; exists && skip {
+		return
+	}
+	if _, exists := j.kSnapshotFiles[jarFile.String()]; !exists {
+		snapshot := SnapshotJarForKotlin(ctx, jarFile.(android.WritablePath))
+		j.kSnapshotFiles[jarFile.String()] = snapshot
+	}
+}
+
+func (j *Module) skipKSnapshot(jarFile android.Path) {
+	if jarFile == nil {
+		return
+	}
+	j.skipKSnapshotFiles[jarFile.String()] = true
 }
 
 func (j *Module) useCompose(ctx android.BaseModuleContext) bool {
@@ -2061,7 +2133,7 @@ func enableErrorproneFlags(flags javaBuilderFlags) javaBuilderFlags {
 }
 
 func (j *Module) compileJavaClasses(ctx android.ModuleContext, jarName string, idx int,
-	srcFiles, srcJars, localHeaderJars android.Paths, flags javaBuilderFlags, extraJarDeps android.Paths, genAnnoSrcJar android.Path) android.Path {
+	srcFiles, srcJars, localHeaderJars, crossModuleHeaderJars android.Paths, flags javaBuilderFlags, extraJarDeps android.Paths, genAnnoSrcJar android.Path) android.Path {
 
 	kzipName := pathtools.ReplaceExtension(jarName, "kzip")
 	annoSrcJar := android.PathForModuleOut(ctx, "javac", "anno.srcjar")
@@ -2075,7 +2147,7 @@ func (j *Module) compileJavaClasses(ctx android.ModuleContext, jarName string, i
 	// enable incremental javac when corresponding flags are enabled and
 	// header jars are present
 	if ctx.Config().PartialCompileFlags().Enable_inc_javac && len(localHeaderJars) > 0 {
-		TransformJavaToClassesInc(ctx, classes, srcFiles, srcJars, localHeaderJars, annoSrcJar, flags, extraJarDeps, genAnnoSrcJar)
+		TransformJavaToClassesInc(ctx, classes, srcFiles, srcJars, localHeaderJars, crossModuleHeaderJars, annoSrcJar, flags, extraJarDeps, genAnnoSrcJar)
 	} else {
 		TransformJavaToClasses(ctx, classes, idx, srcFiles, srcJars, annoSrcJar, flags, extraJarDeps)
 	}
@@ -2500,6 +2572,7 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 	var transitiveStaticJarsHeaderLibs []depset.DepSet[android.Path]
 	var transitiveStaticJarsImplementationLibs []depset.DepSet[android.Path]
 	var transitiveStaticJarsResourceLibs []depset.DepSet[android.Path]
+	deps.kSnapshotFiles = make(map[string]android.Path)
 
 	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		otherName := ctx.OtherModuleName(module)
@@ -2530,6 +2603,9 @@ func (j *Module) collectDeps(ctx android.ModuleContext) deps {
 					dep = syspropDep.JavaInfo
 				}
 			}
+
+			maps.Copy(deps.kSnapshotFiles, dep.KSnapshotFiles)
+
 			switch tag {
 			case bootClasspathTag:
 				deps.bootClasspath = append(deps.bootClasspath, dep.HeaderJars...)

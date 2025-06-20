@@ -137,6 +137,8 @@ func (c Config) PrimaryBuilderInvocations() []bootstrap.PrimaryBuilderInvocation
 	return []bootstrap.PrimaryBuilderInvocation{}
 }
 
+func (c Config) IsBootstrap() bool { return false }
+
 // RunningInsideUnitTest returns true if this code is being run as part of a Soong unit test.
 func (c Config) RunningInsideUnitTest() bool {
 	return c.config.TestProductVariables != nil
@@ -235,6 +237,20 @@ func (c Config) ReleaseAconfigExtraReleaseConfigsValueSets() map[string][]string
 // derived from RELEASE_ACONFIG_FLAG_DEFAULT_PERMISSION
 func (c Config) ReleaseAconfigFlagDefaultPermission() string {
 	return c.config.productVariables.ReleaseAconfigFlagDefaultPermission
+}
+
+func (c Config) ReleaseBuildClangVersion(defaultVersion string) string {
+	if val, exists := c.GetBuildFlag("RELEASE_BUILD_CLANG_VERSION"); exists && val != "" {
+		return val
+	}
+	return defaultVersion
+}
+
+func (c Config) ReleaseBuildClangShortVersion(defaultVersion string) string {
+	if val, exists := c.GetBuildFlag("RELEASE_BUILD_CLANG_SHORT_VERSION"); exists && val != "" {
+		return val
+	}
+	return defaultVersion
 }
 
 // The flag indicating behavior for the tree wrt building modules or using prebuilts
@@ -435,6 +451,8 @@ type partialCompileFlags struct {
 	// Whether to enable incremental d8
 	Enable_inc_d8 bool
 
+	// Whether to enable passing dependencies incrementally from kotlin to java.
+	Enable_inc_kotlin_java_dep bool
 	// Add others as needed.
 }
 
@@ -443,18 +461,20 @@ var defaultPartialCompileFlags = partialCompileFlags{}
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=true`.
 var enabledPartialCompileFlags = partialCompileFlags{
-	Use_d8:                  true,
-	Disable_stub_validation: true,
-	Enable_inc_javac:        true,
-	Enable_inc_d8:           true,
+	Use_d8:                     true,
+	Disable_stub_validation:    true,
+	Enable_inc_javac:           true,
+	Enable_inc_d8:              true,
+	Enable_inc_kotlin_java_dep: false,
 }
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=all`.
 var allPartialCompileFlags = partialCompileFlags{
-	Use_d8:                  true,
-	Disable_stub_validation: true,
-	Enable_inc_javac:        true,
-	Enable_inc_d8:           true,
+	Use_d8:                     true,
+	Disable_stub_validation:    true,
+	Enable_inc_javac:           true,
+	Enable_inc_d8:              true,
+	Enable_inc_kotlin_java_dep: true,
 }
 
 type deviceConfig struct {
@@ -547,7 +567,10 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			ret.Enable_inc_javac = makeVal(state, !defaultPartialCompileFlags.Enable_inc_javac)
 		case "disable_inc_javac":
 			ret.Enable_inc_javac = !makeVal(state, defaultPartialCompileFlags.Enable_inc_javac)
-
+		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
+			ret.Enable_inc_kotlin_java_dep = makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
+		case "disable_inc_kotlin_java_dep":
+			ret.Enable_inc_kotlin_java_dep = !makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
 		case "stub_validation", "enable_stub_validation":
 			ret.Disable_stub_validation = !makeVal(state, !defaultPartialCompileFlags.Disable_stub_validation)
 		case "disable_stub_validation":
@@ -919,6 +942,7 @@ func (c *config) mockFileSystem(bp string, fs map[string][]byte) {
 
 func (c *config) SetAllowMissingDependencies() {
 	c.productVariables.Allow_missing_dependencies = proptools.BoolPtr(true)
+	c.genericConfigField.productVariables.Allow_missing_dependencies = proptools.BoolPtr(true)
 }
 
 // BlueprintToolLocation returns the directory containing build system tools
@@ -1338,6 +1362,11 @@ func (c *config) DefaultAppCertificate(ctx PathContext) (pem, key SourcePath) {
 	return defaultDir.Join(ctx, "testkey.x509.pem"), defaultDir.Join(ctx, "testkey.pk8")
 }
 
+func (c *config) DefaultSystemDevCertificate(ctx PathContext) (pem, key SourcePath) {
+	dir := String(c.productVariables.DefaultSystemDevCertificate)
+	return PathForSource(ctx, dir+".x509.pem"), PathForSource(ctx, dir+".pk8")
+}
+
 func (c *config) ExtraOtaKeys(ctx PathContext, recovery bool) []SourcePath {
 	var otaKeys []string
 	if recovery {
@@ -1381,6 +1410,15 @@ func (c *config) ApexKeyDir(ctx ModuleContext) SourcePath {
 // Certificate for the NetworkStack sepolicy context
 func (c *config) MainlineSepolicyDevCertificatesDir(ctx ModuleContext) SourcePath {
 	cert := String(c.productVariables.MainlineSepolicyDevCertificates)
+	if cert != "" {
+		return PathForSource(ctx, cert)
+	}
+	return c.DefaultAppCertificateDir(ctx)
+}
+
+// Certificate for the Bluetooth module sepolicy context
+func (c *config) MainlineBluetoothSepolicyDevCertificatesDir(ctx ModuleContext) SourcePath {
+	cert := String(c.productVariables.MainlineBluetoothSepolicyDevCertificates)
 	if cert != "" {
 		return PathForSource(ctx, cert)
 	}
@@ -2586,8 +2624,16 @@ func (c *config) DeviceManifestFiles() []string {
 	return c.productVariables.DeviceManifestFiles
 }
 
+func (c *config) DeviceManifestSkus() []string {
+	return c.productVariables.DeviceManifestSkus
+}
+
 func (c *config) OdmManifestFiles() []string {
 	return c.productVariables.OdmManifestFiles
+}
+
+func (c *config) OdmManifestSkus() []string {
+	return c.productVariables.OdmManifestSkus
 }
 
 func (c *config) EnforceSELinuxTrebleLabeling() bool {
@@ -2601,4 +2647,8 @@ func (c *config) SELinuxTrebleLabelingTrackingListFile(ctx PathContext) Path {
 	}
 
 	return PathForSource(ctx, path)
+}
+
+func (c *config) BuildOTAPackage() bool {
+	return Bool(c.productVariables.BuildOTAPackage)
 }

@@ -65,6 +65,16 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 	"kotlincFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "classesDir",
 	"headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir", "name")
 
+var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
+	blueprint.RuleParams{
+		Command: `${config.KotlinJarSnapshotterBinary} -jar="$in"`,
+		CommandDeps: []string{
+			"${config.KotlinJarSnapshotterBinary}",
+		},
+		Restat: true,
+	},
+)
+
 var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 	blueprint.RuleParams{
 		Command: `rm -rf "$srcJarDir" && mkdir -p "$srcJarDir" && ` +
@@ -101,6 +111,22 @@ func kotlinCommonSrcsList(ctx android.ModuleContext, commonSrcFiles android.Path
 		return android.OptionalPathForPath(commonSrcsList)
 	}
 	return android.OptionalPath{}
+}
+
+func jarNameToKotlinSnapshotName(ctx android.ModuleContext, jarFile android.WritablePath) android.WritablePath {
+	return jarFile.ReplaceExtension(ctx, "snapshot.bin")
+}
+
+func SnapshotJarForKotlin(ctx android.ModuleContext, jarFile android.WritablePath) android.Path {
+	outPath := jarNameToKotlinSnapshotName(ctx, jarFile)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        kotlinJarSnapshot,
+		Description: "Creates a snapshot.bin for the given jar",
+		Input:       jarFile,
+		Output:      outPath,
+	})
+
+	return outPath
 }
 
 // kotlinCompile takes .java and .kt sources and srcJars, and compiles the .kt sources into a classes jar in outputFile.
@@ -372,4 +398,8 @@ func kaptEncodeFlags(options [][2]string) string {
 	}
 
 	return base64.StdEncoding.EncodeToString(append(header.Bytes(), buf.Bytes()...))
+}
+
+type KSnapshotContainer interface {
+	JarToSnapshotMap() map[string]android.Path
 }

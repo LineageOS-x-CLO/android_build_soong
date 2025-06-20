@@ -460,8 +460,12 @@ var (
 	ForceSDClangOff = false
 
 	// prebuilts/clang default settings.
-	ClangDefaultBase         = "prebuilts/clang/host"
-	ClangDefaultVersion      = "clang-r547379"
+	ClangDefaultBase = "prebuilts/clang/host"
+	// The Clang version used in the trunk branch.
+	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
+	ClangDefaultVersion = "clang-r547379"
+	// The Clang short version used in the trunk branch.
+	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
 	ClangDefaultShortVersion = "20"
 
 	// Directories with warnings from Android.bp files.
@@ -549,6 +553,10 @@ func init() {
 
 	pctx.VariableFunc("NoOverrideGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := noOverrideGlobalCflags
+		if ClangVersionAtLeast(ctx, 563880) {
+			flags = append(flags, "-Wno-nontrivial-memcall")
+			flags = append(flags, "-Wno-invalid-specialization")
+		}
 		if ctx.Config().IsEnvTrue("LLVM_NEXT") {
 			flags = append(noOverrideGlobalCflags, llvmNextExtraCommonGlobalCflags...)
 			IllegalFlags = []string{} // Don't fail build while testing a new compiler.
@@ -579,8 +587,18 @@ func init() {
 
 	setSdclangVars()
 	pctx.StaticVariableWithEnvOverride("ClangBase", "LLVM_PREBUILTS_BASE", ClangDefaultBase)
-	pctx.StaticVariableWithEnvOverride("ClangVersion", "LLVM_PREBUILTS_VERSION", ClangDefaultVersion)
-	pctx.StaticVariableWithEnvOverride("ClangShortVersion", "LLVM_RELEASE_VERSION", ClangDefaultShortVersion)
+	pctx.VariableFunc("ClangVersion", func(ctx android.PackageVarContext) string {
+		if override := ctx.Config().Getenv("LLVM_PREBUILTS_VERSION"); override != "" {
+			return override
+		}
+		return ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
+	})
+	pctx.VariableFunc("ClangShortVersion", func(ctx android.PackageVarContext) string {
+		if override := ctx.Config().Getenv("LLVM_RELEASE_VERSION"); override != "" {
+			return override
+		}
+		return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+	})
 
 	pctx.StaticVariable("ClangPath", "${ClangBase}/${HostPrebuiltTag}/${ClangVersion}")
 	pctx.StaticVariable("ClangBin", "${ClangPath}/bin")
@@ -781,10 +799,31 @@ func clangPath(ctx android.PathContext) android.SourcePath {
 		if override := ctx.Config().Getenv("LLVM_PREBUILTS_BASE"); override != "" {
 			clangBase = override
 		}
-		clangVersion := ClangDefaultVersion
+		clangVersion := ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
 		if override := ctx.Config().Getenv("LLVM_PREBUILTS_VERSION"); override != "" {
 			clangVersion = override
 		}
 		return android.PathForSource(ctx, clangBase, ctx.Config().PrebuiltOS(), clangVersion)
 	})
+}
+
+func ClangVersion(ctx android.PathContext) string {
+	return ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
+}
+
+func ClangShortVersion(ctx android.PathContext) string {
+	return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+}
+
+// Check if the Clang revision is greater or equal to minRev. Returns false if failed to parse.
+func ClangVersionAtLeast(ctx android.PathContext, minRev int) bool {
+	curRevStr := ClangVersion(ctx)
+	if !strings.HasPrefix(curRevStr, "clang-r") {
+		return false
+	}
+	curRev, err := strconv.Atoi(curRevStr[7:])
+	if err != nil {
+		return false
+	}
+	return curRev >= minRev
 }

@@ -2035,6 +2035,10 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		phonies:           make(map[string]Paths),
 	}
 
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"ETC"}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+
 	blueprintCtx.RegisterConfigurableEvaluator(ctx)
 
 	if ctx.config.captureBuild {
@@ -2134,7 +2138,6 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 					from: src,
 					to:   installedVintfFragment,
 				})
-				ctx.PackageFile(vintfDir, src.Base(), src)
 				ctx.installedVintfFragmentsPaths = append(ctx.installedVintfFragmentsPaths, installedVintfFragment)
 			}
 			installFiles.VintfFragmentsPaths = ctx.vintfFragmentsPaths
@@ -2217,12 +2220,13 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if m.Enabled(ctx) {
 		SetProvider(ctx, InstallFilesProvider, installFiles)
 	}
-	buildLicenseMetadata(ctx, ctx.licenseMetadataFile)
 
 	var testSuiteInstalls []filePair
 	if ctx.testSuiteInfoSet {
 		testSuiteInstalls = m.setupTestSuites(ctx, ctx.testSuiteInfo)
 	}
+
+	buildLicenseMetadata(ctx, ctx.licenseMetadataFile, testSuiteInstalls)
 
 	if m.Enabled(ctx) {
 		m.generateModuleTarget(ctx, testSuiteInstalls)
@@ -2848,6 +2852,8 @@ func (e configurationEvalutor) EvaluateConfiguration(condition proptools.Configu
 			return proptools.ConfigurableValueBool(ctx.Config().UseDebugArt())
 		case "selinux_ignore_neverallows":
 			return proptools.ConfigurableValueBool(ctx.Config().SelinuxIgnoreNeverallows())
+		case "unbundled_build":
+			return proptools.ConfigurableValueBool(ctx.Config().UnbundledBuild())
 		case "always_use_prebuilt_sdks":
 			return proptools.ConfigurableValueBool(ctx.Config().AlwaysUsePrebuiltSdks())
 		default:
