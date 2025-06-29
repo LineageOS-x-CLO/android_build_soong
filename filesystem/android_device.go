@@ -105,6 +105,18 @@ type DeviceProperties struct {
 	// Name of the DTBO partitions
 	Dtbo_image     *string
 	Dtbo_image_16k *string
+
+	// Name of the radio partition
+	Radio_partition_name *string
+
+	Pvmfw PvmfwProperties
+}
+
+type PvmfwProperties struct {
+	Image          *string `android:"path"`
+	Binary         *string `android:"path"`
+	Avbkey         *string `android:"path"`
+	Partition_size *int64
 }
 
 type androidDevice struct {
@@ -158,12 +170,16 @@ type fileContextsDepTagType struct {
 type dtboDepTagType struct {
 	blueprint.BaseDependencyTag
 }
+type radioDepTagType struct {
+	blueprint.BaseDependencyTag
+}
 
 var superPartitionDepTag superPartitionDepTagType
 var filesystemDepTag partitionDepTagType
 var targetFilesMetadataDepTag targetFilesMetadataDepTagType
 var fileContextsDepTag fileContextsDepTagType
 var dtboDepTag dtboDepTagType
+var radioDepTag dtboDepTagType
 
 func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	addDependencyIfDefined := func(dep *string) {
@@ -198,6 +214,9 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	}
 	if a.deviceProps.Dtbo_image_16k != nil {
 		ctx.AddDependency(ctx.Module(), dtboDepTag, *a.deviceProps.Dtbo_image_16k)
+	}
+	if a.deviceProps.Radio_partition_name != nil {
+		ctx.AddDependency(ctx.Module(), radioDepTag, *a.deviceProps.Radio_partition_name)
 	}
 }
 
@@ -667,6 +686,25 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 				Input(bootImgInfo.Kernel).Textf(" %s/PREBUILT_IMAGES/kernel_16k", targetFilesDir)
 		}
 	}
+	if a.deviceProps.Radio_partition_name != nil {
+		radio := ctx.GetDirectDepProxyWithTag(*a.deviceProps.Radio_partition_name, radioDepTag)
+		files := android.OutputFilesForModule(ctx, radio, "")
+		builder.Command().
+			Textf("mkdir -p %s/RADIO && cp -t %s/RADIO ", targetFilesDir, targetFilesDir).
+			Inputs(files)
+	}
+	if a.deviceProps.Pvmfw.Image != nil {
+		pvmfwImg := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Image))
+		builder.Command().Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).Input(pvmfwImg).Textf(" %s/PREBUILT_IMAGES/pvmfw.img", targetFilesDir.String())
+	}
+	if a.deviceProps.Pvmfw.Binary != nil {
+		pvmfwBin := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Binary))
+		builder.Command().Textf("mkdir -p %s/PVMFW/ && cp", targetFilesDir.String()).Input(pvmfwBin).Textf(" %s/PVMFW/pvmfw_bin", targetFilesDir.String())
+	}
+	if a.deviceProps.Pvmfw.Avbkey != nil {
+		pvbmfwAvbkey := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Avbkey))
+		builder.Command().Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).Input(pvbmfwAvbkey).Textf(" %s/PREBUILT_IMAGES/pvmfw_embedded.avbpubkey", targetFilesDir.String())
+	}
 
 	a.copyPrebuiltImages(ctx, builder, targetFilesDir)
 
@@ -1058,6 +1096,15 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 		} else {
 			ctx.ModuleErrorf("Could not write dtbo properties in misc_info.txt")
 		}
+	}
+	if a.deviceProps.Pvmfw.Image != nil {
+		builder.Command().Textf("echo has_pvmfw=true >> %s", miscInfo)
+		if a.deviceProps.Pvmfw.Partition_size != nil {
+			builder.Command().Textf("echo pvmfw_size=%d >> %s", *a.deviceProps.Pvmfw.Partition_size, miscInfo)
+		} else {
+			builder.Command().Textf("echo pvmfw_size= >> %s", miscInfo)
+		}
+		builder.Command().Textf("echo avb_pvmfw_add_hash_footer_args=--prop com.android.build.pvmfw.fingerprint:$(cat %s) >> %s", ctx.Config().BuildFingerprintFile(ctx).String(), miscInfo)
 	}
 
 	// Sort and dedup

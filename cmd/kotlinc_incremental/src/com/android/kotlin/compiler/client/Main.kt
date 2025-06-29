@@ -17,5 +17,5 @@
 package com.android.kotlin.compiler.client
 
 fun main(args: Array<String>) {
-  println("compiling")
+    println("compiling")
 }
