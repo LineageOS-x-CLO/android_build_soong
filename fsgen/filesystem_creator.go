@@ -150,8 +150,8 @@ func filesystemCreatorFactory() android.Module {
 			return
 		}
 		generatedPrebuiltEtcModuleNames := createPrebuiltEtcModules(ctx)
-		createAvbpubkeyModule(ctx)
-		createFsGenState(ctx, generatedPrebuiltEtcModuleNames)
+		avbpubkeyGenerated := createAvbpubkeyModule(ctx)
+		createFsGenState(ctx, generatedPrebuiltEtcModuleNames, avbpubkeyGenerated)
 		module.createAvbKeyFilegroups(ctx)
 		module.createMiscFilegroups(ctx)
 		module.createInternalModules(ctx)
@@ -1203,6 +1203,13 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 		}
 		if partitionVars.BoardErofsCompressorHints != "" {
 			fsProps.Erofs.Compress_hints = proptools.StringPtr(":soong_generated_board_erofs_compress_hints_filegroup")
+		}
+		if s, err := strconv.ParseBool(partitionVars.BoardErofsShareDupBlocks); err == nil {
+			fsProps.Share_dup_blocks = proptools.BoolPtr(s)
+		}
+	} else if *fsProps.Type == "ext4" {
+		if s, err := strconv.ParseBool(partitionVars.BoardExt4ShareDupBlocks); err == nil {
+			fsProps.Share_dup_blocks = proptools.BoolPtr(s)
 		}
 	}
 
