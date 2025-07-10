@@ -146,10 +146,6 @@ type appProperties struct {
 	// it in the APK as an asset.
 	Embed_notices *bool
 
-	// cc.Coverage related properties
-	PreventInstall    bool `blueprint:"mutated"`
-	IsCoverageVariant bool `blueprint:"mutated"`
-
 	// It can be set to test the behaviour of default target sdk version.
 	// Only required when updatable: false. It is an error if updatable: true and this is false.
 	Enforce_default_target_sdk_version *bool
@@ -815,7 +811,6 @@ func (a *AndroidApp) dexBuildActions(ctx android.ModuleContext) (android.Path, a
 	a.dexpreopter.enforceUsesLibs = a.usesLibrary.enforceUsesLibraries(ctx)
 	a.dexpreopter.classLoaderContexts = a.classLoaderContexts
 	a.dexpreopter.manifestFile = a.mergedManifestFile
-	a.dexpreopter.preventInstall = a.appProperties.PreventInstall
 
 	var packageResources = a.exportPackage
 
@@ -1140,7 +1135,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	// Install the app package.
-	shouldInstallAppPackage := (Bool(a.Module.properties.Installable) || ctx.Host()) && apexInfo.IsForPlatform() && !a.appProperties.PreventInstall
+	shouldInstallAppPackage := (Bool(a.Module.properties.Installable) || ctx.Host()) && apexInfo.IsForPlatform()
 	if shouldInstallAppPackage {
 		if a.privAppAllowlist.Valid() {
 			allowlistInstallPath := android.PathForModuleInstall(ctx, "etc", "permissions")
@@ -1508,17 +1503,7 @@ func (a *AndroidApp) IsNativeCoverageNeeded(ctx cc.IsNativeCoverageNeededContext
 	return ctx.Device() && ctx.DeviceConfig().NativeCoverageEnabled()
 }
 
-func (a *AndroidApp) SetPreventInstall() {
-	a.appProperties.PreventInstall = true
-}
-
-func (a *AndroidApp) MarkAsCoverageVariant(coverage bool) {
-	a.appProperties.IsCoverageVariant = coverage
-}
-
-func (a *AndroidApp) EnableCoverageIfNeeded() {}
-
-var _ cc.Coverage = (*AndroidApp)(nil)
+var _ cc.UseCoverage = &AndroidApp{}
 
 func (a *AndroidApp) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	a.Library.IDEInfo(ctx, dpInfo)
