@@ -566,12 +566,22 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 		kytheFiles = make(KytheFilePairs, 0, len(srcObjFiles))
 	}
 
+	// flags.localCommonFlags includes all of the include directories, which can too long and push the command
+	// line length over MAX_ARG_STRLEN (128 kB).  Move them to an rsp file when they are over 64 kB.
+	localCommonFlags := flags.localCommonFlags
+	if len(localCommonFlags) > 64*1024 {
+		localCommonFlagsFile := android.PathForModuleOut(ctx, subdir, "flags.txt")
+		android.WriteFileRule(ctx, localCommonFlagsFile, localCommonFlags)
+		localCommonFlags = "@" + localCommonFlagsFile.String()
+		cFlagsDeps = append(cFlagsDeps, localCommonFlagsFile)
+	}
+
 	// Produce fully expanded flags for use by C tools, C compiles, C++ tools, C++ compiles, and asm compiles
 	// respectively.
 	toolingCflags := flags.globalCommonFlags + " " +
 		flags.globalToolingCFlags + " " +
 		flags.globalConlyFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localToolingCFlags + " " +
 		flags.localConlyFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -580,7 +590,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	cflags := flags.globalCommonFlags + " " +
 		flags.globalCFlags + " " +
 		flags.globalConlyFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localCFlags + " " +
 		flags.localConlyFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -589,7 +599,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	toolingCppflags := flags.globalCommonFlags + " " +
 		flags.globalToolingCFlags + " " +
 		flags.globalToolingCppFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localToolingCFlags + " " +
 		flags.localToolingCppFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -598,7 +608,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	cppflags := flags.globalCommonFlags + " " +
 		flags.globalCFlags + " " +
 		flags.globalCppFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localCFlags + " " +
 		flags.localCppFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -606,7 +616,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 
 	asflags := flags.globalCommonFlags + " " +
 		flags.globalAsFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localAsFlags + " " +
 		flags.systemIncludeFlags
 
