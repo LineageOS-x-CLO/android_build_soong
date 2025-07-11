@@ -160,7 +160,7 @@ func productInstalledModules(ctx android.LoadHookContext) []string {
 	return allInstalledModules
 }
 
-func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNames []string) *FsGenState {
+func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNames []string, avbpubkeyGenerated bool) *FsGenState {
 	return ctx.Config().Once(fsGenStateOnceKey, func() interface{} {
 		allInstalledModules := slices.Concat(
 			productInstalledModules(ctx),
@@ -227,8 +227,9 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"fs_config_files_odm_dlkm": defaultDepCandidateProps(ctx.Config()),
 					"notice_xml_odm_dlkm":      defaultDepCandidateProps(ctx.Config()),
 				},
-				"ramdisk":        {},
-				"vendor_ramdisk": {},
+				"ramdisk":               {},
+				"vendor_ramdisk":        {},
+				"vendor_kernel_ramdisk": {},
 				"recovery": {
 					"sepolicy.recovery":                     defaultDepCandidateProps(ctx.Config()),
 					"plat_file_contexts.recovery":           defaultDepCandidateProps(ctx.Config()),
@@ -254,7 +255,9 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 			nativeBridgeModules:             map[string]bool{},
 		}
 
-		(*fsGenState.fsDeps["product"])["system_other_avbpubkey"] = defaultDepCandidateProps(ctx.Config())
+		if avbpubkeyGenerated {
+			(*fsGenState.fsDeps["product"])["system_other_avbpubkey"] = defaultDepCandidateProps(ctx.Config())
+		}
 
 		if len(ctx.Config().DeviceManifestFiles()) > 0 {
 			(*fsGenState.fsDeps["vendor"])["vendor_manifest.xml"] = defaultDepCandidateProps(ctx.Config())
@@ -356,6 +359,11 @@ func collectDepsMutator(mctx android.BottomUpMutatorContext) {
 		installPartition := m.PartitionTag(mctx.DeviceConfig())
 		if m.Enabled(mctx) && m.ExportedToMake() {
 			appendDepIfAppropriate(mctx, fsGenState.fsDeps[installPartition], installPartition, android.NativeBridgeEnabled, mctx.ModuleName())
+		}
+	} else if _, ok := fsGenState.depCandidatesMap[mctx.ModuleName()+".vendor_ramdisk"]; ok && mctx.Module().InstallInVendorRamdisk() {
+		installPartition := "vendor_ramdisk"
+		if m.Enabled(mctx) && m.ExportedToMake() {
+			appendDepIfAppropriate(mctx, fsGenState.fsDeps[installPartition], installPartition, android.NativeBridgeDisabled, mctx.ModuleName())
 		}
 	}
 
