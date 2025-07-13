@@ -25,6 +25,7 @@ import (
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
+	"android/soong/cc"
 	"android/soong/cc/config"
 )
 
@@ -92,6 +93,14 @@ func newSdkRepoHostModule() *sdkRepoHost {
 	return s
 }
 
+// We need to implement IsNativeCoverageNeeded so that in coverage builds we don't get packaging
+// conflicts with required deps that always use the coverage variant.
+func (p *sdkRepoHost) IsNativeCoverageNeeded(ctx cc.IsNativeCoverageNeededContext) bool {
+	return ctx.DeviceConfig().NativeCoverageEnabled()
+}
+
+var _ cc.UseCoverage = (*sdkRepoHost)(nil)
+
 type dependencyTag struct {
 	blueprint.BaseDependencyTag
 	android.PackagingItemAlwaysDepTag
@@ -134,7 +143,7 @@ func (s *sdkRepoHost) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 				android.PathForModuleInstall(ctx, "sdk-repo").String() + "/",
 				outputZipFile.String(),
 			},
-		})
+		}, ctx.ModuleProxy())
 	builder.Command().Text("cp").
 		Input(noticeFile).
 		Text(filepath.Join(dir.String(), "NOTICE.txt"))

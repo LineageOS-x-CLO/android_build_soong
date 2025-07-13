@@ -263,6 +263,7 @@ type ProductVariables struct {
 	DeviceCurrentApiLevelForVendorModules *string  `json:",omitempty"`
 	DeviceSystemSdkVersions               []string `json:",omitempty"`
 	DeviceMaxPageSizeSupported            *string  `json:",omitempty"`
+	DeviceCheckPrebuiltMaxPageSize        *bool    `json:",omitempty"`
 	DeviceNoBionicPageSizeMacro           *bool    `json:",omitempty"`
 
 	VendorApiLevel             *string `json:",omitempty"`
@@ -511,6 +512,7 @@ type ProductVariables struct {
 	BuildBrokenInputDirModules          []string `json:",omitempty"`
 	BuildBrokenDontCheckSystemSdk       bool     `json:",omitempty"`
 	BuildBrokenDupSysprop               bool     `json:",omitempty"`
+	BuildBrokenPrebuiltELFFiles         bool     `json:",omitempty"`
 
 	BuildDebugfsRestrictionsEnabled bool `json:",omitempty"`
 
@@ -720,6 +722,8 @@ type PartitionVariables struct {
 	BoardDtboPartitionSize            string   `json:",omitempty"`
 	Board16kOtaUseIncremental         bool     `json:",omitempty"`
 	BoardPrebuiltDtbDir               string   `json:",omitempty"`
+	BoardKernelModules16K             []string `json:",omitempty"`
+	BoardKernelModulesLoad16K         []string `json:",omitempty"`
 
 	// Radio stuff
 	RadioFilePath             string   `json:",omitempty"`
@@ -740,6 +744,8 @@ type PartitionVariables struct {
 	ProductBuildSuperPartition        bool                                     `json:",omitempty"`
 	BuildingSuperEmptyImage           bool                                     `json:",omitempty"`
 	BoardSuperPartitionSize           string                                   `json:",omitempty"`
+	BoardSuperPartitionWarnLimit      string                                   `json:",omitempty"`
+	BoardSuperPartitionErrorLimit     string                                   `json:",omitempty"`
 	BoardSuperPartitionMetadataDevice string                                   `json:",omitempty"`
 	BoardSuperPartitionBlockDevices   []string                                 `json:",omitempty"`
 	BoardSuperPartitionGroups         map[string]BoardSuperPartitionGroupProps `json:",omitempty"`
