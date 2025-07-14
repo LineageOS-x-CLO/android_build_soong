@@ -21,11 +21,13 @@ import (
 	"sync"
 
 	"android/soong/android"
+	"android/soong/rust"
 
 	"github.com/google/blueprint/proptools"
 )
 
 func RegisterCollectFileSystemDepsMutators(ctx android.RegisterMutatorsContext) {
+	ctx.BottomUp("fs_recovery_fstab", setRecoveryFstabSrcs).MutatesGlobalState()
 	ctx.BottomUp("fs_collect_deps", collectDepsMutator).MutatesGlobalState()
 	ctx.BottomUp("fs_remove_deps", removeDepsMutator).MutatesGlobalState()
 	ctx.BottomUp("fs_cross_partition_required_deps", crossPartitionRequiredMutator).MutatesGlobalState()
@@ -112,11 +114,15 @@ type FsGenState struct {
 	avbKeyFilegroups map[string]string
 	// Name of all native bridge modules
 	nativeBridgeModules map[string]bool
+
+	// Name of the generated recovery fstab module name
+	recoveryFstabModuleName string
 }
 
 type installationProperties struct {
 	Required  []string
 	Overrides []string
+	Rustlibs  []string
 	Partition string
 	Namespace string
 }
@@ -273,6 +279,10 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 		if name := createTargetRecoveryWipeModuleName(ctx); name != "" {
 			(*fsGenState.fsDeps["recovery"])[name] = defaultDepCandidateProps(ctx.Config())
 		}
+		if name := handleRecoveryFstab(ctx); name != "" {
+			(*fsGenState.fsDeps["recovery"])[name] = defaultDepCandidateProps(ctx.Config())
+			fsGenState.recoveryFstabModuleName = name
+		}
 
 		// VNDK APEXes are deprecated and are not supported and disabled for riscv64 arch.
 		// Adding these modules as deps of the auto generated riscv64 arch filesystem modules
@@ -375,8 +385,20 @@ func collectDepsMutator(mctx android.BottomUpMutatorContext) {
 	// store the map of module to (required,overrides) even if the module is not in PRODUCT_PACKAGES.
 	// the module might be installed transitively.
 	if m.Enabled(mctx) && m.ExportedToMake() {
+		var rustLibs []string
+		if rustModule, ok := m.(*rust.Module); ok {
+			if !rustModule.StdLinkageIsRlibLinkage(mctx.Device()) {
+				for _, prop := range m.GetProperties() {
+					if rustCompilerProps, ok := prop.(*rust.BaseCompilerProperties); ok {
+						rustLibs = rustCompilerProps.Rustlibs.GetOrDefault(mctx, nil)
+					}
+				}
+			}
+		}
+
 		fsGenState.moduleToInstallationProps.AddToMap(mctx, &installationProperties{
 			Required:  m.RequiredModuleNames(mctx),
+			Rustlibs:  rustLibs,
 			Overrides: m.Overrides(),
 			Partition: m.PartitionTag(mctx.DeviceConfig()),
 			Namespace: mctx.Namespace().Path,
@@ -563,6 +585,8 @@ type directDepWithParentPartition struct {
 	parentPartition string
 	// fully qualified module name of the "required" direct dep
 	directDepName string
+	// whether this is a rustlib dependency
+	isRustLibDep bool
 }
 
 // This function is run only once to compute the list of transitive "required" dependencies
@@ -597,6 +621,20 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 							directDepName:   fullyQualifiedModuleName(requiredModule, props.Namespace),
 						})
 					}
+					// system_ext-specific image variation is not created, thus system_ext
+					// rust module will link against system rustlibs. Since cross-partition
+					// installation is not supported in filesystem modules, system rustlibs of
+					// system_ext_specific modules should be separately added as deps of the
+					// system image.
+					if partition == "system_ext" {
+						for _, rustLibModule := range props.Rustlibs {
+							moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
+								parentPartition: partition,
+								directDepName:   fullyQualifiedModuleName(rustLibModule, props.Namespace),
+								isRustLibDep:    true,
+							})
+						}
+					}
 				}
 			}
 		}
@@ -620,15 +658,26 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 			// mark the module visited.
 			if moduleProps, ok := moduleToInstallationProps.GetFromFullyQualifiedModuleName(visitingModule.directDepName); ok {
 				if moduleProps.Partition != visitingModule.parentPartition {
-					ret[visitingModule.directDepName] = moduleProps.Partition
+					if !visitingModule.isRustLibDep || moduleProps.Partition == "system" {
+						ret[visitingModule.directDepName] = moduleProps.Partition
+					}
 				}
 				if _, ok := traversalMap[visitingModule.directDepName]; !ok {
 					traversalMap[visitingModule.directDepName] = true
-					for _, requiredModule := range moduleProps.Required {
+					for _, requiredModule := range append(moduleProps.Required, moduleProps.Rustlibs...) {
 						moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
 							parentPartition: moduleProps.Partition,
 							directDepName:   requiredModule,
 						})
+					}
+					if moduleProps.Partition == "system_ext" {
+						for _, rustLibModule := range moduleProps.Rustlibs {
+							moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
+								parentPartition: moduleProps.Partition,
+								directDepName:   rustLibModule,
+								isRustLibDep:    true,
+							})
+						}
 					}
 				}
 			}

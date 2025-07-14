@@ -395,6 +395,8 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 		rustcFlags = append(rustcFlags, "-Zallow-features=\"\"")
 	}
 
+	rustcFlags = append(rustcFlags, "-Zforce-unstable-if-unmarked")
+
 	// Collect linker flags
 	if !ctx.Darwin() {
 		earlyLinkFlags = "-Wl,--as-needed"
@@ -576,6 +578,8 @@ func Rustdoc(ctx ModuleContext, main android.Path, deps PathDeps,
 
 	rustdocFlags = append(rustdocFlags, makeLibFlags(deps)...)
 	docTimestampFile := android.PathForModuleOut(ctx, "rustdoc.timestamp")
+
+	rustdocFlags = append(rustdocFlags, "-Zforce-unstable-if-unmarked")
 
 	// Silence warnings about renamed lints for third-party crates
 	modulePath := ctx.ModuleDir()
