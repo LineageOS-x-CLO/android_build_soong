@@ -75,6 +75,9 @@ var (
 		// Detects dividing an array size by itself, which is a common typo that
 		// leads to bugs.
 		"-Werror=sizeof-array-div",
+		// Detects code like 'memcpy(dest, src, sizeof(src))' where 'src' is a pointer.
+		// This is nearly always a bug that may cause memory corruption.
+		"-Werror=sizeof-pointer-memaccess",
 		// Detects a typo that cuts off a prefix from a string literal.
 		"-Werror=string-plus-int",
 		// Detects for loops that will never execute more than once (for example
@@ -405,10 +408,6 @@ var (
 		// http://b/72331524 Allow null pointer arithmetic until the instances detected by
 		// this new warning are fixed.
 		"-Wno-null-pointer-arithmetic",
-
-		// http://b/145211477
-		"-Wno-pointer-compare",
-		"-Wno-final-dtor-non-final-class",
 
 		// http://b/165945989
 		"-Wno-psabi",
