@@ -55,7 +55,8 @@ type testSuiteFiles struct{}
 func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 	hostOutTestCases := android.PathForHostInstall(ctx, "testcases")
 	files := make(map[string]testModulesInstallsMap)
-	sharedLibRoots := make(map[string][]string)
+	sharedLibRoots32 := make(map[string][]string)
+	sharedLibRoots64 := make(map[string][]string)
 	sharedLibGraph := make(map[string][]string)
 	allTestSuiteInstalls := make(map[string]android.Paths)
 	var toInstall []android.FilePair
@@ -80,7 +81,7 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 		commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
 		testSuiteSharedLibsInfo := android.OtherModuleProviderOrDefault(ctx, m, android.TestSuiteSharedLibsInfoProvider)
 		makeName := android.OtherModuleProviderOrDefault(ctx, m, android.MakeNameInfoProvider).Name
-		if makeName != "" && commonInfo.Target.Os.Class == android.Host {
+		if makeName != "" && commonInfo.Target.Os == ctx.Config().BuildOS {
 			sharedLibGraph[makeName] = append(sharedLibGraph[makeName], testSuiteSharedLibsInfo.MakeNames...)
 		}
 
@@ -95,7 +96,11 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 					installFilesProvider.InstallFiles...)
 
 				if makeName != "" {
-					sharedLibRoots[testSuite] = append(sharedLibRoots[testSuite], makeName)
+					if commonInfo.Target.Arch.ArchType.Bitness() == "32" {
+						sharedLibRoots32[testSuite] = append(sharedLibRoots32[testSuite], makeName)
+					} else {
+						sharedLibRoots64[testSuite] = append(sharedLibRoots64[testSuite], makeName)
+					}
 				}
 			}
 
@@ -145,7 +150,12 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 		allTestSuiteInstalls[suite] = android.SortedUniquePaths(suiteInstalls)
 	}
 
-	hostSharedLibs := gatherHostSharedLibs(ctx, sharedLibRoots, sharedLibGraph)
+	hostSharedLibs32 := gatherHostSharedLibs(ctx, sharedLibRoots32, sharedLibGraph, android.X86)
+	hostSharedLibs64 := gatherHostSharedLibs(ctx, sharedLibRoots64, sharedLibGraph, android.X86_64)
+	hostSharedLibs := hostSharedLibs64
+	for suite, libs := range hostSharedLibs32 {
+		hostSharedLibs[suite] = append(hostSharedLibs[suite], libs...)
+	}
 
 	if !ctx.Config().KatiEnabled() {
 		for _, testSuite := range android.SortedKeys(files) {
@@ -264,13 +274,14 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 // Get a mapping from testSuite -> list of host shared libraries, given:
 // - sharedLibRoots: Mapping from testSuite -> androidMk name of all test modules in the suite
 // - sharedLibGraph: Mapping from androidMk name of module -> androidMk names of its shared libs
+// - archType: ArchType to match for including shared libs
 //
 // This mimics how make did it historically, which is filled with inaccuracies. Make didn't
 // track variants and treated all variants as if they were merged into one big module. This means
 // you can have a test that's only included in the "vts" test suite on the device variant, and
 // only has a shared library on the host variant, and that shared library will still be included
 // into the vts test suite.
-func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLibGraph map[string][]string) map[string]android.Paths {
+func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLibGraph map[string][]string, archType android.ArchType) map[string]android.Paths {
 	hostOutTestCases := android.PathForHostInstall(ctx, "testcases")
 	hostOut := filepath.Dir(hostOutTestCases.String())
 
@@ -301,7 +312,7 @@ func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLi
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		if makeName, ok := android.OtherModuleProvider(ctx, m, android.MakeNameInfoProvider); ok {
 			commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
-			if commonInfo.SkipInstall {
+			if commonInfo.SkipInstall || commonInfo.Target.Arch.ArchType != archType {
 				return
 			}
 			installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
@@ -323,11 +334,35 @@ func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLi
 	return hostSharedLibs
 }
 
+// Gather shared library dependencies of host tests that are not installed algonside the test.
+// These common dependencies are installed in testcases/lib[64]/ (to reduce duplication).
+func gatherCommonHostSharedLibsForSymlinks(ctx android.SingletonContext, suite string) map[string]android.Paths {
+	hostOut32And64 := android.PathForHostInstall(ctx, "lib").String()
+	moduleNameToCommonHostSharedLibs := make(map[string]android.Paths)
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
+		commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		testInfo := android.OtherModuleProviderOrDefault(ctx, m, android.TestSuiteInfoProvider)
+		if commonInfo.SkipInstall || !commonInfo.Host || !android.InList(suite, testInfo.TestSuites) {
+			return
+		}
+		installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
+		for _, transitive := range installFilesProvider.TransitiveInstallFiles.ToList() {
+			transitivePathString := transitive.String()
+			if strings.HasPrefix(transitivePathString, hostOut32And64) &&
+				strings.HasSuffix(transitivePathString, ".so") {
+				moduleNameToCommonHostSharedLibs[m.Name()] = append(moduleNameToCommonHostSharedLibs[m.Name()], transitive)
+			}
+		}
+	})
+	return moduleNameToCommonHostSharedLibs
+}
+
 type testSuiteConfig struct {
-	name                           string
-	buildHostSharedLibsZip         bool
-	includeHostSharedLibsInMainZip bool
-	hostJavaToolFiles              android.Paths
+	name                                         string
+	buildHostSharedLibsZip                       bool
+	includeHostSharedLibsInMainZip               bool
+	includeCommonHostSharedLibsSymlinksInMainZip bool
+	hostJavaToolFiles                            android.Paths
 }
 
 func buildTestSuite(ctx android.SingletonContext, suiteName string, files testModulesInstallsMap) (android.Path, android.Path) {
@@ -449,6 +484,41 @@ func packageTestSuite(ctx android.SingletonContext, files, sharedLibs android.Pa
 			if strings.HasPrefix(f.String(), hostOutTestCases.String()) {
 				testsZipCmdHostFileInputContent = append(testsZipCmdHostFileInputContent, f.String())
 				testsZipCmd.Implicit(f)
+
+			}
+		}
+	}
+
+	if suiteConfig.includeCommonHostSharedLibsSymlinksInMainZip {
+		commonHostSharedLibsForSymlinks := gatherCommonHostSharedLibsForSymlinks(ctx, suiteConfig.name)
+		intermediatesDirForSuite := pathForPackaging(ctx, suiteConfig.name)
+		seen := make(map[string]bool)
+		for _, moduleName := range android.SortedKeys(commonHostSharedLibsForSymlinks) {
+			for _, common := range commonHostSharedLibsForSymlinks[moduleName] {
+				var symlink android.WritablePath
+				var symlinkTargetPrefix string
+				if strings.Contains(common.String(), "/lib64/") {
+					symlink = intermediatesDirForSuite.Join(ctx, "x86_64", "shared_libs", common.Base())
+					symlinkTargetPrefix = "../../../lib64"
+				} else {
+					symlink = intermediatesDirForSuite.Join(ctx, "x86", "shared_libs", common.Base())
+					symlinkTargetPrefix = "../../../lib"
+				}
+
+				if _, exists := seen[symlink.String()]; exists {
+					continue
+				}
+				seen[symlink.String()] = true
+				ctx.Build(pctx, android.BuildParams{
+					Rule:   android.Symlink,
+					Output: symlink,
+					Args: map[string]string{
+						"fromPath": fmt.Sprintf("%s/%s", symlinkTargetPrefix, common.Base()),
+					},
+				})
+				testsZipCmd.FlagWithArg("-C ", intermediatesDirForSuite.String())
+				testsZipCmd.FlagWithArg("-P ", fmt.Sprintf("host/testcases/%s/", moduleName))
+				testsZipCmd.FlagWithInput("-f ", symlink)
 			}
 		}
 	}
@@ -457,6 +527,7 @@ func packageTestSuite(ctx android.SingletonContext, files, sharedLibs android.Pa
 
 	testsZipCmd.
 		FlagWithArg("-P ", "host").
+		FlagWithArg("-C ", hostOut).
 		FlagWithInput("-l ", testsZipCmdHostFileInput).
 		FlagWithArg("-P ", "target").
 		FlagWithArg("-C ", targetOut)
@@ -700,9 +771,6 @@ func (m *compatibilityTestSuitePackage) DepsMutator(ctx android.BottomUpMutatorC
 	ctx.AddVariationDependencies(variations, ctspHostJavaToolDeptag, "compatibility-tradefed")
 	ctx.AddVariationDependencies(variations, ctspHostToolDeptag, "test-utils-script")
 	for _, tool := range m.properties.Tools {
-		// TODO update bp files to not have .jar and remove this
-		tool := strings.TrimSuffix(tool, ".jar")
-
 		ctx.AddVariationDependencies(variations, ctspHostJavaToolDeptag, tool)
 	}
 }
@@ -777,7 +845,13 @@ func testSuitePackageFactory() android.Module {
 type testSuitePackageProperties struct {
 	Build_host_shared_libs_zip           *bool
 	Include_host_shared_libs_in_main_zip *bool
-	Host_java_tools                      []string
+	// When true, a symlink will be created per test for any
+	// shared library dependencies that are not installed alongside the test.
+	//
+	// e.g. host/testcases/$test/x86_64/shared_libs/libfoo.so --> ../../../lib64/libfoo.so
+	// The target of the symlink will be the host/testcases/lib64/libfoo.so
+	Include_common_host_shared_libs_symlinks_in_main_zip *bool
+	Host_java_tools                                      []string
 }
 
 type testSuitePackage struct {
@@ -815,6 +889,7 @@ func (t *testSuitePackage) GenerateAndroidBuildActions(ctx android.ModuleContext
 		name:                           t.Name(),
 		buildHostSharedLibsZip:         proptools.Bool(t.properties.Build_host_shared_libs_zip),
 		includeHostSharedLibsInMainZip: proptools.Bool(t.properties.Include_host_shared_libs_in_main_zip),
-		hostJavaToolFiles:              toolFiles,
+		includeCommonHostSharedLibsSymlinksInMainZip: proptools.Bool(t.properties.Include_common_host_shared_libs_symlinks_in_main_zip),
+		hostJavaToolFiles: toolFiles,
 	})
 }
