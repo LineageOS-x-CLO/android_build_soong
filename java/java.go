@@ -267,6 +267,11 @@ type UsesLibraryDependencyInfo struct {
 	ClassLoaderContexts dexpreopt.ClassLoaderContextMap
 }
 
+// Return a deep copy of ClassLoaderContexts.
+func (u *UsesLibraryDependencyInfo) GetClassLoaderContexts() dexpreopt.ClassLoaderContextMap {
+	return u.ClassLoaderContexts.DeepCopy()
+}
+
 type ProvidesUsesLibInfo struct {
 	ProvidesUsesLib *string
 }
@@ -3878,9 +3883,9 @@ func addCLCFromDep(ctx android.ModuleContext, depModule android.ModuleProxy,
 		}
 		clcMap.AddContext(ctx, dexpreopt.AnySdkVersion, *sdkLib, optional,
 			dep.DexJarBuildPath.PathOrNil(),
-			dep.UsesLibraryDependencyInfo.DexJarInstallPath, dep.UsesLibraryDependencyInfo.ClassLoaderContexts)
+			dep.UsesLibraryDependencyInfo.DexJarInstallPath, dep.UsesLibraryDependencyInfo.GetClassLoaderContexts())
 	} else {
-		clcMap.AddContextMap(dep.UsesLibraryDependencyInfo.ClassLoaderContexts, depName)
+		clcMap.AddContextMap(dep.UsesLibraryDependencyInfo.GetClassLoaderContexts(), depName)
 	}
 }
 
