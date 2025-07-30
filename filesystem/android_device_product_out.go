@@ -135,7 +135,7 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 	copyBootImg(a.partitionProps.Init_boot_partition_name, "init_boot")
 	copyBootImg(a.partitionProps.Boot_partition_name, "boot")
 	copyBootImg(a.partitionProps.Vendor_boot_partition_name, "vendor_boot")
-	copyBootImg(a.partitionProps.Vendor_boot_partition_name, "vendor_kernel_boot")
+	copyBootImg(a.partitionProps.Vendor_kernel_boot_partition_name, "vendor_kernel_boot")
 
 	// pvmfw
 	if a.deviceProps.Pvmfw.Image != nil {
@@ -147,6 +147,21 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 			Output: installPath,
 		})
 		deps = append(deps, installPath)
+	}
+
+	// radio
+	if a.deviceProps.Radio_partition_name != nil {
+		radio := ctx.GetDirectDepProxyWithTag(*a.deviceProps.Radio_partition_name, radioDepTag)
+		files := android.OutputFilesForModule(ctx, radio, "")
+		for _, file := range files {
+			installPath := android.PathForModuleInPartitionInstall(ctx, "", file.Base())
+			ctx.Build(pctx, android.BuildParams{
+				Rule:   android.Cp,
+				Input:  file,
+				Output: installPath,
+			})
+			deps = append(deps, installPath)
+		}
 	}
 
 	// dtbo

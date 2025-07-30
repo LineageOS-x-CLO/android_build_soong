@@ -469,7 +469,7 @@ type FilesystemInfo struct {
 	// The root staging directory used to build the output filesystem. If consuming this, make sure
 	// to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja.
-	RootDir android.Path
+	RootDir android.OutputPath
 	// Extra root directories that are also built into the partition. Currently only used for
 	// including the recovery partition files into the vendor_boot image.
 	ExtraRootDirs android.Paths
@@ -477,7 +477,7 @@ type FilesystemInfo struct {
 	// sure to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja. In many cases this is the same as RootDir, only in the system partition is it
 	// different. There, it points to the "system" sub-directory of RootDir.
-	RebasedDir android.Path
+	RebasedDir android.OutputPath
 	// Name of the module that produced this FilesystemInfo origionally. (though it may be
 	// re-exported by super images or boot images)
 	ModuleName string

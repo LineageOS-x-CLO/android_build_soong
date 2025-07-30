@@ -15,12 +15,13 @@
 package filesystem
 
 import (
-	"android/soong/android"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"android/soong/android"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/depset"
@@ -94,7 +95,7 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 	}
 
 	output := android.PathForModuleOut(ctx, "system_other.img")
-	stagingDir := android.PathForModuleOut(ctx, "system_other")
+	stagingDir := android.PathForModuleOut(ctx, "system_other").OutputPath
 	stagingDirTimestamp := android.PathForModuleOut(ctx, "staging_dir.timestamp")
 
 	builder := android.NewRuleBuilder(pctx, ctx)
@@ -122,7 +123,8 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 	(&android.PackagingBase{}).CopySpecsToDir(ctx, builder, specs, stagingDir)
 
 	fullInstallPaths := []FullInstallPathInfo{}
-	for _, spec := range specs {
+	for _, mod := range android.SortedKeys(specs) {
+		spec := specs[mod]
 		fullInstallPaths = append(fullInstallPaths, FullInstallPathInfo{
 			FullInstallPath:     spec.FullInstallPath(),
 			RequiresFullInstall: spec.RequiresFullInstall(),
