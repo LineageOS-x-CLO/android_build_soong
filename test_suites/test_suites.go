@@ -55,8 +55,7 @@ type testSuiteFiles struct{}
 func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 	hostOutTestCases := android.PathForHostInstall(ctx, "testcases")
 	files := make(map[string]testModulesInstallsMap)
-	sharedLibRoots32 := make(map[string][]string)
-	sharedLibRoots64 := make(map[string][]string)
+	sharedLibRoots := make(map[string][]string)
 	sharedLibGraph := make(map[string][]string)
 	allTestSuiteInstalls := make(map[string]android.Paths)
 	var toInstall []android.FilePair
@@ -96,11 +95,7 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 					installFilesProvider.InstallFiles...)
 
 				if makeName != "" {
-					if commonInfo.Target.Arch.ArchType.Bitness() == "32" {
-						sharedLibRoots32[testSuite] = append(sharedLibRoots32[testSuite], makeName)
-					} else {
-						sharedLibRoots64[testSuite] = append(sharedLibRoots64[testSuite], makeName)
-					}
+					sharedLibRoots[testSuite] = append(sharedLibRoots[testSuite], makeName)
 				}
 			}
 
@@ -150,12 +145,7 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 		allTestSuiteInstalls[suite] = android.SortedUniquePaths(suiteInstalls)
 	}
 
-	hostSharedLibs32 := gatherHostSharedLibs(ctx, sharedLibRoots32, sharedLibGraph, android.X86)
-	hostSharedLibs64 := gatherHostSharedLibs(ctx, sharedLibRoots64, sharedLibGraph, android.X86_64)
-	hostSharedLibs := hostSharedLibs64
-	for suite, libs := range hostSharedLibs32 {
-		hostSharedLibs[suite] = append(hostSharedLibs[suite], libs...)
-	}
+	hostSharedLibs := gatherHostSharedLibs(ctx, sharedLibRoots, sharedLibGraph)
 
 	if !ctx.Config().KatiEnabled() {
 		for _, testSuite := range android.SortedKeys(files) {
@@ -274,14 +264,13 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 // Get a mapping from testSuite -> list of host shared libraries, given:
 // - sharedLibRoots: Mapping from testSuite -> androidMk name of all test modules in the suite
 // - sharedLibGraph: Mapping from androidMk name of module -> androidMk names of its shared libs
-// - archType: ArchType to match for including shared libs
 //
 // This mimics how make did it historically, which is filled with inaccuracies. Make didn't
 // track variants and treated all variants as if they were merged into one big module. This means
 // you can have a test that's only included in the "vts" test suite on the device variant, and
 // only has a shared library on the host variant, and that shared library will still be included
 // into the vts test suite.
-func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLibGraph map[string][]string, archType android.ArchType) map[string]android.Paths {
+func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLibGraph map[string][]string) map[string]android.Paths {
 	hostOutTestCases := android.PathForHostInstall(ctx, "testcases")
 	hostOut := filepath.Dir(hostOutTestCases.String())
 
@@ -312,7 +301,7 @@ func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLi
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		if makeName, ok := android.OtherModuleProvider(ctx, m, android.MakeNameInfoProvider); ok {
 			commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
-			if commonInfo.SkipInstall || commonInfo.Target.Arch.ArchType != archType {
+			if commonInfo.SkipInstall {
 				return
 			}
 			installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
@@ -651,6 +640,14 @@ func buildCompatibilitySuitePackage(
 		builder.Command().Text("cp").Input(suite.DynamicConfig).Output(hostOutTestCases.Join(ctx, testSuiteName+".dynamic"))
 	}
 
+	hostSharedLibs := suite.HostSharedLibs
+	for _, hostSharedLib := range hostSharedLibs {
+		cmd.
+			FlagWithArg("-e ", subdir+"/lib64/"+hostSharedLib.Base()).
+			FlagWithInput("-f ", hostSharedLib)
+		copyTool(hostSharedLib)
+	}
+
 	licenceInfos := slices.Concat(android.GetNoticeModuleInfos(ctx, testSuiteModules), suite.ToolNoticeInfo)
 	if len(licenceInfos) > 0 {
 		notice := android.PathForOutput(ctx, "compatibility_test_suites", testSuiteName, "NOTICE.txt")
@@ -722,10 +719,11 @@ func compatibilityTestSuitePackageFactory() android.Module {
 }
 
 type compatibilityTestSuitePackageProperties struct {
-	Tradefed       *string
-	Readme         *string `android:"path"`
-	Tools          []string
-	Dynamic_config *string `android:"path"`
+	Tradefed         *string
+	Readme           *string `android:"path"`
+	Tools            []string
+	Dynamic_config   *string `android:"path"`
+	Host_shared_libs []string
 }
 
 type compatibilityTestSuitePackage struct {
@@ -739,6 +737,7 @@ type compatibilitySuitePackageInfo struct {
 	DynamicConfig  android.Path
 	ToolFiles      android.Paths
 	ToolNoticeInfo android.NoticeModuleInfos
+	HostSharedLibs android.Paths
 }
 
 var compatibilitySuitePackageProvider = blueprint.NewProvider[compatibilitySuitePackageInfo]()
@@ -761,6 +760,12 @@ type ctspHostToolDeptagType struct {
 
 var ctspHostToolDeptag = ctspHostToolDeptagType{}
 
+type ctspHostSharedLibDeptagType struct {
+	blueprint.BaseDependencyTag
+}
+
+var ctspHostSharedLibDeptag = ctspHostSharedLibDeptagType{}
+
 func (m *compatibilityTestSuitePackage) DepsMutator(ctx android.BottomUpMutatorContext) {
 	variations := ctx.Config().BuildOSTarget.Variations()
 	ctx.AddVariationDependencies(variations, ctspTradefedDeptag, proptools.String(m.properties.Tradefed))
@@ -772,6 +777,9 @@ func (m *compatibilityTestSuitePackage) DepsMutator(ctx android.BottomUpMutatorC
 	ctx.AddVariationDependencies(variations, ctspHostToolDeptag, "test-utils-script")
 	for _, tool := range m.properties.Tools {
 		ctx.AddVariationDependencies(variations, ctspHostJavaToolDeptag, tool)
+	}
+	for _, host_shared_lib := range m.properties.Host_shared_libs {
+		ctx.AddVariationDependencies(variations, ctspHostSharedLibDeptag, host_shared_lib)
 	}
 }
 
@@ -816,6 +824,15 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 		toolNoticeinfo = append(toolNoticeinfo, android.GetNoticeModuleInfo(ctx, dep))
 	})
 
+	var hostSharedLibs android.Paths
+	ctx.VisitDirectDepsProxyWithTag(ctspHostSharedLibDeptag, func(dep android.ModuleProxy) {
+		libs := android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider).InstallFiles
+		for _, lib := range libs {
+			hostSharedLibs = append(hostSharedLibs, lib)
+		}
+		toolNoticeinfo = append(toolNoticeinfo, android.GetNoticeModuleInfo(ctx, dep))
+	})
+
 	var readme android.Path
 	if m.properties.Readme != nil {
 		readme = android.PathForModuleSrc(ctx, *m.properties.Readme)
@@ -832,6 +849,7 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 		DynamicConfig:  dynamicConfig,
 		ToolFiles:      toolFiles,
 		ToolNoticeInfo: toolNoticeinfo,
+		HostSharedLibs: hostSharedLibs,
 	})
 }
 

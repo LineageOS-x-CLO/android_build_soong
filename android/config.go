@@ -469,7 +469,7 @@ type partialCompileFlags struct {
 	// Add others as needed.
 }
 
-// These are the flags when `SOONG_PARTIAL_COMPILE` is empty or not set.
+// These are the flags when `SOONG_PARTIAL_COMPILE=default`.
 var defaultPartialCompileFlags = partialCompileFlags{}
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=true`.
@@ -512,9 +512,10 @@ type jsonConfigurable interface {
 //
 // The user-facing documentation shows:
 //
-// - empty or not set: "The current default state"
-// - "true" or "on": enable all stable partial compile features.
-// - "false" or "off": disable partial compile completely.
+//   - empty, "false", or "off": disable partial compile completely.
+//   - "default": "The current default state"  This is the value typically assigned in
+//     `${ANDROID_BUILD_ENVIRONMENT_CONFIG_DIR}/${ANDROID_BUILD_ENVIRONMENT_CONFIG}.json`.
+//   - "true" or "on": enable all stable partial compile features.
 //
 // What we actually allow is a comma separated list of tokens, whose first
 // character may be "+" (enable) or "-" (disable).  If neither is present, "+"
@@ -531,19 +532,19 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 	}
 	value := c.Getenv("SOONG_PARTIAL_COMPILE")
 	if value == "" {
-		return defaultPartialCompileFlags, nil
+		return partialCompileFlags{}, nil
 	}
 
-	ret := defaultPartialCompileFlags
+	ret := partialCompileFlags{}
 	tokens := strings.Split(strings.ToLower(value), ",")
-	makeVal := func(state string, defaultValue bool) bool {
+	makeVal := func(state string) bool {
 		switch state {
-		case "":
-			return defaultValue
 		case "-":
 			return false
 		case "+":
 			return true
+		default:
+			panic(fmt.Errorf("Invalid state %v in parsePartialCompileFlags.makeVal", state))
 		}
 		return false
 	}
@@ -567,6 +568,8 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 		// Big toggle switches.
 		case "false":
 			ret = partialCompileFlags{}
+		case "default":
+			ret = defaultPartialCompileFlags
 		case "true":
 			ret = enabledPartialCompileFlags
 		case "all":
@@ -574,30 +577,32 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 
 		// Individual flags.
 		case "inc_d8_outside_platform", "enable_inc_d8_outside_platform":
-			ret.Enable_inc_d8_outside_platform = makeVal(state, !defaultPartialCompileFlags.Enable_inc_d8_outside_platform)
+			ret.Enable_inc_d8_outside_platform = makeVal(state)
 		case "disable_inc_d8_outside_platform":
-			ret.Enable_inc_d8_outside_platform = !makeVal(state, defaultPartialCompileFlags.Enable_inc_d8_outside_platform)
+			ret.Enable_inc_d8_outside_platform = !makeVal(state)
 
 		case "inc_d8", "enable_inc_d8":
-			ret.Enable_inc_d8 = makeVal(state, !defaultPartialCompileFlags.Enable_inc_d8)
+			ret.Enable_inc_d8 = makeVal(state)
 		case "disable_inc_d8":
-			ret.Enable_inc_d8 = !makeVal(state, defaultPartialCompileFlags.Enable_inc_d8)
+			ret.Enable_inc_d8 = !makeVal(state)
 
 		case "inc_javac", "enable_inc_javac":
-			ret.Enable_inc_javac = makeVal(state, !defaultPartialCompileFlags.Enable_inc_javac)
+			ret.Enable_inc_javac = makeVal(state)
 		case "disable_inc_javac":
-			ret.Enable_inc_javac = !makeVal(state, defaultPartialCompileFlags.Enable_inc_javac)
+			ret.Enable_inc_javac = !makeVal(state)
 		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
-			ret.Enable_inc_kotlin_java_dep = makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
+			ret.Enable_inc_kotlin_java_dep = makeVal(state)
 		case "disable_inc_kotlin_java_dep":
-			ret.Enable_inc_kotlin_java_dep = !makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
+			ret.Enable_inc_kotlin_java_dep = !makeVal(state)
+
 		case "stub_validation", "enable_stub_validation":
-			ret.Disable_stub_validation = !makeVal(state, !defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = !makeVal(state)
 		case "disable_stub_validation":
-			ret.Disable_stub_validation = makeVal(state, defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = makeVal(state)
 
 		case "use_d8":
-			ret.Use_d8 = makeVal(state, defaultPartialCompileFlags.Use_d8)
+			ret.Use_d8 = makeVal(state)
+
 		default:
 			return partialCompileFlags{}, fmt.Errorf("Unknown SOONG_PARTIAL_COMPILE value: %v", tok)
 		}
@@ -2039,7 +2044,7 @@ func findOverrideValue(overrides []string, name string, errorMsg string) (newVal
 			// This shouldn't happen as this is first checked in make, but just in case.
 			panic(fmt.Errorf(errorMsg, o))
 		}
-		if matchPattern(split[0], name) {
+		if MatchPattern(split[0], name) {
 			return substPattern(split[0], split[1], name), true
 		}
 	}

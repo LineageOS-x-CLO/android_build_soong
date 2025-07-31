@@ -3322,7 +3322,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	j.combinedHeaderFile = headerJar.WithoutRel()
 	j.combinedImplementationFile = outputFile.WithoutRel()
 
-	j.maybeInstall(ctx, jarName, outputFile)
+	installFile := j.maybeInstall(ctx, jarName, outputFile)
 
 	j.exportAidlIncludeDirs = android.PathsForModuleSrc(ctx, j.properties.Aidl.Export_include_dirs)
 
@@ -3381,6 +3381,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	javaInfo := &JavaInfo{
+		InstallFile:                            installFile,
 		HeaderJars:                             android.PathsIfNonNil(j.combinedHeaderFile),
 		LocalHeaderJars:                        android.PathsIfNonNil(j.combinedHeaderFile),
 		TransitiveLibsHeaderJarsForR8:          j.transitiveLibsHeaderJarsForR8,
@@ -3427,9 +3428,9 @@ func (j *Import) addKSnapshot(ctx android.ModuleContext, jarFile android.Path) {
 	}
 }
 
-func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) {
+func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) android.Path {
 	if !Bool(j.properties.Installable) {
-		return
+		return nil
 	}
 
 	var installDir android.InstallPath
@@ -3442,7 +3443,7 @@ func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputF
 	} else {
 		installDir = android.PathForModuleInstall(ctx, "framework")
 	}
-	ctx.InstallFile(installDir, jarName, outputFile)
+	return ctx.InstallFile(installDir, jarName, outputFile)
 }
 
 func (j *Import) HeaderJars() android.Paths {
