@@ -1195,7 +1195,7 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			j.dexpreopter.disableDexpreopt()
 		}
 	}
-	javaInfo := j.compile(ctx, nil, nil, nil, nil)
+	javaInfo := j.compile(ctx)
 
 	j.setInstallRules(ctx)
 
@@ -2855,7 +2855,7 @@ func (al *ApiLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	annoSrcJar := android.PathForModuleOut(ctx, ctx.ModuleName(), "anno.srcjar")
 
 	TransformJavaToClasses(ctx, al.stubsJarWithoutStaticLibs, 0, android.Paths{},
-		android.Paths{al.stubsSrcJar}, annoSrcJar, javacFlags, android.Paths{})
+		android.Paths{al.stubsSrcJar}, annoSrcJar, javacFlags, android.Paths{}, nil)
 
 	builder := android.NewRuleBuilder(pctx, ctx)
 	builder.Command().

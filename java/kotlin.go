@@ -63,7 +63,7 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 		Restat:         true,
 	},
 	"kotlincFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "classesDir",
-	"headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir", "name")
+	"headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir", "name", "jarArgs")
 
 var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
@@ -131,8 +131,7 @@ func SnapshotJarForKotlin(ctx android.ModuleContext, jarFile android.WritablePat
 
 // kotlinCompile takes .java and .kt sources and srcJars, and compiles the .kt sources into a classes jar in outputFile.
 func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutputFile android.WritablePath,
-	srcFiles, commonSrcFiles, srcJars android.Paths,
-	flags javaBuilderFlags) {
+	srcFiles, commonSrcFiles, srcJars android.Paths, flags javaBuilderFlags, manifest android.OptionalPath) {
 
 	var deps android.Paths
 	deps = append(deps, flags.kotlincClasspath...)
