@@ -661,6 +661,8 @@ var (
 		bootClasspathTag,
 		systemModulesTag,
 		java9LibTag,
+		composePluginTag,
+		composeEmbeddablePluginTag,
 		kotlinPluginTag,
 		syspropPublicStubDepTag,
 		instrumentationForTag,
@@ -770,7 +772,9 @@ type deps struct {
 	srcJars                 android.Paths
 	systemModules           *systemModules
 	aidlPreprocess          android.OptionalPath
-	kSnapshotFiles          map[string]android.Path
+	composeEmbeddablePlugin android.OptionalPath
+	composePlugin           android.OptionalPath	
+    kSnapshotFiles          map[string]android.Path
 	kotlinPlugins           android.Paths
 	aconfigProtoFiles       android.Paths
 

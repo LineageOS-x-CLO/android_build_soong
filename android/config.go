@@ -458,7 +458,10 @@ type partialCompileFlags struct {
 	// Whether to enable incremental java compilation.
 	Enable_inc_javac bool
 
-	// Whether to enable incremental d8
+    // Whether to use the kotlin-incremental-client when compiling .kt files.
+	Enable_inc_kotlin bool	
+
+ 	// Whether to enable incremental d8
 	Enable_inc_d8 bool
 
 	// Whether to enable passing dependencies incrementally from kotlin to java.
@@ -476,6 +479,7 @@ var defaultPartialCompileFlags = partialCompileFlags{}
 var enabledPartialCompileFlags = partialCompileFlags{
 	Use_d8:                         true,
 	Disable_stub_validation:        true,
+	Enable_inc_kotlin:              false,
 	Enable_inc_javac:               true,
 	Enable_inc_d8:                  true,
 	Enable_inc_kotlin_java_dep:     true,
@@ -487,6 +491,7 @@ var allPartialCompileFlags = partialCompileFlags{
 	Use_d8:                         true,
 	Disable_stub_validation:        true,
 	Enable_inc_javac:               true,
+	Enable_inc_kotlin:              true,
 	Enable_inc_d8:                  true,
 	Enable_inc_kotlin_java_dep:     true,
 	Enable_inc_d8_outside_platform: true,
@@ -590,10 +595,16 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			ret.Enable_inc_javac = makeVal(state)
 		case "disable_inc_javac":
 			ret.Enable_inc_javac = !makeVal(state)
+
 		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
 			ret.Enable_inc_kotlin_java_dep = makeVal(state)
 		case "disable_inc_kotlin_java_dep":
 			ret.Enable_inc_kotlin_java_dep = !makeVal(state)
+
+		case "inc_kotlin", "enable_inc_kotlin":
+			ret.Enable_inc_kotlin = makeVal(state)
+		case "disable_inc_kotlin":
+			ret.Enable_inc_kotlin = !makeVal(state)
 
 		case "stub_validation", "enable_stub_validation":
 			ret.Disable_stub_validation = !makeVal(state)
