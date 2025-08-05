@@ -23,8 +23,6 @@ import (
 	"sync"
 	"android/soong/android"
 	"android/soong/cc/config"
-
-	"github.com/google/blueprint/proptools"
 )
 
 var (
@@ -447,13 +445,7 @@ func checkAbiDumpList(ctx android.SingletonContext, stubLibraries []string) {
 
 	checkAbiDumpListTimestamp := android.PathForOutput(ctx, "check-abi-dump-list-timestamp")
 	if len(errorMsg) > 0 {
-		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.ErrorRuleNoQuotes,
-			Output: checkAbiDumpListTimestamp,
-			Args: map[string]string{
-				"error": proptools.NinjaAndShellEscape(errorMsg),
-			},
-		})
+		android.ErrorRule(ctx, checkAbiDumpListTimestamp, errorMsg)
 	} else {
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   android.Touch,
