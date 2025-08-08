@@ -190,22 +190,22 @@ func generatedPartitions(ctx android.EarlyModuleContext) allGeneratedPartitionDa
 			supported:     true,
 		})
 	}
-	if buildingSystemImage(partitionVars) {
-		if ctx.Config().UseSoongSystemImage() {
-			if ctx.Config().SoongDefinedSystemImage() == "" {
-				panic("PRODUCT_SOONG_DEFINED_SYSTEM_IMAGE must be set if USE_SOONG_DEFINED_SYSTEM_IMAGE is true")
-			}
-			result = append(result, generatedPartitionData{
-				partitionType: "system",
-				moduleName:    ctx.Config().SoongDefinedSystemImage(),
-				supported:     true,
-				handwritten:   true,
-			})
-		} else {
-			addGenerated("system")
+	// Always create system and system_ext partition due to still need it for finding deps for vendor or product partition.
+	if ctx.Config().UseSoongSystemImage() {
+		if ctx.Config().SoongDefinedSystemImage() == "" {
+			panic("PRODUCT_SOONG_DEFINED_SYSTEM_IMAGE must be set if USE_SOONG_DEFINED_SYSTEM_IMAGE is true")
 		}
+		result = append(result, generatedPartitionData{
+			partitionType: "system",
+			moduleName:    ctx.Config().SoongDefinedSystemImage(),
+			supported:     true,
+			handwritten:   true,
+		})
+	} else {
+		addGenerated("system")
 	}
-	if buildingSystemExtImage(partitionVars) && ctx.DeviceConfig().SystemExtPath() == "system_ext" {
+	// Auto generate system_ext filesystem if SystemExtPath() is 'system_ext' the partition will not needed if its value is 'system/system_ext'.
+	if ctx.DeviceConfig().SystemExtPath() == "system_ext" {
 		addGenerated("system_ext")
 	}
 	if ctx.DeviceConfig().BuildingVendorImage() && ctx.DeviceConfig().VendorPath() == "vendor" {
@@ -340,6 +340,8 @@ func (f *filesystemCreator) createInternalModules(ctx android.LoadHookContext) {
 	if buildingSuperImage(partitionVars) {
 		superImageSubpartitions = createSuperImage(ctx, partitions, partitionVars, systemOtherImageName)
 		f.properties.Super_image = ":" + generatedModuleNameForPartition(ctx.Config(), "super")
+	} else if partitionVars.ProductUseDynamicPartitions {
+		createSuperImage(ctx, partitions, partitionVars, systemOtherImageName)
 	}
 
 	ctx.Config().Get(fsGenStateOnceKey).(*FsGenState).soongGeneratedPartitions = partitions
@@ -444,6 +446,24 @@ func (f *filesystemCreator) createDeviceModule(
 	vbmetaPartitions []string,
 	superImageSubPartitions []string,
 ) {
+	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
+
+	var vendorBlobsLicenseProp *string
+	if partitionVars.VendorBlobsLicense != "" {
+		vendorBlobsLicenceFilegroupName := generatedModuleName(ctx.Config(), "vendor_blobs_license")
+		filegroupProps := &struct {
+			Name       *string
+			Srcs       []string
+			Visibility []string
+		}{
+			Name:       proptools.StringPtr(vendorBlobsLicenceFilegroupName),
+			Srcs:       []string{filepath.Base(partitionVars.VendorBlobsLicense)},
+			Visibility: []string{"//build/soong/fsgen:__subpackages__"},
+		}
+		ctx.CreateModuleInDirectory(android.FileGroupFactory, filepath.Dir(partitionVars.VendorBlobsLicense), filegroupProps)
+		vendorBlobsLicenseProp = proptools.StringPtr(":" + vendorBlobsLicenceFilegroupName)
+	}
+
 	baseProps := &struct {
 		Name *string
 	}{
@@ -454,12 +474,18 @@ func (f *filesystemCreator) createDeviceModule(
 	partitionProps := &filesystem.PartitionNameProperties{}
 	if f.properties.Super_image != "" {
 		partitionProps.Super_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "super"))
+	} else if partitionVars.ProductUseDynamicPartitions {
+		partitionProps.Dynamic_config_only_super_partition_name = proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), "super"))
 	}
-	if modName := partitions.nameForType("system"); modName != "" && !android.InList("system", superImageSubPartitions) {
-		partitionProps.System_partition_name = proptools.StringPtr(modName)
+	if buildingSystemImage(partitionVars) {
+		if modName := partitions.nameForType("system"); modName != "" && !android.InList("system", superImageSubPartitions) {
+			partitionProps.System_partition_name = proptools.StringPtr(modName)
+		}
 	}
-	if modName := partitions.nameForType("system_ext"); modName != "" && !android.InList("system_ext", superImageSubPartitions) {
-		partitionProps.System_ext_partition_name = proptools.StringPtr(modName)
+	if buildingSystemExtImage(partitionVars) {
+		if modName := partitions.nameForType("system_ext"); modName != "" && !android.InList("system_ext", superImageSubPartitions) {
+			partitionProps.System_ext_partition_name = proptools.StringPtr(modName)
+		}
 	}
 	if modName := partitions.nameForType("vendor"); modName != "" && !android.InList("vendor", superImageSubPartitions) {
 		partitionProps.Vendor_partition_name = proptools.StringPtr(modName)
@@ -505,16 +531,17 @@ func (f *filesystemCreator) createDeviceModule(
 
 	deviceProps := &filesystem.DeviceProperties{
 		Main_device:                         proptools.BoolPtr(true),
-		Ab_ota_updater:                      proptools.BoolPtr(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.AbOtaUpdater),
-		Ab_ota_partitions:                   ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.AbOtaPartitions,
-		Ab_ota_postinstall_config:           ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.AbOtaPostInstallConfig,
+		Ab_ota_updater:                      proptools.BoolPtr(partitionVars.AbOtaUpdater),
+		Ab_ota_partitions:                   partitionVars.AbOtaPartitions,
+		Ab_ota_postinstall_config:           partitionVars.AbOtaPostInstallConfig,
 		Ramdisk_node_list:                   proptools.StringPtr(":ramdisk_node_list"),
-		Android_info:                        proptools.StringPtr(":" + generatedModuleName(ctx.Config(), "android_info.prop{.txt}")),
+		Android_info:                        proptools.StringPtr(generatedModuleName(ctx.Config(), "android_info.prop")),
 		Kernel_version:                      ctx.Config().ProductVariables().BoardKernelVersion,
-		Partial_ota_update_partitions:       ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BoardPartialOtaUpdatePartitionsList,
-		Flash_block_size:                    proptools.StringPtr(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BoardFlashBlockSize),
-		Bootloader_in_update_package:        proptools.BoolPtr(ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BootloaderInUpdatePackage),
+		Partial_ota_update_partitions:       partitionVars.BoardPartialOtaUpdatePartitionsList,
+		Flash_block_size:                    proptools.StringPtr(partitionVars.BoardFlashBlockSize),
+		Bootloader_in_update_package:        proptools.BoolPtr(partitionVars.BootloaderInUpdatePackage),
 		Precompiled_sepolicy_without_vendor: proptools.StringPtr(":precompiled_sepolicy_without_vendor"),
+		Vendor_blobs_license:                vendorBlobsLicenseProp,
 	}
 
 	if f.properties.Bootloader != "" {
@@ -548,16 +575,16 @@ func (f *filesystemCreator) createDeviceModule(
 }
 
 func createRadioImg(ctx android.LoadHookContext) string {
-	radioFilePath := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.RadioFilePath
+	radioFilePath := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BoardRadioImagePath
 	if radioFilePath == "" {
 		return ""
 	}
-	if path := android.ExistentPathForSource(ctx, radioFilePath, "radio.img"); !path.Valid() {
+	if path := android.ExistentPathForSource(ctx, radioFilePath); !path.Valid() {
 		return ""
 	}
 	name := generatedModuleNameForPartition(ctx.Config(), "radio")
 	radioImgProps := filesystem.PrebuiltRadioImgProperties{
-		Src:               proptools.StringPtr(radioFilePath + "/radio.img"),
+		Src:               proptools.StringPtr(radioFilePath),
 		Ab_ota_partitions: ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.AbOtaRadioPartitions,
 		Unpack_tool:       proptools.StringPtr(fmt.Sprintf("vendor/google_devices/%s/prebuilts/misc_bins/unpack.py", proptools.String(ctx.Config().ProductVariables().BoardPlatform))),
 	}
@@ -1097,13 +1124,8 @@ func (f *filesystemCreator) createAndroidInfo(ctx android.LoadHookContext) {
 	// The board info files might be in a directory outside the root soong namespace, so create
 	// the module in "."
 	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
-	androidInfoProps := &struct {
-		Name                  *string
-		Board_info_files      []string
-		Bootloader_board_name *string
-		Stem                  *string
-	}{
-		Name:             proptools.StringPtr(generatedModuleName(ctx.Config(), "android_info.prop")),
+	androidInfoProps := &android.AndroidInfoProperties{
+
 		Board_info_files: partitionVars.BoardInfoFiles,
 		Stem:             proptools.StringPtr("android-info.txt"),
 	}
@@ -1113,6 +1135,11 @@ func (f *filesystemCreator) createAndroidInfo(ctx android.LoadHookContext) {
 	androidInfoProp := ctx.CreateModuleInDirectory(
 		android.AndroidInfoFactory,
 		".",
+		&struct {
+			Name *string
+		}{
+			Name: proptools.StringPtr(generatedModuleName(ctx.Config(), "android_info.prop")),
+		},
 		androidInfoProps,
 	)
 	androidInfoProp.HideFromMake()

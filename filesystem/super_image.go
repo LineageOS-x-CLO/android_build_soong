@@ -88,6 +88,8 @@ type SuperImageProperties struct {
 	Super_image_in_update_package *bool
 	// Whether a super_empty.img should be created
 	Create_super_empty *bool
+	// This is used for generating dynamic config, in soong we need the super.img being processed for dynamic config, will use this to overwrite the build_super_partition for dynamic config.
+	Build_super_partition *bool
 }
 
 type PartitionGroupsInfo struct {
@@ -322,24 +324,20 @@ func (s *superImage) buildMiscInfo(ctx android.ModuleContext, superEmpty bool) (
 
 func (s *superImage) filterMissingPartitions(ctx android.ModuleContext, partitionList []string) []string {
 	ret := []string{}
+	// In make it will only filter out not existing partitions for vendor, vendor_dlkm, odm, odm_dlkm, and system_dlkm.
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=6192
 	for _, p := range partitionList {
 		switch p {
 		case "system":
-			if s.partitionProps.System_partition != nil {
-				ret = append(ret, p)
-			}
+			ret = append(ret, p)
 		case "system_dlkm":
 			if s.partitionProps.System_dlkm_partition != nil {
 				ret = append(ret, p)
 			}
 		case "system_ext":
-			if s.partitionProps.System_ext_partition != nil {
-				ret = append(ret, p)
-			}
+			ret = append(ret, p)
 		case "product":
-			if s.partitionProps.Product_partition != nil {
-				ret = append(ret, p)
-			}
+			ret = append(ret, p)
 		case "vendor":
 			if s.partitionProps.Vendor_partition != nil {
 				ret = append(ret, p)
@@ -376,7 +374,9 @@ func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *str
 		addStr("dynamic_partition_retrofit", "true")
 	}
 	addStr("lpmake", "lpmake")
-	addStr("build_super_partition", "true")
+	if proptools.BoolDefault(s.properties.Build_super_partition, true) {
+		addStr("build_super_partition", "true")
+	}
 	if proptools.Bool(s.properties.Create_super_empty) {
 		addStr("build_super_empty_partition", "true")
 	}
