@@ -582,6 +582,10 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 	} else {
 		a.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
 	}
+        if moduleBuildTargetsInfo.ModulePhonyTarget != nil {
+                a.SetPath("LOCAL_ADDITIONAL_CHECKED_MODULE", moduleBuildTargetsInfo.ModulePhonyTarget)
+        }
+
         platformAvailabilityInfo := OtherModuleProviderOrDefault(ctx, mod, PlatformAvailabilityInfoProvider)
         a.SetBoolIfTrue("LOCAL_NOT_AVAILABLE_FOR_PLATFORM", platformAvailabilityInfo.NotAvailableToPlatform)
 
@@ -1539,6 +1543,10 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 		helperInfo.SetPath("LOCAL_CHECKED_MODULE", moduleBuildTargetsInfo.CheckbuildTarget)
 	} else {
 		helperInfo.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
+	}
+
+	if moduleBuildTargetsInfo.ModulePhonyTarget != nil {
+		helperInfo.SetPath("LOCAL_ADDITIONAL_CHECKED_MODULE", moduleBuildTargetsInfo.ModulePhonyTarget)
 	}
 
 	if len(info.TestData) > 0 {

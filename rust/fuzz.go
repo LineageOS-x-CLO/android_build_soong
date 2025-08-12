@@ -55,9 +55,9 @@ func NewRustFuzz(hod android.HostOrDeviceSupported) (*Module, *fuzzDecorator) {
 	}
 
 	// Change the defaults for the binaryDecorator's baseCompiler
-	fuzz.binaryDecorator.baseCompiler.dir = "fuzz"
-	fuzz.binaryDecorator.baseCompiler.dir64 = "fuzz"
-	fuzz.binaryDecorator.baseCompiler.location = InstallInData
+	fuzz.dir = "fuzz"
+	fuzz.dir64 = "fuzz"
+	fuzz.location = InstallInData
 	module.sanitize.SetSanitizer(cc.Fuzzer, true)
 
 	// The fuzzer runtime is not present for darwin or bionic host modules, so disable rust_fuzz modules for these.
@@ -109,7 +109,7 @@ func (fuzzer *fuzzDecorator) compilerDeps(ctx DepsContext, deps Deps) Deps {
 	return deps
 }
 
-func (fuzzer *fuzzDecorator) compilerProps() []interface{} {
+func (fuzzer *fuzzDecorator) compilerProps() []any {
 	return append(fuzzer.binaryDecorator.compilerProps(),
 		&fuzzer.fuzzPackagedModule.FuzzProperties)
 }
@@ -121,8 +121,8 @@ func (fuzzer *fuzzDecorator) compile(ctx ModuleContext, flags Flags, deps PathDe
 	return out
 }
 
-func (fuzzer *fuzzDecorator) stdLinkage(device bool) RustLinkage {
-	return RlibLinkage
+func (fuzzer *fuzzDecorator) stdLinkage(device bool) StdLinkage {
+	return RlibStd
 }
 
 func (fuzzer *fuzzDecorator) autoDep(ctx android.BottomUpMutatorContext) autoDep {
@@ -142,8 +142,8 @@ func (fuzz *fuzzDecorator) install(ctx ModuleContext) {
 	fuzz.sharedLibraries, _ = cc.CollectAllSharedDependencies(ctx)
 
 	for _, sharedLib := range fuzz.sharedLibraries {
-		fuzz.binaryDecorator.installDeps = append(
-			fuzz.binaryDecorator.installDeps,
+		fuzz.installDeps = append(
+			fuzz.installDeps,
 			sharedLib.Dst,
 		)
 	}
