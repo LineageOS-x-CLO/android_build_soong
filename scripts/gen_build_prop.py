@@ -68,6 +68,13 @@ def parse_args():
   args.config = json.load(args.product_config)
   config = args.config
 
+  if args.partition == "system":
+    config['ProductBrand'] = config['SystemBrand']
+    config['DeviceName'] = config['SystemDevice']
+    config['ProductManufacturer'] = config['SystemManufacturer']
+    config['ProductModel'] = config['SystemModel']
+    config['DeviceProduct'] = config['SystemName']
+
   config["BuildFlavor"] = get_build_flavor(config)
   config["BuildKeys"] = get_build_keys(config)
   config["BuildVariant"] = get_build_variant(config)
@@ -116,18 +123,11 @@ def generate_common_build_props(args):
   build_flags = config["BuildFlags"]
   partition = args.partition
 
-  if partition == "system":
-    print(f"ro.product.{partition}.brand={config['SystemBrand']}")
-    print(f"ro.product.{partition}.device={config['SystemDevice']}")
-    print(f"ro.product.{partition}.manufacturer={config['SystemManufacturer']}")
-    print(f"ro.product.{partition}.model={config['SystemModel']}")
-    print(f"ro.product.{partition}.name={config['SystemName']}")
-  else:
-    print(f"ro.product.{partition}.brand={config['ProductBrand']}")
-    print(f"ro.product.{partition}.device={config['DeviceName']}")
-    print(f"ro.product.{partition}.manufacturer={config['ProductManufacturer']}")
-    print(f"ro.product.{partition}.model={config['ProductModel']}")
-    print(f"ro.product.{partition}.name={config['DeviceProduct']}")
+  print(f"ro.product.{partition}.brand={config['ProductBrand']}")
+  print(f"ro.product.{partition}.device={config['DeviceName']}")
+  print(f"ro.product.{partition}.manufacturer={config['ProductManufacturer']}")
+  print(f"ro.product.{partition}.model={config['ProductModel']}")
+  print(f"ro.product.{partition}.name={config['DeviceProduct']}")
 
   if partition != "system":
     if config["ProductModelForAttestation"]:
@@ -177,11 +177,7 @@ def generate_build_info(args):
   config = args.config
   build_flags = config["BuildFlags"]
 
-  # The ro.build.id will be set dynamically by init, by appending the unique vbmeta digest.
-  if config["BoardUseVbmetaDigestInFingerprint"]:
-    print(f"ro.build.legacy.id={config['BuildId']}")
-  else:
-    print(f"ro.build.id?={config['BuildId']}")
+  print(f"ro.build.id?={config['BuildId']}")
 
   # ro.build.display.id is shown under Settings -> About Phone
   if config["BuildVariant"] == "user":
@@ -234,9 +230,6 @@ def generate_build_info(args):
   if config["ProductLocales"]:
     print(f"ro.product.locale={config['ProductLocales'][0]}")
   print(f"ro.wifi.channels={' '.join(config['ProductDefaultWifiChannels'])}")
-
-  print(f"# ro.build.product is obsolete; use ro.product.device")
-  print(f"ro.build.product={config['DeviceName']}")
 
   print(f"# Do not try to parse description or thumbprint")
   print(f"ro.build.description?={config['BuildDesc']}")
@@ -453,11 +446,6 @@ def append_additional_vendor_props(args):
   if config["DontUseVabcOta"]:
     props.append(f"ro.vendor.build.dont_use_vabc=true")
 
-  # Set the flag in vendor. So VTS would know if the new fingerprint format is in use when
-  # the system images are replaced by GSI.
-  if config["BoardUseVbmetaDigestInFingerprint"]:
-    props.append(f"ro.vendor.build.fingerprint_has_digest=1")
-
   props.append(f"ro.vendor.build.security_patch={config['VendorSecurityPatch']}")
   props.append(f"ro.product.board={config['BootloaderBoardName']}")
   props.append(f"ro.board.platform={config['BoardPlatform']}")
@@ -574,7 +562,10 @@ def build_product_prop(args):
   if config["UsesProductImage"]:
     gen_common_build_props = True
 
-  build_prop(args, gen_build_info=False, gen_common_build_props=True, variables=variables)
+  # Product is the most product-specific partition. So it is the best place to
+  # have the build info.
+  # Product props will be read for any duplicatied properties.
+  build_prop(args, gen_build_info=True, gen_common_build_props=gen_common_build_props, variables=variables)
 
   if config["OemProperties"]:
     print("####################################")

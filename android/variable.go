@@ -565,8 +565,6 @@ type ProductVariables struct {
 
 	ProductDefaultWifiChannels []string `json:",omitempty"`
 
-	BoardUseVbmetaDigestInFingerprint *bool `json:",omitempty"`
-
 	OemProperties []string `json:",omitempty"`
 
 	ArtTargetIncludeDebugBuild *bool `json:",omitempty"`
@@ -719,7 +717,6 @@ type PartitionVariables struct {
 	BoardInitBootimagePartitionSize   string   `json:",omitempty"`
 	BoardBootHeaderVersion            string   `json:",omitempty"`
 	BoardInitBootHeaderVersion        string   `json:",omitempty"`
-	TargetKernelPath                  string   `json:",omitempty"`
 	BoardUsesGenericKernelImage       bool     `json:",omitempty"`
 	BootSecurityPatch                 string   `json:",omitempty"`
 	InitBootSecurityPatch             string   `json:",omitempty"`
@@ -736,6 +733,8 @@ type PartitionVariables struct {
 	BoardPrebuiltDtbDir               string   `json:",omitempty"`
 	BoardKernelModules16K             []string `json:",omitempty"`
 	BoardKernelModulesLoad16K         []string `json:",omitempty"`
+	BuildingDebugBootImage            bool     `json:",omitempty"`
+	BuildingDebugVendorBootImage      bool     `json:",omitempty"`
 
 	// Radio stuff
 	AbOtaRadioPartitions      []string `json:",omitempty"`
