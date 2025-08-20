@@ -38,7 +38,7 @@ const inputDeltaCmd = `${config.FindInputDeltaCmd} --target "$out" ` +
 const nonIncKotlinCmd = `rm -rf "$classesDir" "$headerClassesDir" "$srcJarDir" "$kotlinBuildFile" "$emptyDir" && ` +
 	`mkdir -p "$classesDir" "$headerClassesDir" "$srcJarDir" "$emptyDir" && ` +
 	`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" -f "*.kt" $srcJars && ` +
-	`${config.GenKotlinBuildFileCmd} --classpath "$classpath" --name "$name"` +
+	`${config.GenKotlinBuildFileCmd} --classpath "$classpath" $friendPathsArg --name "$name"` +
 	` --out_dir "$classesDir" --srcs "$out.rsp" --srcs "$srcJarDir/list"` +
 	` $commonSrcFilesArg --out "$kotlinBuildFile" && ` +
 	`${config.KotlincCmd} ${config.KotlincGlobalFlags} ` +
@@ -77,7 +77,7 @@ var kotlinc = pctx.AndroidRemoteStaticRule("kotlinc", android.RemoteRuleSupports
 	},
 	"kotlincFlags", "composePluginFlag", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir",
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
-	"newStateFile", "priorStateFile", "sourceDeltaFile", "name", "jarArgs")
+	"newStateFile", "priorStateFile", "sourceDeltaFile", "name", "jarArgs", "friendPathsArg")
 
 var kotlinJarSnapshot = pctx.AndroidRemoteStaticRule("kotlin-jar-snapshot", android.RemoteRuleSupports{},
 	blueprint.RuleParams{
@@ -98,7 +98,7 @@ var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", andro
 			`rm -rf "$srcJarDir" "$kotlinBuildFile" "$emptyDir" && ` +
 			`mkdir -p "$headerClassesDir" "$srcJarDir" "$emptyDir" && ` +
 			`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" -f "*.kt" $srcJars && ` +
-			`${config.GenKotlinBuildFileCmd} --classpath "$classpath" --name "$name"` +
+			`${config.GenKotlinBuildFileCmd} --classpath "$classpath" $friendPathsArg --name "$name"` +
 			` --out_dir "$classesDir" --srcs "$out.rsp" --srcs "$srcJarDir/list"` +
 			` $commonSrcFilesArg --out "$kotlinBuildFile" && ` +
 			`${config.KotlinIncrementalClientBinary} ${config.KotlincGlobalFlags} ` +
@@ -143,7 +143,7 @@ var kotlinIncremental = pctx.AndroidRemoteStaticRule("kotlin-incremental", andro
 	},
 	"kotlincFlags", "composeEmbeddablePluginFlag", "composePluginFlag", "kotlincPluginFlags", "classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "incrementalRootDir",
 	"classesDir", "headerClassesDir", "headerJar", "kotlinJvmTarget", "kotlinBuildFile", "emptyDir",
-	"name", "outputDir", "buildDir", "workDir", "newStateFile", "priorStateFile", "sourceDeltaFile", "jarArgs")
+	"name", "outputDir", "buildDir", "workDir", "newStateFile", "priorStateFile", "sourceDeltaFile", "jarArgs", "friendPathsArg")
 
 var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 	blueprint.RuleParams{
@@ -155,7 +155,7 @@ var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 			// Skip header jars, those should not have an effect on kythe results.
 			` --args '${config.KotlincGlobalFlags} ` +
 			` ${config.KotlincSuppressJDK9Warnings} ${config.JavacHeapFlags} ` +
-			` $kotlincFlags $kotlincPluginFlags -jvm-target $kotlinJvmTarget ` +
+			` $kotlincFlags $friendPathsArg $kotlincPluginFlags -jvm-target $kotlinJvmTarget ` +
 			`${config.KotlincKytheGlobalFlags}'`,
 		CommandDeps: []string{
 			"${config.KotlinKytheExtractor}",
@@ -164,7 +164,8 @@ var kotlinKytheExtract = pctx.AndroidStaticRule("kotlinKythe",
 		Rspfile:        "$out.rsp",
 		RspfileContent: "$in",
 	},
-	"classpath", "kotlincFlags", "kotlincPluginFlags", "commonSrcFilesList", "kotlinJvmTarget", "outJar", "srcJars", "srcJarDir",
+	"classpath", "kotlincFlags", "kotlincPluginFlags", "commonSrcFilesList", "kotlinJvmTarget", "outJar",
+	"srcJars", "srcJarDir", "friendPathsArg",
 )
 
 var kotlinIncrementalClean = pctx.AndroidStaticRule("kotlin-partialcompileclean",
@@ -230,7 +231,7 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 
 	associateJars := getAssociateJars(ctx, j.properties.Associates)
 	if len(associateJars) > 0 {
-		flags.kotlincFlags += " -Xfriend-paths=" + strings.Join(associateJars.Strings(), ",")
+		flags.kotlincFriendPathsArg = " -Xfriend-paths=" + strings.Join(associateJars.Strings(), ",")
 		deps = append(deps, associateJars...)
 
 		// Prepend the associates classes jar in the classpath, so that they take priority over the other jars.
@@ -290,6 +291,7 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 	workDir := "work"
 	args := map[string]string{
 		"classpath":          classpathRspFile.String(),
+		"friendPathsArg":     flags.kotlincFriendPathsArg,
 		"kotlincFlags":       flags.kotlincFlags,
 		"kotlincPluginFlags": flags.kotlincPluginFlags,
 		"commonSrcFilesArg":  commonSrcFilesArg,
@@ -352,6 +354,7 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 		extractionFile := outputFile.ReplaceExtension(ctx, "kzip")
 		args := map[string]string{
 			"classpath":          classpathRspFile.String(),
+			"friendPathsArg":     flags.kotlincFriendPathsArg,
 			"kotlincFlags":       flags.kotlincFlags,
 			"kotlincPluginFlags": flags.kotlincPluginFlags,
 			"kotlinJvmTarget":    flags.javaVersion.StringForKotlinc(),
@@ -422,7 +425,7 @@ var kaptStubs = pctx.AndroidRemoteStaticRule("kaptStubs", android.RemoteRuleSupp
 			`mkdir -p "$srcJarDir" "$kaptDir/sources" "$kaptDir/classes" && ` +
 			`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" $srcJars && ` +
 			`${config.FindInputDeltaCmd} --template '' --target "$out" --inputs_file "$out.rsp" && ` +
-			`${config.GenKotlinBuildFileCmd} --classpath "$classpath" --name "$name"` +
+			`${config.GenKotlinBuildFileCmd} --classpath "$classpath" $friendPathsArg --name "$name"` +
 			` --srcs "$out.rsp" --srcs "$srcJarDir/list"` +
 			` $commonSrcFilesArg --out "$kotlinBuildFile" && ` +
 			`${config.KotlincCmd} ${config.KotlincGlobalFlags} ` +
@@ -455,7 +458,7 @@ var kaptStubs = pctx.AndroidRemoteStaticRule("kaptStubs", android.RemoteRuleSupp
 	},
 	"kotlincFlags", "encodedJavacFlags", "kaptProcessorPath", "kaptProcessor",
 	"classpath", "srcJars", "commonSrcFilesArg", "srcJarDir", "kaptDir",
-	"kotlinBuildFile", "name", "classesJarOut")
+	"kotlinBuildFile", "name", "classesJarOut", "friendPathsArg")
 
 // kotlinKapt performs Kotlin-compatible annotation processing.  It takes .kt and .java sources and srcjars, and runs
 // annotation processors over all of them, producing a srcjar of generated code in outputFile.  The srcjar should be
@@ -513,6 +516,7 @@ func kotlinKapt(ctx android.ModuleContext, srcJarOutputFile, resJarOutputFile an
 		Implicits:   deps,
 		Args: map[string]string{
 			"classpath":         classpathRspFile.String(),
+			"friendPathsArg":    flags.kotlincFriendPathsArg,
 			"kotlincFlags":      flags.kotlincFlags,
 			"commonSrcFilesArg": commonSrcFilesArg,
 			"srcJars":           strings.Join(srcJars.Strings(), " "),

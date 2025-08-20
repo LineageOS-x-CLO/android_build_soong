@@ -100,6 +100,28 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 		}
 
 		deps = append(deps, imgInstallPath)
+
+		// Copy installed-files(.txt|.json) to staging dir for makepush
+		for _, installedFiles := range info.InstalledFilesDepSet.ToList() {
+			if installedFiles.Json != nil {
+				installPath := android.PathForModuleInPartitionInstall(ctx, "", installedFiles.Json.Base())
+				ctx.Build(pctx, android.BuildParams{
+					Rule:   android.Cp,
+					Input:  installedFiles.Json,
+					Output: installPath,
+				})
+				deps = append(deps, installPath)
+			}
+			if installedFiles.Txt != nil {
+				installPath := android.PathForModuleInPartitionInstall(ctx, "", installedFiles.Txt.Base())
+				ctx.Build(pctx, android.BuildParams{
+					Rule:   android.Cp,
+					Input:  installedFiles.Txt,
+					Output: installPath,
+				})
+				deps = append(deps, installPath)
+			}
+		}
 	}
 
 	a.createComplianceMetadataTimestamp(ctx, depsNoImg)
@@ -322,14 +344,14 @@ func (a *androidDevice) getFsInfos(ctx android.ModuleContext) map[string]Filesys
 func (a *androidDevice) getInfoOnlyFsInfos(ctx android.ModuleContext) map[string]FilesystemInfo {
 	filesystemInfos := make(map[string]FilesystemInfo)
 
-	if a.infoPartitionProps.Info_system_partition_name != nil {
-		systemPartition := ctx.GetDirectDepProxyWithTag(*a.infoPartitionProps.Info_system_partition_name, filesystemDepTag)
+	if a.deviceProps.InfoPartitionProps.System_partition_name != nil {
+		systemPartition := ctx.GetDirectDepProxyWithTag(*a.deviceProps.InfoPartitionProps.System_partition_name, filesystemDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, systemPartition, FilesystemProvider); ok {
 			filesystemInfos["system"] = info
 		}
 	}
-	if a.infoPartitionProps.Info_system_ext_partition_name != nil {
-		systemExtPartition := ctx.GetDirectDepProxyWithTag(*a.infoPartitionProps.Info_system_ext_partition_name, filesystemDepTag)
+	if a.deviceProps.InfoPartitionProps.System_ext_partition_name != nil {
+		systemExtPartition := ctx.GetDirectDepProxyWithTag(*a.deviceProps.InfoPartitionProps.System_ext_partition_name, filesystemDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, systemExtPartition, FilesystemProvider); ok {
 			filesystemInfos["system_ext"] = info
 		}

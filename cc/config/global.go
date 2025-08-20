@@ -399,7 +399,7 @@ var (
 
 	extraTestsCflags = []string{
 		"-Wno-error=unused-but-set-variable",
-		"-Wno-error=unused-variable",
+		"-Wno-unused-variable",
 	}
 
 	// Extra cflags applied to third-party code (anything for which

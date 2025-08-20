@@ -338,10 +338,8 @@ func checkAbiDumpList(ctx android.SingletonContext, stubLibraries []string) {
 		return lsdumpPaths[i].dumpFile.String() < lsdumpPaths[j].dumpFile.String()
 	})
 
-	// A python script that the build tells people to run expects this file in this location.
-	// TODO(b/434265259): Move to out/soong/lsdump_paths.txt
-	// https://source.corp.google.com/h/googleplex-android/platform/superproject/main/+/main:development/vndk/tools/header-checker/utils/utils.py;l=197;drc=75fa01f5270c0cb4e2251867deed347012a47864
-	lsdumpPathsFile := android.PathForDeviceFirstInstall(ctx, "lsdump_paths.txt")
+	// create_reference_dumps.py expects this file in this location.
+	lsdumpPathsFile := android.PathForOutput(ctx, "lsdump_paths.txt")
 	var lsdumpPathsFileContent strings.Builder
 	for _, lsdump := range lsdumpPaths {
 		lsdumpPathsFileContent.WriteString(string(lsdump.tag))
@@ -360,7 +358,7 @@ func checkAbiDumpList(ctx android.SingletonContext, stubLibraries []string) {
 		case apexLsdumpTag:
 			ctx.Phony("findlsdumps_APEX", lsdump.dumpFile)
 		case llndkLsdumpTag:
-			ctx.Phony("findlsdumps_APEX", lsdump.dumpFile)
+			ctx.Phony("findlsdumps_LLNDK", lsdump.dumpFile)
 		case platformLsdumpTag:
 			ctx.Phony("findlsdumps_PLATFORM", lsdump.dumpFile)
 		}

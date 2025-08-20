@@ -69,12 +69,10 @@ type PartitionNameProperties struct {
 	Vendor_dlkm_partition_name *string
 	// Name of the odm_dlkm partition filesystem module
 	Odm_dlkm_partition_name *string
-}
-
-type InfoPartitionNameProperties struct {
-	Info_super_partition_name      *string
-	Info_system_partition_name     *string
-	Info_system_ext_partition_name *string
+	// Name of the ramdisk partition module
+	Ramdisk_partition_name *string
+	// Name of the vendor kernel ramdisk partition filesystem module
+	Vendor_kernel_ramdisk_partition_name *string
 }
 
 type DeviceProperties struct {
@@ -124,6 +122,10 @@ type DeviceProperties struct {
 	Ramdisk_16k *string
 
 	Vendor_blobs_license *string `android:"path"`
+
+	// For saving those partition filesystems being created which are for gathering filesystem
+	// infos but not going to create images for the device.
+	InfoPartitionProps PartitionNameProperties
 }
 
 type PvmfwProperties struct {
@@ -139,8 +141,6 @@ type androidDevice struct {
 	partitionProps PartitionNameProperties
 
 	deviceProps DeviceProperties
-
-	infoPartitionProps InfoPartitionNameProperties
 
 	allImagesZip android.Path
 
@@ -171,7 +171,7 @@ type androidDevice struct {
 
 func AndroidDeviceFactory() android.Module {
 	module := &androidDevice{}
-	module.AddProperties(&module.partitionProps, &module.deviceProps, &module.infoPartitionProps)
+	module.AddProperties(&module.partitionProps, &module.deviceProps)
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibFirst)
 	return module
 }
@@ -227,8 +227,8 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	if a.partitionProps.Super_partition_name != nil {
 		ctx.AddDependency(ctx.Module(), superPartitionDepTag, *a.partitionProps.Super_partition_name)
 	}
-	if a.infoPartitionProps.Info_super_partition_name != nil {
-		ctx.AddDependency(ctx.Module(), superPartitionDepTag, *a.infoPartitionProps.Info_super_partition_name)
+	if a.deviceProps.InfoPartitionProps.Super_partition_name != nil {
+		ctx.AddDependency(ctx.Module(), superPartitionDepTag, *a.deviceProps.InfoPartitionProps.Super_partition_name)
 	}
 
 	addDependencyIfDefined(a.partitionProps.Boot_partition_name)
@@ -247,6 +247,8 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	addDependencyIfDefined(a.partitionProps.Vendor_dlkm_partition_name)
 	addDependencyIfDefined(a.partitionProps.Odm_dlkm_partition_name)
 	addDependencyIfDefined(a.partitionProps.Recovery_partition_name)
+	addDependencyIfDefined(a.partitionProps.Ramdisk_partition_name)
+	addDependencyIfDefined(a.partitionProps.Vendor_kernel_ramdisk_partition_name)
 	for _, vbmetaPartition := range a.partitionProps.Vbmeta_partitions {
 		ctx.AddDependency(ctx.Module(), filesystemDepTag, vbmetaPartition)
 	}
@@ -273,8 +275,8 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	ctx.AddDependency(ctx.Module(), filesystemDepTag, "system-build.prop")
 
 	// For collecting install module information for products not building system.img or system_ext.img.
-	addDependencyIfDefined(a.infoPartitionProps.Info_system_partition_name)
-	addDependencyIfDefined(a.infoPartitionProps.Info_system_ext_partition_name)
+	addDependencyIfDefined(a.deviceProps.InfoPartitionProps.System_partition_name)
+	addDependencyIfDefined(a.deviceProps.InfoPartitionProps.System_ext_partition_name)
 
 	a.hostInitVerifierCheckDepsMutator(ctx)
 }
@@ -311,6 +313,9 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			// made the default thing to build in soong-only builds.
 			ctx.ModuleErrorf("There cannot be more than 1 main android_device module")
 		}
+	}
+	if a.partitionProps.Init_boot_partition_name != nil && a.partitionProps.Ramdisk_partition_name != nil {
+		ctx.ModuleErrorf("Init_boot and Ramdisk cannot both be non-empty.")
 	}
 
 	// Normal allInstalledModules which only include modules in those partitions which will be create images for this product.
@@ -700,6 +705,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 		targetFilesZipCopy{a.partitionProps.Odm_dlkm_partition_name, "ODM_DLKM"},
 		targetFilesZipCopy{a.partitionProps.Init_boot_partition_name, "BOOT/RAMDISK"},
 		targetFilesZipCopy{a.partitionProps.Init_boot_partition_name, "INIT_BOOT/RAMDISK"},
+		targetFilesZipCopy{a.partitionProps.Ramdisk_partition_name, "BOOT/RAMDISK"}, // For products without init_boot
 		targetFilesZipCopy{a.partitionProps.Vendor_boot_partition_name, "VENDOR_BOOT/RAMDISK"},
 		targetFilesZipCopy{a.partitionProps.Vendor_kernel_boot_partition_name, "VENDOR_KERNEL_BOOT/RAMDISK"},
 	}
@@ -1083,6 +1089,15 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 				Implicit(fsConfigBin)
 		}
 	}
+	if a.partitionProps.Ramdisk_partition_name != nil {
+		partition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Ramdisk_partition_name, filesystemDepTag)
+		if info, ok := android.OtherModuleProvider(ctx, partition, FilesystemProvider); ok {
+			builder.Command().Textf("cp").Input(info.FilesystemConfig).Textf(" %s/META/boot_filesystem_config.txt", targetFilesDir.String())
+		} else {
+			ctx.ModuleErrorf("Ramdisk partition %s does not set FilesystemProvider\n", partition.Name())
+		}
+	}
+
 	// Copy ramdisk_node_list
 	if proptools.String(a.deviceProps.Ramdisk_node_list) != "" {
 		ramdiskNodeList := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Ramdisk_node_list))
@@ -1129,7 +1144,7 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	// Pack dynamic_partitions_info.txt to target-file.
 	superPartitionName := a.partitionProps.Super_partition_name
 	if superPartitionName == nil {
-		superPartitionName = a.infoPartitionProps.Info_super_partition_name
+		superPartitionName = a.deviceProps.InfoPartitionProps.Super_partition_name
 	}
 	if superPartitionName != nil {
 		superPartition := ctx.GetDirectDepProxyWithTag(*superPartitionName, superPartitionDepTag)
