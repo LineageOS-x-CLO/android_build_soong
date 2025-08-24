@@ -304,6 +304,8 @@ func RegisterCCBuildComponents(ctx android.RegistrationContext) {
 	})
 
 	ctx.PostDepsMutators(func(ctx android.RegisterMutatorsContext) {
+		ctx.BottomUp("sanitize_markapexes", markSanitizableApexesMutator)
+
 		for _, san := range Sanitizers {
 			san.registerMutators(ctx)
 		}
@@ -1316,8 +1318,16 @@ func (c *Module) MinSdkVersion() string {
 	return String(c.Properties.Min_sdk_version)
 }
 
-func (c *Module) SetSdkVersion(s string) {
-	c.Properties.Sdk_version = StringPtr(s)
+func (c *Module) SetSdkVersion(s *string) {
+	c.Properties.Sdk_version = s
+}
+
+func (c *Module) SetSdkAndPlatformVariantVisibleToMake() {
+	c.Properties.SdkAndPlatformVariantVisibleToMake = true
+}
+
+func (c *Module) SetSdkVariant() {
+	c.Properties.IsSdkVariant = true
 }
 
 func (c *Module) SetMinSdkVersion(s string) {
