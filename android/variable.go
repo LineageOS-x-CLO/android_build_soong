@@ -598,8 +598,6 @@ type ProductVariables struct {
 	OdmManifestFiles       []string `json:",omitempty"`
 	OdmManifestSkus        []string `json:",omitempty"`
 
-	UseSoongNoticeXML *bool `json:",omitempty"`
-
 	StripByDefault *bool `json:",omitempty"`
 
 	CompatibilityTestcases map[string]CompatibilityTestcaseJSON
