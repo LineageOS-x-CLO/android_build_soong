@@ -317,6 +317,7 @@ var (
 		"-Wno-tautological-overlap-compare", // http://b/148815696
 		// New warnings to be fixed after clang-r383902.
 		"-Wno-deprecated-copy",                      // http://b/153746672
+		"-Wno-range-loop-construct",                 // http://b/153747076
 		"-Wno-zero-as-null-pointer-constant",        // http://b/68236239
 		"-Wno-deprecated-anon-enum-enum-conversion", // http://b/153746485
 		"-Wno-deprecated-enum-enum-conversion",
@@ -401,8 +402,7 @@ var (
 
 	extraTestsCflags = []string{
 		"-Wno-error=unused-but-set-variable",
-                "-Wno-unused-variable",
-                "-Wno-error=range-loop-construct", // http://b/153747076
+		"-Wno-unused-variable",
 	}
 
 	// Extra cflags applied to third-party code (anything for which
@@ -431,8 +431,7 @@ var (
 		"-Wno-unused",
 		"-Wno-unused-but-set-variable",
 		"-Wno-deprecated",
-                "-Wno-tautological-constant-compare",
-                "-Wno-range-loop-construct", // http://b/153747076
+		"-Wno-tautological-constant-compare",
 	}
 
 	// Similar to noOverrideGlobalCflags, but applies only to third-party code
