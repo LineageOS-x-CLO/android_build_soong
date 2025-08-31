@@ -350,7 +350,7 @@ func (j *Module) kotlinCompile(ctx android.ModuleContext, outputFile, headerOutp
 	ctx.Phony("partialcompileclean", cleanPhonyPath)
 
 	// Emit kythe xref rule
-	if (ctx.Config().EmitXrefRules()) && ctx.Module() == ctx.PrimaryModule() {
+	if (ctx.Config().EmitXrefRules()) && ctx.IsPrimaryModule() {
 		extractionFile := outputFile.ReplaceExtension(ctx, "kzip")
 		args := map[string]string{
 			"classpath":          classpathRspFile.String(),
