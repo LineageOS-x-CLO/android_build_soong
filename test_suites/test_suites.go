@@ -27,6 +27,7 @@ import (
 
 	"android/soong/android"
 	"android/soong/java"
+	"android/soong/phony"
 )
 
 var (
@@ -156,15 +157,13 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 
 	hostSharedLibs := gatherHostSharedLibs(ctx, sharedLibRoots, sharedLibGraph)
 
-	if !ctx.Config().KatiEnabled() {
-		for _, testSuite := range android.SortedKeys(testSuiteModules) {
-			testSuiteSymbolsZipFile := android.PathForHostInstall(ctx, fmt.Sprintf("%s-symbols.zip", testSuite))
-			testSuiteMergedMappingProtoFile := android.PathForHostInstall(ctx, fmt.Sprintf("%s-symbols-mapping.textproto", testSuite))
-			android.BuildSymbolsZip(ctx, testSuiteModules[testSuite], testSuiteSymbolsZipFile, testSuiteMergedMappingProtoFile)
+	for _, testSuite := range android.SortedKeys(testSuiteModules) {
+		testSuiteSymbolsZipFile := android.PathForHostInstall(ctx, fmt.Sprintf("%s-symbols.zip", testSuite))
+		testSuiteMergedMappingProtoFile := android.PathForHostInstall(ctx, fmt.Sprintf("%s-symbols-mapping.textproto", testSuite))
+		android.BuildSymbolsZip(ctx, testSuiteModules[testSuite], testSuiteSymbolsZipFile, testSuiteMergedMappingProtoFile)
 
-			ctx.DistForGoalWithFilenameTag(testSuite, testSuiteSymbolsZipFile, testSuiteSymbolsZipFile.Base())
-			ctx.DistForGoalWithFilenameTag(testSuite, testSuiteMergedMappingProtoFile, testSuiteMergedMappingProtoFile.Base())
-		}
+		ctx.DistForGoalWithFilenameTag(testSuite, testSuiteSymbolsZipFile, testSuiteSymbolsZipFile.Base())
+		ctx.DistForGoalWithFilenameTag(testSuite, testSuiteMergedMappingProtoFile, testSuiteMergedMappingProtoFile.Base())
 	}
 
 	// https://source.corp.google.com/h/googleplex-android/platform/superproject/main/+/main:build/make/core/main.mk;l=674;drc=46bd04e115d34fd62b3167128854dfed95290eb0
@@ -295,9 +294,9 @@ func generateCtsCoverageReports(ctx android.SingletonContext, allTestSuiteSrcs m
 	var ctsVerifierApiMapFile android.Path
 
 	// Collect apk and jar paths in {suite}_api_map_files.txt as input for coverage report.
-	for suite, suiteSrcs := range allTestSuiteSrcs {
+	for _, suite := range android.SortedKeys(allTestSuiteSrcs) {
 		if slices.Contains(ctsReportModules, suite) {
-			allTestSuiteSrcs[suite] = android.SortedUniquePaths(suiteSrcs)
+			allTestSuiteSrcs[suite] = android.SortedUniquePaths(allTestSuiteSrcs[suite])
 			var apkJarSrcs android.Paths
 			for _, srcPath := range allTestSuiteSrcs[suite] {
 				if srcPath.Ext() == ".apk" || srcPath.Ext() == ".jar" {
@@ -1062,6 +1061,7 @@ type compatibilityTestSuitePackageProperties struct {
 	// requires post-processing, so the module name does not conflict with the original test suite name.
 	Test_suite_name   *string `json:"test_suite_name"`
 	Test_suite_subdir *string
+	phony.PhonyProperties
 }
 
 type compatibilityTestSuitePackage struct {
@@ -1207,6 +1207,9 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 
 	// Make compatibility_test_suite_package a SourceFileProducer so that it can be used by other modules.
 	ctx.SetOutputFiles(android.Paths{android.PathForHostInstall(ctx, suiteName, fmt.Sprintf("android-%s.zip", suiteName))}, "")
+	for _, dep := range m.properties.Phony_deps.GetOrDefault(ctx, nil) {
+		ctx.Phony(m.Name(), android.PathForPhony(ctx, dep))
+	}
 }
 
 func testSuitePackageFactory() android.Module {

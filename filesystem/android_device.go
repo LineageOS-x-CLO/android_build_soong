@@ -128,6 +128,9 @@ type DeviceProperties struct {
 	// For saving those partition filesystems being created which are for gathering filesystem
 	// infos but not going to create images for the device.
 	InfoPartitionProps PartitionNameProperties
+
+	// This is used for fontchain_lint, it will not check emoji if Minimal_font_footprint is true.
+	Minimal_font_footprint *bool
 }
 
 type PvmfwProperties struct {
@@ -468,6 +471,7 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.hostInitVerifierCheck(ctx)
 	a.findSharedUIDViolation(ctx)
 	a.checkPartitionSizes(ctx)
+	a.fontchainLint(ctx)
 }
 
 func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.DependencyTag) {
@@ -519,6 +523,9 @@ func (a *androidDevice) allInstalledModules(ctx android.ModuleContext, includeIn
 	allOwners := make(map[string][]installedOwnerInfo)
 
 	for _, partition := range android.SortedKeys(fsInfoMap) {
+		if fsInfoMap[partition].Prebuilt {
+			continue
+		}
 		fsInfo := fsInfoMap[partition]
 		for _, owner := range fsInfo.Owners.ToList() {
 			allOwners[owner.Name] = append(allOwners[owner.Name], installedOwnerInfo{
@@ -533,6 +540,9 @@ func (a *androidDevice) allInstalledModules(ctx android.ModuleContext, includeIn
 		commonInfo, ok := android.OtherModuleProvider(ctx, mod, android.CommonModuleInfoProvider)
 		if !(ok && commonInfo.ExportedToMake) {
 			return false
+		}
+		if info, ok := fsInfoMap[commonInfo.PartitionTag]; !ok || info.Prebuilt {
+			return true
 		}
 		prebuiltInfo := android.OtherModuleProviderOrDefault(ctx, mod, android.PrebuiltInfoProvider)
 		name := android.OtherModuleNameWithPossibleOverride(ctx, mod)
@@ -658,12 +668,21 @@ func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 			bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_debug_partition_name), filesystemDepTag)
 			bootImgInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, BootimgInfoProvider)
 			ctx.DistForGoal("droidcore-unbundled", bootImgInfo.Output)
+			ramdiskInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, FilesystemProvider)
+			if ramdiskInfo.Output != nil {
+				ctx.DistForGoal("droidcore-unbundled", ramdiskInfo.Output)
+			}
+
 		}
 		// vendor_boot-test-harness
 		if a.partitionProps.Vendor_boot_test_harness_partition_name != nil {
 			bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_test_harness_partition_name), filesystemDepTag)
 			bootImgInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, BootimgInfoProvider)
 			ctx.DistForGoal("droidcore-unbundled", bootImgInfo.Output)
+			ramdiskInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, FilesystemProvider)
+			if ramdiskInfo.Output != nil {
+				ctx.DistForGoal("droidcore-unbundled", ramdiskInfo.Output)
+			}
 		}
 
 		if a.withLicenseFile != nil {
@@ -717,6 +736,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 		targetFilesZipCopy{a.partitionProps.Ramdisk_partition_name, "BOOT/RAMDISK"}, // For products without init_boot
 		targetFilesZipCopy{a.partitionProps.Vendor_boot_partition_name, "VENDOR_BOOT/RAMDISK"},
 		targetFilesZipCopy{a.partitionProps.Vendor_kernel_boot_partition_name, "VENDOR_KERNEL_BOOT/RAMDISK"},
+		targetFilesZipCopy{a.partitionProps.Userdata_partition_name, "DATA"},
 	}
 
 	filesystemsToCopy := []targetFilesystemZipCopy{}
@@ -777,6 +797,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 			a.rootDirForFsConfigTimestamp = rootDirForFsConfigTimestamp
 		}
 	}
+
 	// Copy cmdline, kernel etc. files of boot images
 	if a.partitionProps.Vendor_boot_partition_name != nil {
 		bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_partition_name), filesystemDepTag)
@@ -1179,6 +1200,7 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	// Pack dynamic_partitions_info.txt to target-file.
 	superPartitionName := a.partitionProps.Super_partition_name
 	if superPartitionName == nil {
+		// Even if a super partition isn't actually built, its information needs to be included in misc_info.txt if dynamic partitioning is enabled. This is for its later use with merge_target_files alongside other targets.
 		superPartitionName = a.deviceProps.InfoPartitionProps.Super_partition_name
 	}
 	if superPartitionName != nil {
@@ -1418,8 +1440,12 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 		builder.Command().Textf("echo boot_images=boot.img >> %s", miscInfo)
 	}
 
-	if a.partitionProps.Super_partition_name != nil {
-		superPartition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Super_partition_name, superPartitionDepTag)
+	superPartitionName := a.partitionProps.Super_partition_name
+	if superPartitionName == nil {
+		superPartitionName = a.deviceProps.InfoPartitionProps.Super_partition_name
+	}
+	if superPartitionName != nil {
+		superPartition := ctx.GetDirectDepProxyWithTag(*superPartitionName, superPartitionDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, superPartition, SuperImageProvider); ok {
 			// cat dynamic_partition_info.txt
 			builder.Command().Text("cat").Input(info.DynamicPartitionsInfo).Textf(" >> %s", miscInfo)

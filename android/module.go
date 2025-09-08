@@ -1421,7 +1421,9 @@ func (m *ModuleBase) RequiresStableAPIs(ctx BaseModuleContext) bool {
 
 func (m *ModuleBase) PartitionTag(config DeviceConfig) string {
 	partition := "system"
-	if m.SocSpecific() {
+	if m.module.InstallInData() {
+		partition = "userdata"
+	} else if m.SocSpecific() {
 		// A SoC-specific module could be on the vendor partition at
 		// "vendor" or the system partition at "system/vendor".
 		if config.VendorPath() == "vendor" {
@@ -2462,8 +2464,10 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}); ok {
 		ver := mm.MinSdkVersion(ctx)
 		commonData.MinSdkVersion.ApiLevel = &ver
-	} else if mm, ok := m.module.(interface{ MinSdkVersion() string }); ok {
-		ver := mm.MinSdkVersion()
+	} else if mm, ok := m.module.(interface {
+		MinSdkVersion(ctx ConfigurableEvaluatorContext) string
+	}); ok {
+		ver := mm.MinSdkVersion(ctx)
 		// Compile against the current platform
 		if ver == "" {
 			commonData.MinSdkVersion.IsPlatform = true

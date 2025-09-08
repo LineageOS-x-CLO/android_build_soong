@@ -66,6 +66,7 @@ func init() {
 	AddNeverAllowRules(createPrebuiltEtcBpDefineRule())
 	AddNeverAllowRules(createAutogenRroBpDefineRule())
 	AddNeverAllowRules(createNoSha1HashRule())
+	AddNeverAllowRules(createNoPrebuiltSystemImageRule())
 }
 
 // Add a NeverAllow rule to the set of rules to apply.
@@ -340,6 +341,17 @@ func createNoSha1HashRule() Rule {
 		ModuleType("filesystem", "android_system_image").
 		With("avb_hash_algorithm", "sha1").
 		Because("sha1 is discouraged")
+}
+
+func createNoPrebuiltSystemImageRule() Rule {
+	return NeverAllow().
+		ModuleType(
+			"filesystem",
+			"android_filesystem",
+			"android_system_image",
+		).
+		WithMatcher("prebuilt_module_name", isSetMatcherInstance).
+		Because("in development and must not be used")
 }
 
 func createKotlinPluginRule() []Rule {

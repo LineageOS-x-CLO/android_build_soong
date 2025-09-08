@@ -90,6 +90,8 @@ var (
 		// Making deprecated usages an error causes extreme pain when trying to
 		// deprecate anything.
 		"-Wno-error=deprecated-declarations",
+		// http://b/315246135 temporarily disabled
+		"-Wno-error=unused-variable",
 
 		// Warnings disabled by default.
 
@@ -301,8 +303,6 @@ var (
 		// also controls -Wvoid-pointer-to-int-cast, -Wpointer-to-enum-cast
 		// and -Wvoid-pointer-to-enum-cast
 		"-Wno-pointer-to-int-cast",
-		// http://b/315246135 temporarily disabled
-		"-Wno-error=unused-variable",
 		// Disabled because it produces many false positives. http://b/323050926
 		"-Wno-missing-field-initializers",
 		// http://b/323050889
@@ -577,6 +577,14 @@ func init() {
 
 	pctx.VariableFunc("NoOverrideGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := noOverrideGlobalCflags
+		if ClangVersionAtLeast(ctx, 574158) {
+			flags = append(flags, "-Wno-unterminated-string-initialization")
+			flags = append(flags, "-Wno-implicit-int-conversion-on-negation")
+			flags = append(flags, "-Wno-default-const-init-field-unsafe")
+			flags = append(flags, "-Wno-default-const-init-var-unsafe")
+			flags = append(flags, "-Wno-preferred-type-bitfield-enum-conversion")
+			flags = append(flags, "-Wno-implicit-enum-enum-cast")
+		}
 		if ctx.Config().IsEnvTrue("LLVM_NEXT") {
 			flags = append(noOverrideGlobalCflags, llvmNextExtraCommonGlobalCflags...)
 			IllegalFlags = []string{} // Don't fail build while testing a new compiler.
