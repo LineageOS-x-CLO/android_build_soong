@@ -623,6 +623,7 @@ type PartitionQualifiedVariablesType struct {
 	BoardErofsCompressor        string `json:",omitempty"`
 	BoardErofsCompressHints     string `json:",omitempty"`
 	BoardErofsPclusterSize      string `json:",omitempty"`
+	BoardErofsBlockSize         string `json:",omitempty"`
 	BoardExtfsInodeCount        string `json:",omitempty"`
 	BoardExtfsRsvPct            string `json:",omitempty"`
 	BoardF2fsSloadCompressFlags string `json:",omitempty"`
@@ -686,6 +687,7 @@ type PartitionVariables struct {
 	BoardErofsCompressor           string `json:",omitempty"`
 	BoardErofsCompressorHints      string `json:",omitempty"`
 	BoardErofsPclusterSize         string `json:",omitempty"`
+	BoardErofsBlockSize            string `json:",omitempty"`
 	BoardErofsShareDupBlocks       string `json:",omitempty"`
 	BoardErofsUseLegacyCompression string `json:",omitempty"`
 	BoardExt4ShareDupBlocks        string `json:",omitempty"`
@@ -848,6 +850,8 @@ type PartitionVariables struct {
 	TargetRecoveryFstabDefault string `json:",omitempty"`
 
 	VendorBlobsLicense string `json:",omitempty"`
+
+	MinimalFontFootprint bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {

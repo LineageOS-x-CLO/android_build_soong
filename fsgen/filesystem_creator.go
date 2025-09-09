@@ -585,6 +585,7 @@ func (f *filesystemCreator) createDeviceModule(
 		Precompiled_sepolicy_without_vendor: proptools.StringPtr(":precompiled_sepolicy_without_vendor"),
 		Vendor_blobs_license:                vendorBlobsLicenseProp,
 		InfoPartitionProps:                  *infoPartitionProps,
+		Minimal_font_footprint:              proptools.BoolPtr(partitionVars.MinimalFontFootprint),
 	}
 
 	if buildingInitBootImage(partitionVars) {
@@ -1381,7 +1382,8 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 		return nil, false
 	}
 
-	if *fsProps.Type == "erofs" {
+	switch *fsProps.Type {
+	case "erofs":
 		if partitionVars.BoardErofsCompressor != "" {
 			fsProps.Erofs.Compressor = proptools.StringPtr(partitionVars.BoardErofsCompressor)
 		}
@@ -1391,7 +1393,38 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 		if s, err := strconv.ParseBool(partitionVars.BoardErofsShareDupBlocks); err == nil {
 			fsProps.Share_dup_blocks = proptools.BoolPtr(s)
 		}
-	} else if *fsProps.Type == "ext4" {
+		if len(partitionVars.BoardErofsPclusterSize) > 0 {
+			parsed, err := strconv.ParseInt(partitionVars.BoardErofsPclusterSize, 10, 64)
+			if err != nil {
+				panic(fmt.Sprintf("erofs pcluster size must be an int, got %s", partitionVars.BoardErofsPclusterSize))
+			}
+			fsProps.Erofs.Pcluster_size = &parsed
+		}
+		// BOARD_*IMAGE_PCLUSTER_SIZE overrides BOARD_EROFS_PCLUSTER_SIZE
+		specificPartitionVars := partitionVars.PartitionQualifiedVariables[partitionType]
+		if len(specificPartitionVars.BoardErofsPclusterSize) > 0 {
+			parsed, err := strconv.ParseInt(specificPartitionVars.BoardErofsPclusterSize, 10, 64)
+			if err != nil {
+				panic(fmt.Sprintf("%s erofs pcluster size must be an int, got %s", partitionType, specificPartitionVars.BoardErofsPclusterSize))
+			}
+			fsProps.Erofs.Pcluster_size = &parsed
+		}
+		if len(partitionVars.BoardErofsBlockSize) > 0 {
+			parsed, err := strconv.ParseInt(partitionVars.BoardErofsBlockSize, 10, 64)
+			if err != nil {
+				panic(fmt.Sprintf("erofs pcluster size must be an int, got %s", partitionVars.BoardErofsBlockSize))
+			}
+			fsProps.Erofs.Block_size = &parsed
+		}
+		// BOARD_*IMAGE_EROFS_BLOCKSIZE overrides BOARD_EROFS_BLOCKSIZE
+		if len(specificPartitionVars.BoardErofsBlockSize) > 0 {
+			parsed, err := strconv.ParseInt(specificPartitionVars.BoardErofsBlockSize, 10, 64)
+			if err != nil {
+				panic(fmt.Sprintf("%s erofs block size must be an int, got %s", partitionType, specificPartitionVars.BoardErofsBlockSize))
+			}
+			fsProps.Erofs.Block_size = &parsed
+		}
+	case "ext4":
 		if s, err := strconv.ParseBool(partitionVars.BoardExt4ShareDupBlocks); err == nil {
 			fsProps.Share_dup_blocks = proptools.BoolPtr(s)
 		}
@@ -1692,7 +1725,11 @@ func generateBpContent(ctx android.EarlyModuleContext, partitionType string) str
 	baseProps := generateBaseProps(proptools.StringPtr(generatedModuleNameForPartition(ctx.Config(), partitionType)), ctx.Config())
 	deps := fsGenState.fsDeps[partitionType]
 	highPriorityDeps := fsGenState.generatedPrebuiltEtcModuleNames
-	depProps := generateDepStruct(*deps, highPriorityDeps)
+	var overriddenDeps []string
+	if deps, ok := fsGenState.overriddenModuleNames[partitionType]; ok {
+		overriddenDeps = deps
+	}
+	depProps := generateDepStruct(*deps, highPriorityDeps, overriddenDeps)
 
 	result, err := proptools.RepackProperties([]interface{}{baseProps, fsProps, depProps})
 	if err != nil {
