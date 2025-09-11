@@ -427,8 +427,8 @@ func (m *moduleContext) Rule(pctx PackageContext, name string, params blueprint.
 
 	if m.config.UseRemoteBuild() {
 		if params.Pool == nil {
-			// When USE_RBE=true is set and the rule is not supported by RBE, restrict
-			// jobs to the local parallelism value
+			// When USE_REWRAPPER=true is set and the rule is not supported by RBE,
+			// restrict jobs to the local parallelism value
 			params.Pool = localPool
 		} else if params.Pool == remotePool {
 			// remotePool is a fake pool used to identify rule that are supported for remoting. If the rule's
@@ -483,18 +483,6 @@ func (m *moduleContext) GetMissingDependencies() []string {
 	missingDeps = append(missingDeps, m.bp.GetMissingDependencies()...)
 	missingDeps = FirstUniqueStrings(missingDeps)
 	return missingDeps
-}
-
-func (m *moduleContext) GetDirectDepWithTag(name string, tag blueprint.DependencyTag) Module {
-	deps := m.getDirectDepsInternal(name, tag)
-	if len(deps) == 1 {
-		return deps[0]
-	} else if len(deps) >= 2 {
-		panic(fmt.Errorf("Multiple dependencies having same BaseModuleName() %q found from %q",
-			name, m.ModuleName()))
-	} else {
-		return nil
-	}
 }
 
 func (m *moduleContext) GetDirectDepProxyWithTag(name string, tag blueprint.DependencyTag) ModuleProxy {
