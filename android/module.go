@@ -2415,7 +2415,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}
 
 	if len(ctx.phonies) > 0 {
-		SetProvider(ctx, ModulePhonyProvider, ModulePhonyInfo{
+		SetProvider(ctx, ModulePhonyProvider, PhonyInfo{
 			Phonies: ctx.phonies,
 		})
 	}
@@ -2514,8 +2514,12 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			HostToolPath: h.HostToolPath()})
 	}
 
-	if p, ok := m.module.(AndroidMkProviderInfoProducer); ok && !commonData.SkipAndroidMkProcessing {
-		SetProvider(ctx, AndroidMkInfoProvider, p.PrepareAndroidMKProviderInfo(ctx.Config()))
+	if ctx.Config().KatiEnabled() {
+		if p, ok := m.module.(AndroidMkProviderInfoProducer); ok && !commonData.SkipAndroidMkProcessing {
+			if info := p.PrepareAndroidMKProviderInfo(ctx.Config()); info != nil {
+				SetProvider(ctx, AndroidMkInfoProvider, info)
+			}
+		}
 	}
 
 	if s, ok := m.module.(SourceFileGenerator); ok {
@@ -3548,9 +3552,3 @@ func CheckBlueprintSyntax(ctx BaseModuleContext, filename string, contents strin
 	bpctx := ctx.blueprintBaseModuleContext()
 	return blueprint.CheckBlueprintSyntax(bpctx.ModuleFactories(), filename, contents)
 }
-
-type HideApexVariantFromMakeInfo struct {
-	HideApexVariantFromMake bool
-}
-
-var HideApexVariantFromMakeProvider = blueprint.NewProvider[HideApexVariantFromMakeInfo]()

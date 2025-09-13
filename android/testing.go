@@ -1267,13 +1267,16 @@ func AndroidMkInfoForTest(t *testing.T, ctx *TestContext, mod Module) *AndroidMk
 		t.Error("module does not implement AndroidMkProviderInfoProducer: " + mod.Name())
 	}
 
-	info := OtherModuleProviderOrDefault(ctx, mod, AndroidMkInfoProvider)
+	info, ok := OtherModuleProvider(ctx, mod, AndroidMkInfoProvider)
+	if !ok {
+		t.Fatalf("module %q is missing AndroidMkInfoProvider", mod.Name())
+	}
 	aconfigUpdateAndroidMkInfos(ctx, mod, info)
 	commonInfo := OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider)
 	info.PrimaryInfo.fillInEntries(ctx, mod, commonInfo)
 	if len(info.ExtraInfo) > 0 {
-		for _, ei := range info.ExtraInfo {
-			ei.fillInEntries(ctx, mod, commonInfo)
+		for i := range info.ExtraInfo {
+			info.ExtraInfo[i].fillInEntries(ctx, mod, commonInfo)
 		}
 	}
 

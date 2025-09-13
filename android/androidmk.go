@@ -67,7 +67,6 @@ type AndroidMkData struct {
 	Class           string
 	SubName         string
 	OutputFile      OptionalPath
-	Disabled        bool
 	Include         string
 	Required        []string
 	Host_required   []string
@@ -117,9 +116,6 @@ type AndroidMkEntries struct {
 	OverrideName string
 	// The output file for Kati to process and/or install. If absent, the module is skipped.
 	OutputFile OptionalPath
-	// If true, the module is skipped and does not appear on the final Android-<product name>.mk
-	// file. Useful when a module needs to be skipped conditionally.
-	Disabled bool
 	// The postprocessing mk file to include, e.g. $(BUILD_SYSTEM)/soong_cc_rust_prebuilt.mk
 	// If not set, $(BUILD_SYSTEM)/prebuilt.mk is used.
 	Include string
@@ -690,7 +686,7 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 }
 
 func (a *AndroidMkEntries) disabled() bool {
-	return a.Disabled || !a.OutputFile.Valid()
+	return !a.OutputFile.Valid()
 }
 
 // write  flushes the AndroidMkEntries's in-struct data populated by AndroidMkEntries into the
@@ -900,53 +896,11 @@ func getSoongOnlyDataFromMods(ctx fillInEntriesContext, mods []ModuleOrProxy) ([
 		if commonInfo.SkipAndroidMkProcessing {
 			continue
 		}
-		if info, ok := OtherModuleProvider(ctx, mod, AndroidMkInfoProvider); ok {
-			// Deep copy the provider info since we need to modify the info later
-			info := deepCopyAndroidMkProviderInfo(info)
-			info.PrimaryInfo.fillInEntries(ctx, mod, commonInfo)
-			if info.PrimaryInfo.Disabled {
-				continue
-			}
-			if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
-				moduleInfoJSONs = append(moduleInfoJSONs, moduleInfoJSON.Data...)
-			}
-			if contribution := getDistContributions(ctx, mod); contribution != nil {
-				allDistContributions = append(allDistContributions, *contribution)
-			}
-		} else {
-			if x, ok := mod.(AndroidMkDataProvider); ok {
-				data := x.AndroidMk()
-
-				if data.Include == "" {
-					data.Include = "$(BUILD_PREBUILT)"
-				}
-
-				data.fillInData(ctx, mod.(Module))
-				if data.Entries.Disabled {
-					continue
-				}
-				if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
-					moduleInfoJSONs = append(moduleInfoJSONs, moduleInfoJSON.Data...)
-				}
-				if contribution := getDistContributions(ctx, mod.(Module)); contribution != nil {
-					allDistContributions = append(allDistContributions, *contribution)
-				}
-			}
-			if x, ok := mod.(AndroidMkEntriesProvider); ok {
-				entriesList := x.AndroidMkEntries()
-				for _, entries := range entriesList {
-					entries.fillInEntries(ctx, mod.(Module))
-					if entries.Disabled {
-						continue
-					}
-					if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
-						moduleInfoJSONs = append(moduleInfoJSONs, moduleInfoJSON.Data...)
-					}
-					if contribution := getDistContributions(ctx, mod.(Module)); contribution != nil {
-						allDistContributions = append(allDistContributions, *contribution)
-					}
-				}
-			}
+		if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+			moduleInfoJSONs = append(moduleInfoJSONs, moduleInfoJSON.Data...)
+		}
+		if contribution := getDistContributions(ctx, mod); contribution != nil {
+			allDistContributions = append(allDistContributions, *contribution)
 		}
 	}
 	return allDistContributions, moduleInfoJSONs
@@ -1049,7 +1003,6 @@ func (data *AndroidMkData) fillInData(ctx fillInEntriesContext, mod Module) {
 		Class:           data.Class,
 		SubName:         data.SubName,
 		OutputFile:      data.OutputFile,
-		Disabled:        data.Disabled,
 		Include:         data.Include,
 		Required:        data.Required,
 		Host_required:   data.Host_required,
@@ -1290,9 +1243,6 @@ type AndroidMkInfo struct {
 	OverrideName string
 	// The output file for Kati to process and/or install. If absent, the module is skipped.
 	OutputFile OptionalPath
-	// If true, the module is skipped and does not appear on the final Android-<product name>.mk
-	// file. Useful when a module needs to be skipped conditionally.
-	Disabled bool
 	// The postprocessing mk file to include, e.g. $(BUILD_SYSTEM)/soong_cc_rust_prebuilt.mk
 	// If not set, $(BUILD_SYSTEM)/prebuilt.mk is used.
 	Include string
@@ -1362,8 +1312,15 @@ func translateAndroidMkEntriesInfoModule(ctx SingletonContext, w io.Writer, modu
 
 // Utility funcs to manipulate Android.mk variable entries.
 
+func (a *AndroidMkInfo) createMapIfNecessary() {
+	if a.EntryMap == nil {
+		a.EntryMap = make(map[string][]string)
+	}
+}
+
 // SetString sets a Make variable with the given name to the given value.
 func (a *AndroidMkInfo) SetString(name, value string) {
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1372,6 +1329,7 @@ func (a *AndroidMkInfo) SetString(name, value string) {
 
 // SetPath sets a Make variable with the given name to the given path string.
 func (a *AndroidMkInfo) SetPath(name string, path Path) {
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1404,6 +1362,7 @@ func (a *AndroidMkInfo) AddOptionalPath(name string, path OptionalPath) {
 
 // SetPaths sets a Make variable with the given name to a slice of the given path strings.
 func (a *AndroidMkInfo) SetPaths(name string, paths Paths) {
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1420,6 +1379,7 @@ func (a *AndroidMkInfo) SetOptionalPaths(name string, paths Paths) {
 
 // AddPaths appends the given path strings to a Make variable with the given name.
 func (a *AndroidMkInfo) AddPaths(name string, paths Paths) {
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1430,6 +1390,7 @@ func (a *AndroidMkInfo) AddPaths(name string, paths Paths) {
 // It is a no-op if the given flag is false.
 func (a *AndroidMkInfo) SetBoolIfTrue(name string, flag bool) {
 	if flag {
+		a.createMapIfNecessary()
 		if _, ok := a.EntryMap[name]; !ok {
 			a.EntryOrder = append(a.EntryOrder, name)
 		}
@@ -1439,6 +1400,7 @@ func (a *AndroidMkInfo) SetBoolIfTrue(name string, flag bool) {
 
 // SetBool sets a Make variable with the given name to if the given bool flag value.
 func (a *AndroidMkInfo) SetBool(name string, flag bool) {
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1454,6 +1416,7 @@ func (a *AndroidMkInfo) AddStrings(name string, value ...string) {
 	if len(value) == 0 {
 		return
 	}
+	a.createMapIfNecessary()
 	if _, ok := a.EntryMap[name]; !ok {
 		a.EntryOrder = append(a.EntryOrder, name)
 	}
@@ -1478,9 +1441,7 @@ func (a *AndroidMkInfo) AddCompatibilityTestSuites(suites ...string) {
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
 func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProxy, commonInfo *CommonModuleInfo) {
-	helperInfo := AndroidMkInfo{
-		EntryMap: make(map[string][]string),
-	}
+	helperInfo := AndroidMkInfo{}
 
 	name := commonInfo.BaseModuleName
 	if a.OverrideName != "" {
@@ -1495,7 +1456,7 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 	a.Host_required = append(a.Host_required, commonInfo.HostRequiredModuleNames...)
 	a.Target_required = append(a.Target_required, commonInfo.TargetRequiredModuleNames...)
 
-	a.HeaderStrings = append(a.HeaderStrings, a.GetDistForGoals(ctx, mod, commonInfo)...)
+	a.HeaderStrings = append(a.HeaderStrings, a.GetDistForGoals(ctx, mod)...)
 	a.HeaderStrings = append(a.HeaderStrings, fmt.Sprintf("\ninclude $(CLEAR_VARS)  # type: %s, name: %s, variant: %s", ctx.ModuleType(mod), commonInfo.BaseModuleName, ctx.ModuleSubDir(mod)))
 
 	// Add the TestSuites from the provider to LOCAL_SOONG_PROVIDER_TEST_SUITES.
@@ -1630,7 +1591,7 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 func (a *AndroidMkInfo) mergeEntries(helperInfo *AndroidMkInfo) {
 	for _, extraEntry := range a.EntryOrder {
 		if v, ok := helperInfo.EntryMap[extraEntry]; ok {
-			v = append(v, a.EntryMap[extraEntry]...)
+			helperInfo.EntryMap[extraEntry] = append(v, a.EntryMap[extraEntry]...)
 		} else {
 			helperInfo.EntryMap[extraEntry] = a.EntryMap[extraEntry]
 			helperInfo.EntryOrder = append(helperInfo.EntryOrder, extraEntry)
@@ -1641,7 +1602,7 @@ func (a *AndroidMkInfo) mergeEntries(helperInfo *AndroidMkInfo) {
 }
 
 func (a *AndroidMkInfo) disabled() bool {
-	return a.Disabled || !a.OutputFile.Valid()
+	return !a.OutputFile.Valid()
 }
 
 // write  flushes the AndroidMkEntries's in-struct data populated by AndroidMkEntries into the
@@ -1664,7 +1625,7 @@ func (a *AndroidMkInfo) write(w io.Writer) {
 // calls from the module's dist and dists properties.
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func (a *AndroidMkInfo) GetDistForGoals(ctx fillInEntriesContext, mod ModuleOrProxy, commonInfo *CommonModuleInfo) []string {
+func (a *AndroidMkInfo) GetDistForGoals(ctx fillInEntriesContext, mod ModuleOrProxy) []string {
 	distContributions := getDistContributions(ctx, mod)
 	if distContributions == nil {
 		return nil
@@ -1693,7 +1654,6 @@ func deepCopyAndroidMkInfo(mkinfo *AndroidMkInfo) AndroidMkInfo {
 		// There is no modification on OutputFile, so no need to
 		// make their deep copy.
 		OutputFile:      mkinfo.OutputFile,
-		Disabled:        mkinfo.Disabled,
 		Include:         mkinfo.Include,
 		Required:        deepCopyStringSlice(mkinfo.Required),
 		Host_required:   deepCopyStringSlice(mkinfo.Host_required),
