@@ -714,7 +714,7 @@ func getPvmfwProperties(ctx android.LoadHookContext) *filesystem.PvmfwProperties
 
 	return &filesystem.PvmfwProperties{
 		Image:          proptools.StringPtr(":" + image),
-		Binary:         proptools.StringPtr(":" + bin),
+		Binary_name:    proptools.StringPtr(bin),
 		Avbkey:         proptools.StringPtr(":" + avbkey),
 		Partition_size: partitionSize,
 	}
@@ -1516,6 +1516,8 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 		fsProps.Mount_point = mountPoint
 
 	}
+
+	fsProps.Enable_host_init_verifier_check = proptools.BoolPtr(false)
 
 	partitionSpecificFsProps(ctx, partitions, fsProps, partitionType)
 
