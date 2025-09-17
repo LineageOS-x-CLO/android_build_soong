@@ -375,7 +375,7 @@ type OverridableProperties struct {
 
 	// if not blank, set the minimum version of the sdk that the compiled artifacts will run against.
 	// Defaults to sdk_version if not set. See sdk_version for possible values.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
 }
 
 // Functionality common to Module and Import
@@ -831,8 +831,9 @@ func (j *Module) SystemModules() string {
 }
 
 func (j *Module) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
-	if j.overridableProperties.Min_sdk_version != nil {
-		return android.ApiLevelFrom(ctx, *j.overridableProperties.Min_sdk_version)
+	minSdkVersion := j.overridableProperties.Min_sdk_version.Get(j.ConfigurableEvaluator(ctx))
+	if minSdkVersion.IsPresent() {
+		return android.ApiLevelFrom(ctx, minSdkVersion.Get())
 	}
 	return j.SdkVersion(ctx).ApiLevel
 }
@@ -1352,6 +1353,8 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			j.addKSnapshot(ctx, hj)
 		}
 
+		overridableMinSdkVersion := j.overridableProperties.Min_sdk_version.Get(ctx)
+
 		j.outputFile = j.headerJarFile
 		return &JavaInfo{
 			HeaderJars:                          android.PathsIfNonNil(j.headerJarFile),
@@ -1367,7 +1370,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			StubsLinkType:                       j.stubsLinkType,
 			AconfigIntermediateCacheOutputPaths: deps.aconfigProtoFiles,
 			SdkVersion:                          j.SdkVersion(ctx),
-			OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
+			HasOverrideMinSdkVersion:            overridableMinSdkVersion.IsPresent(),
 			Installable:                         BoolDefault(j.properties.Installable, true),
 			KSnapshotFiles:                      j.kSnapshotFiles,
 		}
@@ -2124,6 +2127,9 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 	if deps.headerJarOverride.Valid() {
 		j.headerJarFile = deps.headerJarOverride.Path()
 	}
+
+	overridableMinSdkVersion := j.overridableProperties.Min_sdk_version.Get(ctx)
+
 	return &JavaInfo{
 		HeaderJars:               android.PathsIfNonNil(j.headerJarFile),
 		LocalHeaderJarsPreJarjar: android.PathsIfNonNil(combinedHeaderJarFile),
@@ -2153,7 +2159,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 		AconfigIntermediateCacheOutputPaths: j.aconfigCacheFiles,
 		SdkVersion:                          j.SdkVersion(ctx),
 		OutputFile:                          j.outputFile,
-		OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
+		HasOverrideMinSdkVersion:            overridableMinSdkVersion.IsPresent(),
 		Installable:                         BoolDefault(j.properties.Installable, true),
 	}
 }
