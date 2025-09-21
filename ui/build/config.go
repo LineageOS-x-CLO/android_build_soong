@@ -167,6 +167,9 @@ type configImpl struct {
 
 	// Control which JDK is used for builds
 	useJdk25 bool
+
+	// The directory where Siso config can be found.
+	sisoConfigDir string
 }
 
 type NinjaWeightListSource uint
@@ -319,6 +322,10 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 		}
 	}
 
+	if ret.environ.IsEnvTrue("SOONG_INCREMENTAL_ANALYSIS") {
+		ret.incrementalBuildActions = true
+	}
+
 	if ret.ninjaWeightListSource == HINT_FROM_SOONG {
 		ret.environ.Set("SOONG_GENERATES_NINJA_HINT", "always")
 	} else if ret.ninjaWeightListSource == DEFAULT {
@@ -363,16 +370,26 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	}
 
 	// If we are not using Siso, force USE_REWRAPPER to be the same as USE_RBE.
+	// If we are using Siso, force USE_REWRAPPER=false when USE_RBE is not "true".
 	// These are separate only for Siso.
+	rbeValue, ok := ret.environ.Get("USE_RBE")
+	rewrapperValue, _ := ret.environ.Get("USE_REWRAPPER")
 	if ret.ninjaCommand != NINJA_SISO {
-		rbeValue, ok := ret.environ.Get("USE_RBE")
-		rewrapperValue, _ := ret.environ.Get("USE_REWRAPPER")
 		if rbeValue != rewrapperValue {
 			if ok {
 				ret.environ.Set("USE_REWRAPPER", rbeValue)
 			} else {
 				ret.environ.Unset("USE_REWRAPPER")
 			}
+		}
+	} else {
+		if rbeValue != "true" && rewrapperValue == "true" {
+			ret.environ.Set("USE_REWRAPPER", "false")
+		}
+		if value, ok := ret.environ.Get("SISO_CONFIG_DIR"); ok {
+			ret.sisoConfigDir = value
+		} else {
+			ret.sisoConfigDir = "build/soong/siso_config"
 		}
 	}
 
@@ -1861,6 +1878,9 @@ func (c *configImpl) N2Bin() string {
 }
 
 func (c *configImpl) SisoBin() string {
+	// TODO(b/374176257): remove this once Siso is built from source.
+	return filepath.Join("prebuilts/siso", c.HostPrebuiltTag(), "siso")
+
 	path := c.PrebuiltBuildTool("siso")
 	// Use musl instead of glibc because glibc on the build server is old and has bugs
 	return strings.ReplaceAll(path, "/linux-x86/", "/linux_musl-x86/")
@@ -1945,6 +1965,10 @@ func (c *configImpl) LogsDir() string {
 // MkFileMetrics returns the file path for make-related metrics.
 func (c *configImpl) MkMetrics() string {
 	return filepath.Join(c.LogsDir(), "mk_metrics.pb")
+}
+
+func (c *configImpl) SisoConfigDir() string {
+	return c.sisoConfigDir
 }
 
 func (c *configImpl) SetEmptyNinjaFile(v bool) {
