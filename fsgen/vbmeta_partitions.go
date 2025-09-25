@@ -134,6 +134,7 @@ func (f *filesystemCreator) createVbmetaPartitions(ctx android.LoadHookContext, 
 				Rollback_index:            rollbackIndex,
 				Rollback_index_location:   &ril,
 				Partitions:                proptools.NewSimpleConfigurable(partitionModules),
+				Is_auto_generated:         proptools.BoolPtr(true),
 			}, &struct {
 				Name *string
 			}{
@@ -269,6 +270,17 @@ func (f *filesystemCreator) createVbmetaPartitions(ctx android.LoadHookContext, 
 		}
 	}
 
+	// This property is only set in Soong-only builds as not all custom partitions has been
+	// converted to Soong. Unconditionally setting this property will lead to missing
+	// dependencies error.
+	if !ctx.Config().KatiEnabled() {
+		for _, customPartition := range partitionVars.CustomImagesPartitions {
+			if partitionVars.PartitionQualifiedVariables[customPartition].BoardAvbKeyPath != "" {
+				chainedPartitionModules = append(chainedPartitionModules, customPartition)
+			}
+		}
+	}
+
 	ctx.CreateModuleInDirectory(
 		filesystem.VbmetaFactory,
 		".", // Create in the root directory for now so its easy to get the key
@@ -280,6 +292,7 @@ func (f *filesystemCreator) createVbmetaPartitions(ctx android.LoadHookContext, 
 			Chained_partitions: chainedPartitionModules,
 			Partitions:         proptools.NewSimpleConfigurable(includePartitionModules),
 			Partition_name:     proptools.StringPtr("vbmeta"),
+			Is_auto_generated:  proptools.BoolPtr(true),
 		}, &struct {
 			Name *string
 		}{

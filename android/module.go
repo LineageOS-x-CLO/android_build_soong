@@ -2086,6 +2086,7 @@ type HostToolProviderInfo struct {
 
 var HostToolProviderInfoProvider = blueprint.NewProvider[HostToolProviderInfo]()
 
+// @auto-generate: gob
 type DistInfo struct {
 	Dists []dist
 }
@@ -3428,6 +3429,10 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 		}
 	})
 
+	if !ctx.Config().UnbundledBuildImage() {
+		checkbuildDeps = append(checkbuildDeps, PathForPhony(ctx, "blueprint_tests"))
+	}
+
 	suffix := ""
 	if ctx.Config().KatiEnabled() {
 		suffix = "-soong"
@@ -3500,6 +3505,7 @@ type IDEInfo interface {
 }
 
 // Collect information for opening IDE project files in java/jdeps.go.
+// @auto-generate: gob
 type IdeInfo struct {
 	BaseModuleName    string   `json:"-"`
 	Deps              []string `json:"dependencies,omitempty"`
