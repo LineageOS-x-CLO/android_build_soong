@@ -788,7 +788,8 @@ func (a *aapt) compileResInDir(ctx android.ModuleContext, dirs android.Paths, co
 
 var resourceProcessorBusyBox = pctx.AndroidStaticRule("resourceProcessorBusyBox",
 	blueprint.RuleParams{
-		Command: "${config.JavaCmd} -cp ${config.ResourceProcessorBusyBox} " +
+		Command: "${config.JavaCmd} ${config.ResourceProcessorBusyBoxSuppressJDKWarnings} " +
+			"-cp ${config.ResourceProcessorBusyBox} " +
 			"com.google.devtools.build.android.ResourceProcessorBusyBox --tool=GENERATE_BINARY_R -- @${out}.args && " +
 			"if cmp -s ${out}.tmp ${out} ; then rm ${out}.tmp ; else mv ${out}.tmp ${out}; fi",
 		CommandDeps:    []string{"${config.ResourceProcessorBusyBox}"},
@@ -1213,7 +1214,7 @@ type AARImportProperties struct {
 	// List of java static libraries that the included ARR (android library prebuilts) has dependencies to.
 	Static_libs proptools.Configurable[[]string]
 	// List of java libraries that the included ARR (android library prebuilts) has dependencies to.
-	Libs []string
+	Libs proptools.Configurable[[]string]
 	// If set to true, run Jetifier against .aar file. Defaults to false.
 	Jetifier *bool
 	// If true, extract JNI libs from AAR archive. These libs will be accessible to android_app modules and
@@ -1336,7 +1337,7 @@ func (a *AARImport) DepsMutator(ctx android.BottomUpMutatorContext) {
 		}
 	}
 
-	ctx.AddVariationDependencies(nil, libTag, a.properties.Libs...)
+	ctx.AddVariationDependencies(nil, libTag, a.properties.Libs.GetOrDefault(ctx, nil)...)
 	ctx.AddVariationDependencies(nil, staticLibTag, a.properties.Static_libs.GetOrDefault(ctx, nil)...)
 
 	a.usesLibrary.deps(ctx, false)
