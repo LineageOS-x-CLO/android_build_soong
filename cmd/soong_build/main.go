@@ -53,7 +53,7 @@ var (
 const configCacheFile = "config.cache"
 
 type ConfigCache struct {
-	EnvDepsHash                  uint64
+	EnvDepsHash                  proptools.Hash
 	ProductVariableFileTimestamp int64
 	SoongBuildFileTimestamp      int64
 }
@@ -223,7 +223,10 @@ func incrementalValid(config android.Config, configCacheFile string) (*ConfigCac
 	var configCache ConfigCache
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&configCache)
-	maybeQuit(err, "")
+	if err != nil {
+		fmt.Printf("Failed to parse config cache: %s.  Continuing with non-incremental analysis.", err.Error())
+		return &newConfigCache, false
+	}
 
 	return &newConfigCache, newConfigCache == configCache
 }

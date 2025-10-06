@@ -24,6 +24,8 @@ import com.android.kotlin.compiler.snapshotter.fileToSnapshotFile
 import java.io.File
 import java.net.URLClassLoader
 import java.util.UUID
+import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.deleteRecursively
 import kotlin.system.exitProcess
 import org.jetbrains.kotlin.buildtools.api.CompilationResult
 import org.jetbrains.kotlin.buildtools.api.CompilationService
@@ -46,6 +48,7 @@ private val ARGUMENT_PARSERS =
         PluginArgument(),
         RunFilesArgument(),
         RootDirArgument(),
+        SrcJarsDirArgument(),
         SourceDeltaArgument(),
         Verbose(),
         WorkingDirArgument(),
@@ -125,6 +128,7 @@ fun writeCacheMarker(marker: CacheMarker) {
     }
 }
 
+@OptIn(ExperimentalPathApi::class)
 fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationResult {
     val kotlincArgs = mutableListOf<String>()
     if (opts.buildFile != null) {
@@ -143,8 +147,8 @@ fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationRe
 
     if (!cacheMarker.isValid()) {
         println("Invalid or missing cache. Triggering full compile.")
-        opts.workingDir.delete()
-        opts.outputDir.delete()
+        opts.workingDir.toPath().deleteRecursively()
+        opts.outputDir.toPath().deleteRecursively()
     } else {
         if (!cacheMarker.remove()) {
             throw CacheMarkerError("Failed to remove cache marker. Aborting the build.")
@@ -153,6 +157,7 @@ fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationRe
     return doBtaCompilation(
         opts.sources + opts.buildFileSources,
         opts.classPath + opts.buildFileClassPaths,
+        opts.srcJarsDir,
         opts.workingDir,
         opts.outputDir,
         opts.sourceDeltaFile,
@@ -166,6 +171,7 @@ fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationRe
 fun doBtaCompilation(
     sources: List<String>,
     classPath: List<String>,
+    srcJarsDirectory: File,
     workingDirectory: File,
     outputDirectory: File,
     sourceDeltaFile: File?,
@@ -206,7 +212,7 @@ fun doBtaCompilation(
         compilationConfig.makeClasspathSnapshotBasedIncrementalCompilationConfiguration()
     var sourceChanges: SourcesChanges = SourcesChanges.Unknown
     if (sourceDeltaFile != null) {
-        sourceChanges = parseSourceChanges(sourceDeltaFile)
+        sourceChanges = parseSourceChanges(sourceDeltaFile, srcJarsDirectory.absolutePath)
     }
     compilationConfig.useIncrementalCompilation(
         workingDirectory,
@@ -257,25 +263,55 @@ fun getClasspathSnapshotParameters(
     )
 }
 
-fun parseSourceChanges(sourceDeltaFile: File): SourcesChanges.Known {
+enum class SourceChangeParseState {
+    STANDARD,
+    ZIP_FILE,
+    CONTENTS,
+}
+
+fun parseSourceChanges(sourceDeltaFile: File, zipSrcsDir: String): SourcesChanges.Known {
     val modifiedList = mutableListOf<File>()
     val removedList = mutableListOf<File>()
+    var state = SourceChangeParseState.STANDARD
+
     for (entry in sourceDeltaFile.readText().split(" ")) {
         if (entry.length < 1) {
             continue
         }
-        val f = File(entry.substring(1))
+
+        // Prepare the file name as it is used in different branches.
+        // Not that this file name is nonsense for a few entries, but won't be used for
+        // those entries.
+        var filename = entry.substring(1)
+        if (state == SourceChangeParseState.CONTENTS) {
+            filename = zipSrcsDir + File.separator + filename
+        }
         when {
+            entry == "--file" -> {
+                state = SourceChangeParseState.ZIP_FILE
+                // We'll skip the next entry
+            }
+            entry == "--endfile" -> {
+                state = SourceChangeParseState.STANDARD
+            }
+            state == SourceChangeParseState.ZIP_FILE -> {
+                state = SourceChangeParseState.CONTENTS
+                // we now need to prefix our entries with the srcJars directory.
+            }
             entry.startsWith("+") -> {
-                if (!f.exists()) {
-                    throw RuntimeException(
-                        "Supplied file diff contains modified file that does not exist: $entry"
-                    )
+                val f = File(filename)
+                if (f.extension == "kt") {
+                    if (!f.exists()) {
+                        throw RuntimeException(
+                            "Supplied file diff contains modified file that does not exist: $entry"
+                        )
+                    }
+                    modifiedList.add(f.absoluteFile)
                 }
-                modifiedList.add(f.absoluteFile)
             }
 
             entry.startsWith("-") -> {
+                val f = File(filename)
                 if (f.exists()) {
                     throw RuntimeException(
                         "Supplied file diff contains removed file that exist: $entry"
