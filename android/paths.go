@@ -114,8 +114,10 @@ type ModuleInstallPathContext interface {
 	InstallInSanitizerDir() bool
 	InstallInRamdisk() bool
 	InstallInVendorRamdisk() bool
+	InstallPathSkipFirstStageRamdisk() bool
 	InstallInVendorKernelRamdisk() bool
 	InstallInDebugRamdisk() bool
+	InstallInTestHarnessRamdisk() bool
 	InstallInRecovery() bool
 	InstallInRoot() bool
 	InstallInOdm() bool
@@ -153,12 +155,20 @@ func (ctx *baseModuleContextToModuleInstallPathContext) InstallInVendorRamdisk()
 	return ctx.Module().InstallInVendorRamdisk()
 }
 
+func (ctx *baseModuleContextToModuleInstallPathContext) InstallPathSkipFirstStageRamdisk() bool {
+	return ctx.Module().InstallPathSkipFirstStageRamdisk()
+}
+
 func (ctx *baseModuleContextToModuleInstallPathContext) InstallInVendorKernelRamdisk() bool {
 	return ctx.Module().InstallInVendorKernelRamdisk()
 }
 
 func (ctx *baseModuleContextToModuleInstallPathContext) InstallInDebugRamdisk() bool {
 	return ctx.Module().InstallInDebugRamdisk()
+}
+
+func (ctx *baseModuleContextToModuleInstallPathContext) InstallInTestHarnessRamdisk() bool {
+	return ctx.Module().InstallInTestHarnessRamdisk()
 }
 
 func (ctx *baseModuleContextToModuleInstallPathContext) InstallInRecovery() bool {
@@ -1926,13 +1936,25 @@ func PathForModuleInstall(ctx ModuleInstallPathContext, pathComponents ...string
 // PathForHostDexInstall returns an InstallPath representing the install path for the
 // module appended with paths...
 func PathForHostDexInstall(ctx ModuleInstallPathContext, pathComponents ...string) InstallPath {
-	return pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "", pathComponents...)
+	return PathForHostInstall(ctx, pathComponents...)
 }
 
 // PathForModuleInPartitionInstall is similar to PathForModuleInstall but partition is provided by the caller
 func PathForModuleInPartitionInstall(ctx ModuleInstallPathContext, partition string, pathComponents ...string) InstallPath {
 	os, arch := osAndArch(ctx)
 	return pathForInstall(ctx, os, arch, partition, pathComponents...)
+}
+
+// PathForHostInstall returns an InstallPath representing the install path for a host file.
+// Equivalent to $(HOST_OUT) from make.
+func PathForHostInstall(ctx PathContext, pathComponents ...string) InstallPath {
+	return pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "", pathComponents...)
+}
+
+// PathForDeviceFirstInstall returns an InstallPath representing the install path for a device file
+// in the first arch folder. Equivalent to $(TARGET_OUT) from make.
+func PathForDeviceFirstInstall(ctx PathContext, pathComponents ...string) InstallPath {
+	return pathForInstall(ctx, ctx.Config().AndroidFirstDeviceTarget.Os, ctx.Config().AndroidFirstDeviceTarget.Arch.ArchType, "", pathComponents...)
 }
 
 func osAndArch(ctx ModuleInstallPathContext) (OsType, ArchType) {
@@ -2047,7 +2069,7 @@ func modulePartition(ctx ModuleInstallPathContext, device bool) string {
 			// /first_stage_ramdisk. To expose the module before switching root
 			// on a device without a dedicated recovery partition, install the
 			// recovery variant.
-			if ctx.DeviceConfig().BoardMoveRecoveryResourcesToVendorBoot() {
+			if ctx.DeviceConfig().BoardMoveRecoveryResourcesToVendorBoot() && !ctx.InstallPathSkipFirstStageRamdisk() {
 				partition = "vendor_ramdisk/first_stage_ramdisk"
 			} else {
 				partition = "vendor_ramdisk"
@@ -2082,6 +2104,8 @@ func modulePartition(ctx ModuleInstallPathContext, device bool) string {
 			partition = ctx.DeviceConfig().OdmDlkmPath()
 		} else if ctx.InstallInVendorKernelRamdisk() {
 			partition = "vendor_kernel_ramdisk"
+		} else if ctx.InstallInTestHarnessRamdisk() {
+			partition = "test_harness_ramdisk"
 		} else {
 			partition = "system"
 		}
@@ -2320,12 +2344,20 @@ func (m testModuleInstallPathContext) InstallInVendorRamdisk() bool {
 	return m.inVendorRamdisk
 }
 
+func (m testModuleInstallPathContext) InstallPathSkipFirstStageRamdisk() bool {
+	return false
+}
+
 func (m testModuleInstallPathContext) InstallInVendorKernelRamdisk() bool {
 	return false
 }
 
 func (m testModuleInstallPathContext) InstallInDebugRamdisk() bool {
 	return m.inDebugRamdisk
+}
+
+func (m testModuleInstallPathContext) InstallInTestHarnessRamdisk() bool {
+	return false
 }
 
 func (m testModuleInstallPathContext) InstallInRecovery() bool {

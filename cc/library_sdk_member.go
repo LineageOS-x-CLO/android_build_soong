@@ -24,6 +24,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // This file contains support for using cc library modules within an sdk.
 
 var sharedLibrarySdkMemberType = &librarySdkMemberType{
@@ -65,6 +67,7 @@ func init() {
 	android.RegisterSdkMemberType(staticAndSharedLibrarySdkMemberType)
 }
 
+// @auto-generate: gob
 type librarySdkMemberType struct {
 	android.SdkMemberTypeBase
 
@@ -577,7 +580,7 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 	}
 }
 
-func getRequiredMemberOutputFile(ctx android.SdkMemberContext, module android.ModuleOrProxy) android.Path {
+func getRequiredMemberOutputFile(ctx android.SdkMemberContext, module android.ModuleProxy) android.Path {
 	var path android.Path
 	if info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), module, LinkableInfoProvider); ok && info.OutputFile.Valid() {
 		path = info.OutputFile.Path()

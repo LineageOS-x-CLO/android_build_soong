@@ -435,11 +435,20 @@ func (p *PackagingBase) AddDeps(ctx BottomUpMutatorContext, depTag blueprint.Dep
 			Mutator:   "link",
 			Variation: "shared",
 		}
+		rustLibDylibVariation := blueprint.Variation{
+			Mutator:   "rust_libraries",
+			Variation: "dylib",
+		}
+
 		// If a shared variation exists, use that. Static variants do not provide any standalone files
-		// for packaging.
+		// for packaging. Similarly, use the dylib variation of rust library if it exists as
+		// the static lib (rlib) variants are never installed.
 		if ctx.OtherModuleFarDependencyVariantExists([]blueprint.Variation{sharedVariation}, dep) {
 			targetVariation = append(targetVariation, sharedVariation)
+		} else if ctx.OtherModuleFarDependencyVariantExists([]blueprint.Variation{rustLibDylibVariation}, dep) {
+			targetVariation = append(targetVariation, rustLibDylibVariation)
 		}
+
 		depTagToUse := depTag
 		if highPriority {
 			depTagToUse = highPriorityDepTag{}
@@ -532,7 +541,6 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 		}
 	})
 
-	modulesToVintfFragmentsPaths := make(map[string]Paths)
 	// gather modules to install, skipping overridden modules
 	ctx.WalkDepsProxy(func(child, parent ModuleProxy) bool {
 		owner := OtherModuleNameWithPossibleOverride(ctx, child)
@@ -545,8 +553,21 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 				return false
 			}
 		}
-		modulesToVintfFragmentsPaths[owner] = getVintFragmentsPaths(ctx, child)
 		modulesToInstall[owner] = true
+		return true
+	})
+
+	// gather vintf fragments of modules that belong to this packaging module.
+	// overridden modules do not need to be skipped, since they will be removed
+	// in p.UniqueVintfFragmentsPaths using modulesToInstall.
+	modulesToVintfFragmentsPaths := make(map[string]Paths)
+	ctx.WalkDepsProxy(func(child, parent ModuleProxy) bool {
+		depTag := ctx.OtherModuleDependencyTag(child)
+		if interPartitionDepTag, ok := depTag.(InterPartitionIncludeVintfsInterface); ok {
+			return interPartitionDepTag.IncludeVintfs()
+		}
+		owner := OtherModuleNameWithPossibleOverride(ctx, child)
+		modulesToVintfFragmentsPaths[owner] = getVintFragmentsPaths(ctx, child)
 		return true
 	})
 
@@ -600,6 +621,10 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 	p.UniqueVintfFragmentsPaths = SortedUniquePaths(uniqueVintfFragmentsPaths)
 
 	return m
+}
+
+type InterPartitionIncludeVintfsInterface interface {
+	IncludeVintfs() bool
 }
 
 // Returns `Vintf_fragments` of the module. This will be collected by the top-level filesystem.

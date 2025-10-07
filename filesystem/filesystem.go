@@ -42,6 +42,7 @@ func init() {
 	pctx.HostBinToolVariable("fileslist", "fileslist")
 	pctx.HostBinToolVariable("fs_config", "fs_config")
 	pctx.HostBinToolVariable("SoongZipCmd", "soong_zip")
+	pctx.HostBinToolVariable("check_radio_versions", "check_radio_versions")
 }
 
 func registerBuildComponents(ctx android.RegistrationContext) {
@@ -316,13 +317,19 @@ func FilesystemFactory() android.Module {
 	return module
 }
 
-func initFilesystemModule(module android.DefaultableModule, filesystemModule *filesystem) {
+// This does not include packaging specs. It is used for initializing prebuilt images and normal
+// filesystem modules.
+func initBaseFilesystemModule(module android.DefaultableModule, filesystemModule *filesystem) {
 	module.AddProperties(&filesystemModule.properties)
+	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	android.InitDefaultableModule(module)
+}
+
+func initFilesystemModule(module android.DefaultableModule, filesystemModule *filesystem) {
 	android.InitPackageModule(filesystemModule)
 	filesystemModule.PackagingBase.DepsCollectFirstTargetOnly = true
 	filesystemModule.PackagingBase.AllowHighPriorityDeps = true
-	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
-	android.InitDefaultableModule(module)
+	initBaseFilesystemModule(module, filesystemModule)
 
 	android.AddLoadHook(module, func(ctx android.LoadHookContext) {
 		filesystemModule.setDevNodesDescriptionProp()
@@ -350,11 +357,18 @@ type depTagWithVisibilityEnforcementBypass struct {
 
 type interPartitionDepTag struct {
 	blueprint.BaseDependencyTag
+	includeVintfs bool
 }
 
-var interPartitionDependencyTag = interPartitionDepTag{}
+var interPartitionDependencyTag = interPartitionDepTag{includeVintfs: false}
 
-var interPartitionInstallDependencyTag = interPartitionDepTag{}
+var interPartitionInstallDependencyTag = interPartitionDepTag{includeVintfs: true}
+
+func (t interPartitionDepTag) IncludeVintfs() bool {
+	return t.includeVintfs
+}
+
+var _ android.InterPartitionIncludeVintfsInterface = (*interPartitionDepTag)(nil)
 
 var _ android.ExcludeFromVisibilityEnforcementTag = (*depTagWithVisibilityEnforcementBypass)(nil)
 
@@ -456,7 +470,7 @@ type FilesystemInfo struct {
 	// The root staging directory used to build the output filesystem. If consuming this, make sure
 	// to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja.
-	RootDir android.Path
+	RootDir android.OutputPath
 	// Extra root directories that are also built into the partition. Currently only used for
 	// including the recovery partition files into the vendor_boot image.
 	ExtraRootDirs android.Paths
@@ -464,7 +478,7 @@ type FilesystemInfo struct {
 	// sure to add a dependency on the Output file, as you cannot add dependencies on directories
 	// in ninja. In many cases this is the same as RootDir, only in the system partition is it
 	// different. There, it points to the "system" sub-directory of RootDir.
-	RebasedDir android.Path
+	RebasedDir android.OutputPath
 	// Name of the module that produced this FilesystemInfo origionally. (though it may be
 	// re-exported by super images or boot images)
 	ModuleName string
@@ -646,6 +660,18 @@ func buildInstalledFiles(ctx android.ModuleContext, partition string, rootDir an
 	}
 }
 
+func (f *filesystem) updateAvbInFsInfo(ctx android.ModuleContext, fsInfo *FilesystemInfo) {
+	if proptools.Bool(f.properties.Use_avb) {
+		fsInfo.UseAvb = true
+		fsInfo.AvbAlgorithm = proptools.StringDefault(f.properties.Avb_algorithm, "SHA256_RSA4096")
+		fsInfo.AvbHashAlgorithm = proptools.StringDefault(f.properties.Avb_hash_algorithm, "sha256")
+		if f.properties.Avb_private_key != nil {
+			fsInfo.AvbKey = android.PathForModuleSrc(ctx, *f.properties.Avb_private_key)
+			f.avbKey = fsInfo.AvbKey
+		}
+	}
+}
+
 func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	validatePartitionType(ctx, f)
 	if f.filesystemBuilder.ShouldUseVintfFragmentModuleOnly() {
@@ -797,15 +823,7 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		NoFlashall:          proptools.Bool(f.properties.No_flashall),
 		checkVintfLog:       checkVintfLog,
 	}
-	if proptools.Bool(f.properties.Use_avb) {
-		fsInfo.UseAvb = true
-		fsInfo.AvbAlgorithm = proptools.StringDefault(f.properties.Avb_algorithm, "SHA256_RSA4096")
-		fsInfo.AvbHashAlgorithm = proptools.StringDefault(f.properties.Avb_hash_algorithm, "sha256")
-		if f.properties.Avb_private_key != nil {
-			fsInfo.AvbKey = android.PathForModuleSrc(ctx, *f.properties.Avb_private_key)
-			f.avbKey = fsInfo.AvbKey
-		}
-	}
+	f.updateAvbInFsInfo(ctx, &fsInfo)
 
 	android.SetProvider(ctx, FilesystemProvider, fsInfo)
 
@@ -1092,6 +1110,8 @@ func (f *filesystem) verifyGenericConfig(ctx android.ModuleContext) {
 	allowedModules := []string{
 		// build_flag_system collects information from the metadata for each product.
 		"build_flag_system",
+		// system_ext may have bootjars that are non-generic.
+		"dex_bootjars",
 		// microdroid_ramdisk is an android_filesystem included in the system image.
 		"microdroid_ramdisk",
 		// notice_xml_system collects information from the metadata for each product.
@@ -1569,6 +1589,10 @@ var validPartitions = []string{
 	"vendor_ramdisk",
 	"recovery",
 	"vendor_kernel_ramdisk",
+	"vendor_ramdisk-debug",
+	"vendor_ramdisk-test-harness",
+	"debug_ramdisk",
+	"test_harness_ramdisk",
 }
 
 func (f *filesystem) buildEventLogtagsFile(
@@ -1690,7 +1714,9 @@ func (f *filesystem) AndroidMkEntries() []android.AndroidMkEntries {
 			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
 				entries.SetString("LOCAL_MODULE_PATH", f.installDir.String())
 				entries.SetString("LOCAL_INSTALLED_MODULE_STEM", f.installFileName())
-				entries.SetString("LOCAL_FILESYSTEM_FILELIST", f.fileListFile.String())
+				if f.fileListFile != nil {
+					entries.SetString("LOCAL_FILESYSTEM_FILELIST", f.fileListFile.String())
+				}
 				if f.avbKey != nil {
 					entries.SetString("LOCAL_FILESYSTEM_AVB_KEY_PATH", f.avbKey.String())
 				}
@@ -1893,7 +1919,7 @@ func assertMaxImageSize(builder *android.RuleBuilder, image android.Path, maxSiz
 // It visits apps installed in system and system_ext partitions, and adds the autogenerated
 // RRO modules to its own deps.
 func addAutogeneratedRroDeps(ctx android.BottomUpMutatorContext) {
-	overlayModuleName := func(child android.ModuleOrProxy, partition string) string {
+	overlayModuleName := func(child android.ModuleProxy, partition string) string {
 		ret := java.AutogeneratedRroModuleName(ctx, child.Name(), partition)
 		// Use the fully qualified name if the app is a soong namespace
 		if ctx.OtherModuleNamespace(child).Path != "." {
@@ -1901,7 +1927,7 @@ func addAutogeneratedRroDeps(ctx android.BottomUpMutatorContext) {
 		}
 		return ret
 	}
-	productCharacteristicsOverlayModuleName := func(child android.ModuleOrProxy) string {
+	productCharacteristicsOverlayModuleName := func(child android.ModuleProxy) string {
 		ret := java.AutogeneratedProductCharacteristicsRroModuleName(ctx, child.Name())
 		// Use the fully qualified name if the app is a soong namespace
 		if ctx.OtherModuleNamespace(child).Path != "." {
@@ -1959,7 +1985,7 @@ func addAutogeneratedRroDeps(ctx android.BottomUpMutatorContext) {
 }
 
 func (f *filesystem) MakeVars(ctx android.MakeVarsModuleContext) []android.ModuleMakeVarsValue {
-	if f.Name() == ctx.Config().SoongDefinedSystemImage() {
+	if f.Name() == ctx.Config().SoongDefinedSystemImage() && android.IsModulePreferredProxy(ctx.(android.OtherModuleProviderContext), f) {
 		return []android.ModuleMakeVarsValue{{"SOONG_DEFINED_SYSTEM_IMAGE_PATH", f.output.String()}}
 	}
 	return nil

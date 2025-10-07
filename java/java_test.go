@@ -511,7 +511,7 @@ func TestArchSpecific(t *testing.T) {
 
 func TestBinary(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx, _ := testJava(t, cc.GatherRequiredDepsForTest(android.Android)+`
 		java_library_host {
 			name: "foo",
 			srcs: ["a.java"],
@@ -539,7 +539,7 @@ func TestBinary(t *testing.T) {
 	barWrapperDeps := bar.Output("bar").Implicits.Strings()
 
 	libjni := ctx.ModuleForTests(t, "libjni", buildOS+"_x86_64_shared")
-	libjniSO := libjni.Rule("Cp").Output.String()
+	libjniSO := android.OtherModuleProviderOrDefault(ctx, libjni.Module(), android.InstallFilesProvider).InstallFiles[0].RelativeToTop().String()
 
 	// Test that the install binary wrapper depends on the installed jar file
 	if g, w := barWrapperDeps, barJar; !android.InList(w, g) {
@@ -554,7 +554,7 @@ func TestBinary(t *testing.T) {
 
 func TestTest(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx, _ := testJava(t, cc.GatherRequiredDepsForTest(android.Android)+`
 		java_test_host {
 			name: "foo",
 			srcs: ["a.java"],

@@ -202,6 +202,9 @@ func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstra
 	commonArgs := make([]string, 0, 0)
 
 	commonArgs = append(commonArgs, "--kati_suffix", config.KatiSuffix())
+	if !config.SkipKati() {
+		commonArgs = append(commonArgs, "--kati_enabled")
+	}
 
 	if !pb.config.skipSoongTests {
 		commonArgs = append(commonArgs, "-t")
@@ -510,11 +513,6 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 
 	// Record the .top as the very last thing in the function.
 	tf := filepath.Join(outDir, ".top")
-	defer func() {
-		if err := os.WriteFile(tf, []byte(cwd), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to log CWD: %v", err)
-		}
-	}()
 
 	// Find the previous working directory if it was recorded.
 	var prevCWD string
@@ -524,14 +522,19 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 			// No previous working directory recorded, nothing to do.
 			return nil
 		}
+		ctx.Println(fmt.Sprintf("Failed to read pcwd: %v", err))
 		return err
 	}
+
 	prevCWD = strings.Trim(string(pcwd), "\n")
 
-	if prevCWD == cwd {
-		// We are in the same source dir, nothing to update.
+	if prevCWD == cwd || prevCWD == "" {
+		// We are in the same source dir, or prevCWD came up empty for some reason,
+		// so nothing to update.
 		return nil
 	}
+
+	ctx.Println(fmt.Sprintf("CWD directory changed from %v to %v, updating output symlinks", prevCWD, cwd))
 
 	symlinkWg.Add(1)
 	if err := updateSymlinks(ctx, outDir, prevCWD, cwd, newUpdateSemaphore()); err != nil {
@@ -539,6 +542,11 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 	}
 	symlinkWg.Wait()
 	ctx.Println(fmt.Sprintf("Updated %d/%d symlinks in dir %v", numUpdated, numFound, outDir))
+
+	if err := os.WriteFile(tf, []byte(cwd), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to log CWD: %v", err)
+	}
+
 	return nil
 }
 
@@ -689,6 +697,9 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 			// This is currently how the command line to invoke soong_build finds the
 			// root of the source tree and the output root
 			ninjaEnv.Set("TOP", os.Getenv("TOP"))
+			SetupLitePath(ctx, config, "")
+			ninjaPath, _ := config.Environment().Get("PATH")
+			ninjaEnv.Set("PATH", ninjaPath)
 
 		        qcEnvVars := []string{
 			    "TARGET_BOARD_PLATFORM",

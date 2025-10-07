@@ -92,21 +92,6 @@ func SetupTempDir(ctx Context, config Config) {
 	ensureEmptyDirectoriesExist(ctx, config.TempDir())
 }
 
-// SetupKatiEnabledMarker creates or delets a file that tells soong_build if we're running with
-// kati.
-func SetupKatiEnabledMarker(ctx Context, config Config) {
-	// Potentially write a marker file for whether kati is enabled. This is used by soong_build to
-	// potentially run the AndroidMk singleton and postinstall commands.
-	// Note that the absence of the file does not preclude running Kati for product
-	// configuration purposes.
-	katiEnabledMarker := filepath.Join(config.SoongOutDir(), ".soong.kati_enabled")
-	if config.SkipKati() || config.SkipKatiNinja() {
-		os.Remove(katiEnabledMarker)
-	} else {
-		ensureEmptyFileExists(ctx, katiEnabledMarker)
-	}
-}
-
 var combinedBuildNinjaTemplate = template.Must(template.New("combined").Parse(`
 builddir = {{.OutDir}}
 {{if .UseRemoteBuild }}pool local_pool
@@ -311,7 +296,7 @@ func Build(ctx Context, config Config) {
 	checkCaseSensitivity(ctx, config)
 
 	SetupPath(ctx, config)
-	SetProductReleaseConfigMaps(ctx, config)
+	mapsCh := QueryProductReleaseConfigMaps(ctx, config)
 
 	what := evaluateWhatToRun(config, ctx.Verboseln)
 
@@ -334,9 +319,10 @@ func Build(ctx Context, config Config) {
 
 	if config.RunCIPDProxyServer() && shouldRunCIPDProxy(config) {
 		cipdProxy := startCIPDProxyServer(ctx, config)
-		defer cipdProxy.Stop()
+		defer cipdProxy.Stop(ctx)
 	}
 
+	SetProductReleaseConfigMaps(ctx, config, mapsCh)
 	if what&RunProductConfig != 0 {
 		runMakeProductConfig(ctx, config)
 
@@ -346,8 +332,6 @@ func Build(ctx Context, config Config) {
 	}
 
 	// Everything below here depends on product config.
-
-	SetupKatiEnabledMarker(ctx, config)
 
 	if inList("installclean", config.Arguments()) ||
 		inList("install-clean", config.Arguments()) {
@@ -541,5 +525,19 @@ func distFile(ctx Context, config Config, src string, subDirs ...string) {
 // Actions to run on every build where 'dist' is in the actions.
 // Be careful, anything added here slows down EVERY CI build
 func runDistActions(ctx Context, config Config) {
+	// Always dist the build flags used in this build.
+	if product, err := config.TargetProductOrErr(); err == nil {
+		buildFlagsDir := filepath.Join(config.DistDir(), "build_flags")
+		ensureDirectoriesExist(ctx, buildFlagsDir)
+		flagsFile := filepath.Join(config.SoongOutDir(), "release-config", fmt.Sprintf("release_config-%s.vars", product))
+		flagsData, err := os.ReadFile(flagsFile)
+		if err != nil {
+			ctx.Printf("failed to read %s: %v", flagsFile, err)
+			return
+		}
+		distFlagsFile := filepath.Join(buildFlagsDir, filepath.Base(flagsFile))
+		os.WriteFile(distFlagsFile, flagsData, 0666)
+	}
+
 	runStagingSnapshot(ctx, config)
 }

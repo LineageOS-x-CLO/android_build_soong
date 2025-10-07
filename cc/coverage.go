@@ -210,12 +210,22 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 }
 
 func (cov *coverage) begin(ctx BaseModuleContext) {
-	if ctx.Host() && !ctx.Os().Linux() {
-		// TODO(dwillemsen): because of -nodefaultlibs, we must depend on libclang_rt.profile-*.a
-		// Just turn off for now.
-	} else {
+	if IsCoverageEnabled(ctx) {
 		cov.Properties = SetCoverageProperties(ctx, cov.Properties, ctx.nativeCoverage(), ctx.useSdk(), ctx.sdkVersion())
 	}
+}
+
+func IsCoverageEnabled(ctx android.BaseModuleContext) bool {
+	if ctx.Host() {
+		// Host coverage is only supported on Linux 64-bit binaries
+		if !ctx.Os().Linux() {
+			return false
+		}
+		if ctx.Arch().ArchType.Multilib == "lib32" {
+			return false
+		}
+	}
+	return true
 }
 
 func SetCoverageProperties(ctx android.BaseModuleContext, properties CoverageProperties, moduleTypeHasCoverage bool,
@@ -324,10 +334,8 @@ func (c coverageTransitionMutator) IncomingTransition(ctx android.IncomingTransi
 	// non-coverage variants have PreventInstall = true, so we need certain deptags that are
 	// used for installation to use the coverage variant so that filesystem modules will package
 	// them correctly.
-	if ctx.Device() {
-		if x, ok := ctx.DepTag().(UseCoverageDeptag); (ok && x.IsNativeCoverageNeededDepTag(ctx)) || ctx.DepTag() == android.RequiredDepTag {
-			return "cov"
-		}
+	if x, ok := ctx.DepTag().(UseCoverageDeptag); (ok && x.IsNativeCoverageNeededDepTag(ctx)) || ctx.DepTag() == android.RequiredDepTag {
+		return "cov"
 	}
 
 	return incomingVariation

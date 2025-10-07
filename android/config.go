@@ -84,6 +84,7 @@ type CmdArgs struct {
 	SoongOutDir    string
 	SoongVariables string
 	KatiSuffix     string
+	KatiEnabled    bool
 
 	DocFile string
 
@@ -181,6 +182,10 @@ func (c Config) CoverageSuffix() string {
 // shared libraries).
 func (c Config) MaxPageSizeSupported() string {
 	return String(c.config.productVariables.DeviceMaxPageSizeSupported)
+}
+
+func (c Config) DeviceCheckPrebuiltMaxPageSize() bool {
+	return Bool(c.config.productVariables.DeviceCheckPrebuiltMaxPageSize)
 }
 
 // NoBionicPageSizeMacro returns true when AOSP is page size agnostic.
@@ -344,6 +349,14 @@ type DeviceConfig struct {
 // VendorConfig represents the configuration for vendor-specific behavior.
 type VendorConfig soongconfig.SoongConfig
 
+// envDeps must be a singleton. non-generic and generic configurations share a single
+// instance of envDeps.
+type envDeps struct {
+	envLock   sync.Mutex
+	envDeps   map[string]string
+	envFrozen bool
+}
+
 // Definition of general build configuration for soong_build. Some of these
 // product configuration values are read from Kati-generated soong.variables.
 type config struct {
@@ -382,10 +395,8 @@ type config struct {
 
 	runGoTests bool
 
-	env       map[string]string
-	envLock   sync.Mutex
-	envDeps   map[string]string
-	envFrozen bool
+	env     map[string]string
+	envDeps *envDeps
 
 	// Changes behavior based on whether Kati runs after soong_build, or if soong_build
 	// runs standalone.
@@ -448,7 +459,10 @@ type partialCompileFlags struct {
 	// Whether to enable incremental java compilation.
 	Enable_inc_javac bool
 
-	// Whether to enable incremental d8
+    // Whether to use the kotlin-incremental-client when compiling .kt files.
+	Enable_inc_kotlin bool	
+
+ 	// Whether to enable incremental d8
 	Enable_inc_d8 bool
 
 	// Whether to enable passing dependencies incrementally from kotlin to java.
@@ -459,13 +473,14 @@ type partialCompileFlags struct {
 	// Add others as needed.
 }
 
-// These are the flags when `SOONG_PARTIAL_COMPILE` is empty or not set.
+// These are the flags when `SOONG_PARTIAL_COMPILE=default`.
 var defaultPartialCompileFlags = partialCompileFlags{}
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=true`.
 var enabledPartialCompileFlags = partialCompileFlags{
 	Use_d8:                         true,
 	Disable_stub_validation:        true,
+	Enable_inc_kotlin:              false,
 	Enable_inc_javac:               true,
 	Enable_inc_d8:                  true,
 	Enable_inc_kotlin_java_dep:     true,
@@ -477,6 +492,7 @@ var allPartialCompileFlags = partialCompileFlags{
 	Use_d8:                         true,
 	Disable_stub_validation:        true,
 	Enable_inc_javac:               true,
+	Enable_inc_kotlin:              true,
 	Enable_inc_d8:                  true,
 	Enable_inc_kotlin_java_dep:     true,
 	Enable_inc_d8_outside_platform: true,
@@ -502,9 +518,10 @@ type jsonConfigurable interface {
 //
 // The user-facing documentation shows:
 //
-// - empty or not set: "The current default state"
-// - "true" or "on": enable all stable partial compile features.
-// - "false" or "off": disable partial compile completely.
+//   - empty, "false", or "off": disable partial compile completely.
+//   - "default": "The current default state"  This is the value typically assigned in
+//     `${ANDROID_BUILD_ENVIRONMENT_CONFIG_DIR}/${ANDROID_BUILD_ENVIRONMENT_CONFIG}.json`.
+//   - "true" or "on": enable all stable partial compile features.
 //
 // What we actually allow is a comma separated list of tokens, whose first
 // character may be "+" (enable) or "-" (disable).  If neither is present, "+"
@@ -521,19 +538,19 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 	}
 	value := c.Getenv("SOONG_PARTIAL_COMPILE")
 	if value == "" {
-		return defaultPartialCompileFlags, nil
+		return partialCompileFlags{}, nil
 	}
 
-	ret := defaultPartialCompileFlags
+	ret := partialCompileFlags{}
 	tokens := strings.Split(strings.ToLower(value), ",")
-	makeVal := func(state string, defaultValue bool) bool {
+	makeVal := func(state string) bool {
 		switch state {
-		case "":
-			return defaultValue
 		case "-":
 			return false
 		case "+":
 			return true
+		default:
+			panic(fmt.Errorf("Invalid state %v in parsePartialCompileFlags.makeVal", state))
 		}
 		return false
 	}
@@ -557,6 +574,8 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 		// Big toggle switches.
 		case "false":
 			ret = partialCompileFlags{}
+		case "default":
+			ret = defaultPartialCompileFlags
 		case "true":
 			ret = enabledPartialCompileFlags
 		case "all":
@@ -564,30 +583,38 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 
 		// Individual flags.
 		case "inc_d8_outside_platform", "enable_inc_d8_outside_platform":
-			ret.Enable_inc_d8_outside_platform = makeVal(state, !defaultPartialCompileFlags.Enable_inc_d8_outside_platform)
+			ret.Enable_inc_d8_outside_platform = makeVal(state)
 		case "disable_inc_d8_outside_platform":
-			ret.Enable_inc_d8_outside_platform = !makeVal(state, defaultPartialCompileFlags.Enable_inc_d8_outside_platform)
+			ret.Enable_inc_d8_outside_platform = !makeVal(state)
 
 		case "inc_d8", "enable_inc_d8":
-			ret.Enable_inc_d8 = makeVal(state, !defaultPartialCompileFlags.Enable_inc_d8)
+			ret.Enable_inc_d8 = makeVal(state)
 		case "disable_inc_d8":
-			ret.Enable_inc_d8 = !makeVal(state, defaultPartialCompileFlags.Enable_inc_d8)
+			ret.Enable_inc_d8 = !makeVal(state)
 
 		case "inc_javac", "enable_inc_javac":
-			ret.Enable_inc_javac = makeVal(state, !defaultPartialCompileFlags.Enable_inc_javac)
+			ret.Enable_inc_javac = makeVal(state)
 		case "disable_inc_javac":
-			ret.Enable_inc_javac = !makeVal(state, defaultPartialCompileFlags.Enable_inc_javac)
+			ret.Enable_inc_javac = !makeVal(state)
+
 		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
-			ret.Enable_inc_kotlin_java_dep = makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
+			ret.Enable_inc_kotlin_java_dep = makeVal(state)
 		case "disable_inc_kotlin_java_dep":
-			ret.Enable_inc_kotlin_java_dep = !makeVal(state, defaultPartialCompileFlags.Enable_inc_kotlin_java_dep)
+			ret.Enable_inc_kotlin_java_dep = !makeVal(state)
+
+		case "inc_kotlin", "enable_inc_kotlin":
+			ret.Enable_inc_kotlin = makeVal(state)
+		case "disable_inc_kotlin":
+			ret.Enable_inc_kotlin = !makeVal(state)
+
 		case "stub_validation", "enable_stub_validation":
-			ret.Disable_stub_validation = !makeVal(state, !defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = !makeVal(state)
 		case "disable_stub_validation":
-			ret.Disable_stub_validation = makeVal(state, defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = makeVal(state)
 
 		case "use_d8":
-			ret.Use_d8 = makeVal(state, defaultPartialCompileFlags.Use_d8)
+			ret.Use_d8 = makeVal(state)
+
 		default:
 			return partialCompileFlags{}, fmt.Errorf("Unknown SOONG_PARTIAL_COMPILE value: %v", tok)
 		}
@@ -737,9 +764,12 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 		moduleListFile: cmdArgs.ModuleListFile,
 		fs:             pathtools.NewOsFs(absSrcDir),
 
+		envDeps: &envDeps{},
 		OncePer: &OncePer{},
 
 		buildFromSourceStub: cmdArgs.BuildFromSourceStub,
+
+		katiEnabled: cmdArgs.KatiEnabled,
 	}
 	variant, ok := os.LookupEnv("TARGET_BUILD_VARIANT")
 	isEngBuild := !ok || variant == "eng"
@@ -768,11 +798,6 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 	err = loadConfig(newConfig)
 	if err != nil {
 		return &config{}, err
-	}
-
-	KatiEnabledMarkerFile := filepath.Join(cmdArgs.SoongOutDir, ".soong.kati_enabled")
-	if _, err := os.Stat(absolutePath(KatiEnabledMarkerFile)); err == nil {
-		newConfig.katiEnabled = true
 	}
 
 	determineBuildOS(newConfig)
@@ -897,7 +922,8 @@ func overrideGenericConfig(config *config) {
 		}
 	}
 
-	// OncePer must be a singleton.
+	// envDeps and OncePer must be singletons.
+	config.genericConfigField.envDeps = config.envDeps
 	config.genericConfigField.OncePer = config.OncePer
 	// keep the device name to get the install path.
 	config.genericConfigField.deviceNameToInstall = config.deviceNameToInstall
@@ -1034,17 +1060,17 @@ func (c *config) CpPreserveSymlinksFlags() string {
 func (c *config) Getenv(key string) string {
 	var val string
 	var exists bool
-	c.envLock.Lock()
-	defer c.envLock.Unlock()
-	if c.envDeps == nil {
-		c.envDeps = make(map[string]string)
+	c.envDeps.envLock.Lock()
+	defer c.envDeps.envLock.Unlock()
+	if c.envDeps.envDeps == nil {
+		c.envDeps.envDeps = make(map[string]string)
 	}
-	if val, exists = c.envDeps[key]; !exists {
-		if c.envFrozen {
+	if val, exists = c.envDeps.envDeps[key]; !exists {
+		if c.envDeps.envFrozen {
 			panic("Cannot access new environment variables after envdeps are frozen")
 		}
 		val, _ = c.env[key]
-		c.envDeps[key] = val
+		c.envDeps.envDeps[key] = val
 	}
 	return val
 }
@@ -1074,10 +1100,10 @@ func (c *config) TargetsJava21() bool {
 // EnvDeps returns the environment variables this build depends on. The first
 // call to this function blocks future reads from the environment.
 func (c *config) EnvDeps() map[string]string {
-	c.envLock.Lock()
-	defer c.envLock.Unlock()
-	c.envFrozen = true
-	return c.envDeps
+	c.envDeps.envLock.Lock()
+	defer c.envDeps.envLock.Unlock()
+	c.envDeps.envFrozen = true
+	return c.envDeps.envDeps
 }
 
 func (c *config) KatiEnabled() bool {
@@ -1760,6 +1786,10 @@ func (c *config) DisableNoticeXmlGeneration() bool {
 	return c.IsEnvTrue("DISABLE_NOTICE_XML_GENERATION")
 }
 
+func (c *config) CompatibilityTestcases() map[string]CompatibilityTestcaseJSON {
+	return c.productVariables.CompatibilityTestcases
+}
+
 func (c *deviceConfig) Arches() []Arch {
 	var arches []Arch
 	for _, target := range c.config.Targets[Android] {
@@ -2023,7 +2053,7 @@ func findOverrideValue(overrides []string, name string, errorMsg string) (newVal
 			// This shouldn't happen as this is first checked in make, but just in case.
 			panic(fmt.Errorf(errorMsg, o))
 		}
-		if matchPattern(split[0], name) {
+		if MatchPattern(split[0], name) {
 			return substPattern(split[0], split[1], name), true
 		}
 	}
@@ -2353,6 +2383,10 @@ func (c *deviceConfig) BuildBrokenDupSysprop() bool {
 	return c.config.productVariables.BuildBrokenDupSysprop
 }
 
+func (c *deviceConfig) BuildBrokenPrebuiltELFFiles() bool {
+	return c.config.productVariables.BuildBrokenPrebuiltELFFiles
+}
+
 func (c *deviceConfig) RequiresInsecureExecmemForSwiftshader() bool {
 	return c.config.productVariables.RequiresInsecureExecmemForSwiftshader
 }
@@ -2464,6 +2498,10 @@ func (c *config) UseR8GlobalCheckNotNullFlags() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_R8_GLOBAL_CHECK_NOT_NULL_FLAGS")
 }
 
+func (c *config) UseR8MinimizedSyntheticNames() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_R8_MINIMIZE_SYNTHETIC_NAMES")
+}
+
 func (c *config) UseDexV41() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_USE_DEX_V41")
 }
@@ -2502,7 +2540,7 @@ var (
 		"RELEASE_APEX_CONTRIBUTIONS_SWCODEC":                 "com.android.media.swcodec",
 		"RELEASE_APEX_CONTRIBUTIONS_STATSD":                  "com.android.os.statsd",
 		"RELEASE_APEX_CONTRIBUTIONS_TELEMETRY_TVP":           "",
-		"RELEASE_APEX_CONTRIBUTIONS_TELEMETRY_TELEPHONY2":    "com.android.telephony2",
+		"RELEASE_APEX_CONTRIBUTIONS_TELEPHONY2":              "com.android.telephonycore",
 		"RELEASE_APEX_CONTRIBUTIONS_TZDATA":                  "com.android.tzdata",
 		"RELEASE_APEX_CONTRIBUTIONS_UPROBESTATS":             "com.android.uprobestats",
 		"RELEASE_APEX_CONTRIBUTIONS_UWB":                     "com.android.uwb",
@@ -2536,10 +2574,6 @@ func (c *config) ProductLocales() []string {
 
 func (c *config) ProductDefaultWifiChannels() []string {
 	return c.productVariables.ProductDefaultWifiChannels
-}
-
-func (c *config) BoardUseVbmetaDigestInFingerprint() bool {
-	return Bool(c.productVariables.BoardUseVbmetaDigestInFingerprint)
 }
 
 func (c *config) OemProperties() []string {

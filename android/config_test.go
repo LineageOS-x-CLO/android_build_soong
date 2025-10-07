@@ -228,6 +228,10 @@ func (p partialCompileFlags) updateEnableIncJavac(value bool) partialCompileFlag
 	return p
 }
 
+func (p partialCompileFlags) updateEnableIncKotlin(value bool) partialCompileFlags {
+	p.Enable_inc_kotlin = value
+    return P
+}
 func (p partialCompileFlags) updateEnableIncD8(value bool) partialCompileFlags {
 	p.Enable_inc_d8 = value
 	return p
@@ -249,6 +253,7 @@ func TestPartialCompile(t *testing.T) {
 			env: map[string]string{
 				"SOONG_PARTIAL_COMPILE": value,
 			},
+			envDeps: &envDeps{},
 		}
 		return c
 	}
@@ -285,7 +290,15 @@ func TestPartialCompile(t *testing.T) {
 		{"false,+enable_inc_javac", true, partialCompileFlags{}.updateEnableIncJavac(true)},
 		{"false,-disable_inc_javac", true, partialCompileFlags{}.updateEnableIncJavac(true)},
 
-		// enable_inc_d8 can be specified with any of 3 options.
+		// enable_inc_kotlin can be specified with any of 3 options.
+		{"false,-inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(false)},
+		{"false,-enable_inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(false)},
+		{"false,+disable_inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(false)},
+		{"false,+inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(true)},
+		{"false,+enable_inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(true)},
+		{"false,-disable_inc_kotlin", true, partialCompileFlags{}.updateEnableIncKotlin(true)},		
+
+        // enable_inc_d8 can be specified with any of 3 options.
 		{"false,-inc_d8", true, partialCompileFlags{}.updateEnableIncD8(false)},
 		{"false,-enable_inc_d8", true, partialCompileFlags{}.updateEnableIncD8(false)},
 		{"false,+disable_inc_d8", true, partialCompileFlags{}.updateEnableIncD8(false)},

@@ -111,6 +111,7 @@ type configImpl struct {
 	katiArgs        []string
 	ninjaArgs       []string
 	katiSuffix      string
+	useRkati        bool
 	targetDevice    string
 	targetDeviceDir string
 	sandboxConfig   *SandboxConfig
@@ -353,9 +354,7 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 		ret.distDir = filepath.Join(ret.OutDir(), "dist")
 	}
 
-	if srcDirIsWritable, ok := ret.environ.Get("BUILD_BROKEN_SRC_DIR_IS_WRITABLE"); ok {
-		ret.sandboxConfig.SetSrcDirIsRO(srcDirIsWritable == "false")
-	}
+	ret.setupSandboxConfig(ctx, ret.environ.AsMap())
 
 	if os.Getenv("GENERATE_SOONG_DEBUG") == "true" {
 		ret.moduleDebugFile, _ = filepath.Abs(shared.JoinPath(ret.SoongOutDir(), "soong-debug-info.json"))
@@ -606,19 +605,38 @@ func NewBuildActionConfig(action BuildAction, dir string, ctx Context, args ...s
 	return NewConfig(ctx, getConfigArgs(action, dir, ctx, args)...)
 }
 
+type productReleaseConfigMapsInfo struct {
+	// The value of PRODUCT_RELEASE_CONFIG_MAPS
+	value string
+
+	// Any error
+	err error
+}
+
 // Prepare for getting make variables.  For them to be accurate, we need to have
 // obtained PRODUCT_RELEASE_CONFIG_MAPS.
 //
 // Returns:
 //
-//	Whether config should be called again.
+//	chan to pass to SetProductReleaseConfigMaps to finish setting the value.
 //
 // TODO: when converting product config to a declarative language, make sure
 // that PRODUCT_RELEASE_CONFIG_MAPS is properly handled as a separate step in
 // that process.
-func SetProductReleaseConfigMaps(ctx Context, config Config) {
+func QueryProductReleaseConfigMaps(ctx Context, config Config) chan *productReleaseConfigMapsInfo {
+	mapsCh := make(chan *productReleaseConfigMapsInfo)
+	go func() {
+		defer close(mapsCh)
+		getProductReleaseConfigMaps(ctx, config, mapsCh)
+	}()
+	return mapsCh
+}
+
+func getProductReleaseConfigMaps(ctx Context, config Config, mapsCh chan *productReleaseConfigMapsInfo) {
 	ctx.BeginTrace(metrics.RunKati, "SetProductReleaseConfigMaps")
 	defer ctx.EndTrace()
+
+	ret := &productReleaseConfigMapsInfo{}
 
 	if config.SkipConfig() {
 		// This duplicates the logic from Build to skip product config
@@ -634,9 +652,36 @@ func SetProductReleaseConfigMaps(ctx Context, config Config) {
 	// when we run product config to get the rest of the make vars.
 	releaseMapVars, err := dumpMakeVars(ctx, config, nil, releaseConfigVars, false, "")
 	if err != nil {
-		ctx.Fatalln("Error getting PRODUCT_RELEASE_CONFIG_MAPS:", err)
+		ret.err = err
+	} else {
+		ret.value = releaseMapVars["PRODUCT_RELEASE_CONFIG_MAPS"]
 	}
-	config.Environment().Set("PRODUCT_RELEASE_CONFIG_MAPS", releaseMapVars["PRODUCT_RELEASE_CONFIG_MAPS"])
+	mapsCh <- ret
+}
+
+// Wait for the Query to finish, and set PRODUCT_RELEASE_CONFIG_MAPS in the environment.
+func SetProductReleaseConfigMaps(ctx Context, config Config, mapsCh chan *productReleaseConfigMapsInfo) {
+	if config.SkipConfig() {
+		return
+	}
+	mapsInfo := <-mapsCh
+	if mapsInfo.err != nil {
+		ctx.Fatalln("Error getting PRODUCT_RELEASE_CONFIG_MAPS:", mapsInfo.err)
+	}
+	config.Environment().Set("PRODUCT_RELEASE_CONFIG_MAPS", mapsInfo.value)
+}
+
+func (config *configImpl) setupSandboxConfig(ctx Context, makeVars map[string]string) {
+	if makeVars["RELEASE_SRC_DIR_IS_READ_ONLY"] == "true" || config.environ.IsEnvTrue("SOONG_SRC_DIR_IS_READ_ONLY") {
+		// If the release config says source is read-only, then make it read-write only if
+		// BUILD_BROKEN_SRC_DIR_IS_WRITABLE=true.
+		config.sandboxConfig.SetSrcDirIsRO(makeVars["BUILD_BROKEN_SRC_DIR_IS_WRITABLE"] != "true")
+	} else {
+		// If the release config says source is not read-only, then make it read-only only if
+		// BUILD_BROKEN_SRC_DIR_IS_WRITABLE=false.
+		config.sandboxConfig.SetSrcDirIsRO(makeVars["BUILD_BROKEN_SRC_DIR_IS_WRITABLE"] == "false")
+	}
+	config.sandboxConfig.SetSrcDirRWAllowlist(strings.Fields(makeVars["BUILD_BROKEN_SRC_DIR_RW_ALLOWLIST"]))
 }
 
 // storeConfigMetrics selects a set of configuration information and store in
@@ -1204,11 +1249,7 @@ func (c *configImpl) PrebuiltOS() string {
 }
 
 func (c *configImpl) HostToolDir() string {
-	if c.SkipKatiNinja() {
-		return filepath.Join(c.SoongOutDir(), "host", c.PrebuiltOS(), "bin")
-	} else {
-		return filepath.Join(c.OutDir(), "host", c.PrebuiltOS(), "bin")
-	}
+	return filepath.Join(c.OutDir(), "host", c.PrebuiltOS(), "bin")
 }
 
 func (c *configImpl) UsedEnvFile(tag string) string {
@@ -1759,8 +1800,11 @@ func (c *configImpl) HostPrebuiltTag() string {
 
 func (c *configImpl) KatiBin() string {
 	binName := "ckati"
+	if c.useRkati {
+		binName = "rkati"
+	}
 	if c.UseABFS() {
-		binName = "ckati-wrap"
+		binName += "-wrap"
 	}
 
 	return c.PrebuiltBuildTool(binName)

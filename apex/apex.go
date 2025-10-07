@@ -1763,6 +1763,10 @@ func (vctx *visitorContext) normalizeFileInfo(mctx android.ModuleContext) {
 			vctx.unwantedTransitiveFilesInfo = append(vctx.unwantedTransitiveFilesInfo, f)
 			continue
 		}
+		if f.builtFile == nil {
+			mctx.ModuleErrorf("Dependency %q had nil builtFile. Make sure the module has an output file. (the installable and compile_dex properties can affect this)", f.androidMkModuleName)
+			continue
+		}
 		dest := filepath.Join(f.installDir, f.builtFile.Base())
 		if e, ok := encountered[dest]; !ok {
 			encountered[dest] = f
@@ -2176,13 +2180,7 @@ func (a *apexBundle) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			// Create placeholder paths for later stages that expect to see those paths,
 			// though they won't be used.
 			var unusedPath = android.PathForModuleOut(ctx, "nonexistentprivatekey")
-			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.ErrorRule,
-				Output: unusedPath,
-				Args: map[string]string{
-					"error": "Private key not available",
-				},
-			})
+			android.ErrorRule(ctx, unusedPath, "Private key not available")
 			a.privateKeyFile = unusedPath
 		} else {
 			ctx.PropertyErrorf("key", "private_key for %q could not be found", String(a.overridableProperties.Key))
@@ -2197,13 +2195,7 @@ func (a *apexBundle) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			// Create placeholder paths for later stages that expect to see those paths,
 			// though they won't be used.
 			var unusedPath = android.PathForModuleOut(ctx, "nonexistentpublickey")
-			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.ErrorRule,
-				Output: unusedPath,
-				Args: map[string]string{
-					"error": "Public key not available",
-				},
-			})
+			android.ErrorRule(ctx, unusedPath, "Public key not available")
 			a.publicKeyFile = unusedPath
 		} else {
 			ctx.PropertyErrorf("key", "public_key for %q could not be found", String(a.overridableProperties.Key))
@@ -2224,7 +2216,8 @@ func (a *apexBundle) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	////////////////////////////////////////////////////////////////////////////////////////////
 	// 3.a) some artifacts are generated from the collected files
-	a.filesInfo = append(a.filesInfo, a.buildAconfigFiles(ctx)...)
+	aconfigFiles := a.buildAconfigFiles(ctx)
+	a.filesInfo = append(a.filesInfo, aconfigFiles...)
 
 	////////////////////////////////////////////////////////////////////////////////////////////
 	// 4) generate the build rules to create the APEX. This is done in builder.go.
@@ -2269,6 +2262,33 @@ func (a *apexBundle) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	moduleInfoJSON.Class = []string{"ETC"}
 	moduleInfoJSON.SystemSharedLibs = []string{"none"}
 	moduleInfoJSON.Disabled = false
+
+	// Build compliance metadata
+	if a.installable() && slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) {
+		builtFiles := []string{}
+		for _, file := range aconfigFiles {
+			builtFiles = append(builtFiles, file.builtFile.String())
+		}
+
+		filesContained := []string{}
+		buildOutputPaths := []string{}
+		filesContained = append(filesContained, a.installedFile.String())
+		buildOutputPaths = append(buildOutputPaths, a.outputFile.String())
+		for _, f := range a.filesInfo {
+			filesContained = append(filesContained, f.path())
+			buildOutputPaths = append(buildOutputPaths, f.builtFile.String())
+			imageDir := android.PathForModuleOut(ctx, "image"+imageApexSuffix).String()
+			for _, symlinkPath := range f.symlinkPaths() {
+				filesContained = append(filesContained, symlinkPath)
+				buildOutputPaths = append(buildOutputPaths, filepath.Join(imageDir, symlinkPath))
+				builtFiles = append(builtFiles, filepath.Join(imageDir, symlinkPath))
+			}
+		}
+		complianceMetadataInfo := ctx.ComplianceMetadataInfo()
+		complianceMetadataInfo.SetFilesContained(filesContained)
+		complianceMetadataInfo.SetBuildOutputPathsOfFilesContained(buildOutputPaths)
+		complianceMetadataInfo.AddBuiltFiles(builtFiles...)
+	}
 }
 
 // Set prebuiltInfoProvider. This will be used by `apex_prebuiltinfo_singleton` to print out a metadata file
@@ -2351,6 +2371,7 @@ func apexBootclasspathFragmentFiles(ctx android.ModuleContext, module android.Mo
 				Input:  pathOnHost,
 				Output: tempPath,
 			})
+			ctx.ComplianceMetadataInfo().AddBuiltFiles(tempPath.String())
 		} else {
 			// At this point, the boot image profile cannot be generated. It is probably because the boot
 			// image profile source file does not exist on the branch, or it is not available for the
@@ -2359,13 +2380,7 @@ func apexBootclasspathFragmentFiles(ctx android.ModuleContext, module android.Mo
 			// targets (such as module SDK) do not need it. It is only needed when the APEX is being
 			// built. Therefore, we create an error rule so that an error will occur at the ninja phase
 			// only if the APEX is being built.
-			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.ErrorRule,
-				Output: tempPath,
-				Args: map[string]string{
-					"error": "Boot image profile cannot be generated",
-				},
-			})
+			android.ErrorRule(ctx, tempPath, "Boot image profile cannot be generated")
 		}
 
 		androidMkModuleName := filepath.Base(pathInApex)

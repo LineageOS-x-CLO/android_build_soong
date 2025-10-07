@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -822,23 +823,20 @@ func (a *AndroidApp) dexBuildActions(ctx android.ModuleContext) (android.Path, a
 			a.dexer.resourcesInput = android.OptionalPathForPath(protoFile)
 		}
 
-		var extraSrcJars android.Paths
-		var extraClasspathJars android.Paths
-		var extraCombinedJars android.Paths
 		if a.useResourceProcessorBusyBox(ctx) {
 			// When building an app with ResourceProcessorBusyBox enabled ResourceProcessorBusyBox has already
 			// created R.class files that provide IDs for resources in busybox/R.jar.  Pass that file in the
 			// classpath when compiling everything else, and add it to the final classes jar.
-			extraClasspathJars = android.Paths{a.aapt.rJar}
-			extraCombinedJars = android.Paths{a.aapt.rJar}
+			a.Module.extraClasspathJars = append(a.Module.extraClasspathJars, a.aapt.rJar)
+			a.Module.extraCombinedJars = append(a.Module.extraCombinedJars, a.aapt.rJar)
 		} else {
 			// When building an app without ResourceProcessorBusyBox the aapt2 rule creates R.srcjar containing
 			// R.java files for the app's package and the packages from all transitive static android_library
 			// dependencies.  Compile the srcjar alongside the rest of the sources.
-			extraSrcJars = android.Paths{a.aapt.aaptSrcJar}
+			a.Module.extraSrcJars = append(a.Module.extraSrcJars, a.aapt.aaptSrcJar)
 		}
 
-		javaInfo = a.Module.compile(ctx, extraSrcJars, extraClasspathJars, extraCombinedJars, nil)
+		javaInfo = a.Module.compile(ctx)
 		if a.dexProperties.resourceShrinkingEnabled(ctx) {
 			binaryResources := android.PathForModuleOut(ctx, packageResources.Base()+".binary.out.apk")
 			aapt2Convert(ctx, binaryResources, a.dexer.resourcesOutput.Path(), "binary")
@@ -1102,6 +1100,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 					a.outputFile.String(),
 				},
 			},
+			ctx.ModuleProxy(),
 		)
 		builder := android.NewRuleBuilder(pctx, ctx)
 		builder.Command().Text("cp").
@@ -1130,8 +1129,10 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	android.SetProvider(ctx, BundleProvider, BundleInfo{Bundle: bundleFile})
 
 	allowlist := a.createPrivappAllowlist(ctx)
+	complianceMetadataInfo := ctx.ComplianceMetadataInfo()
 	if allowlist != nil {
 		a.privAppAllowlist = android.OptionalPathForPath(allowlist)
+		complianceMetadataInfo.AddBuiltFiles(a.privAppAllowlist.Path().String())
 	}
 
 	// Install the app package.
@@ -1253,6 +1254,11 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	a.setOutputFiles(ctx)
 
 	buildComplianceMetadata(ctx)
+	if shouldInstallAppPackage && slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) {
+		complianceMetadataInfo.SetFilesContained([]string{a.installedOutputFile.String()})
+		complianceMetadataInfo.SetBuildOutputPathsOfFilesContained([]string{a.outputFile.String()})
+		complianceMetadataInfo.AddBuiltFiles(a.outputFile.String())
+	}
 
 	if !a.hideApexVariantFromMake && !a.IsHideFromMake() {
 		if a.embeddedJniLibs {
@@ -1523,7 +1529,7 @@ func AndroidAppFactory() android.Module {
 	module := &AndroidApp{}
 
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
-	module.Module.dexProperties.Optimize.Shrink = proptools.BoolPtr(true)
+	module.Module.dexProperties.Optimize.Shrink = proptools.NewSimpleConfigurable(true)
 	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Instrument = true
@@ -1781,6 +1787,7 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_prefer32_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Host_common_data)...)
+	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Host_first_data)...)
 
 	a.data = android.SortedUniquePaths(a.data)
 	a.extraTestConfigs = android.SortedUniquePaths(a.extraTestConfigs)
@@ -1804,6 +1811,7 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		CompatibilitySupportFiles: a.data,
 		NeedsArchFolder:           true,
 		PerTestcaseDirectory:      proptools.Bool(a.testProperties.Per_testcase_directory),
+		IsUnitTest:                Bool(a.testProperties.Test_options.Unit_test),
 	})
 
 	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
@@ -2244,7 +2252,7 @@ func (u *usesLibrary) classLoaderContextForUsesLibDeps(ctx android.ModuleContext
 			}
 			clcMap.AddContext(ctx, tag.sdkVersion, libName, tag.optional,
 				javaInfo.DexJarBuildPath.PathOrNil(), lib.DexJarInstallPath,
-				lib.ClassLoaderContexts)
+				lib.GetClassLoaderContexts())
 		} else if ctx.Config().AllowMissingDependencies() {
 			ctx.AddMissingDependencies([]string{dep})
 		} else {

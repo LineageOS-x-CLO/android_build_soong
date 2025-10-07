@@ -62,7 +62,7 @@ func DumpMakeVars(ctx Context, config Config, goals, vars []string) (map[string]
 		defer os.RemoveAll(tmpDir)
 
 		SetupLitePath(ctx, config, tmpDir)
-		SetProductReleaseConfigMaps(ctx, config)
+		SetProductReleaseConfigMaps(ctx, config, QueryProductReleaseConfigMaps(ctx, config))
 
 		ret, err = dumpMakeVars(ctx, config, goals, makeVars, false, tmpDir)
 		if err != nil {
@@ -113,7 +113,7 @@ func dumpMakeVars(ctx Context, config Config, goals, vars []string, write_soong_
 	cmd.Stdout = &output
 	pipe, err := cmd.StderrPipe()
 	if err != nil {
-		ctx.Fatalln("Error getting output pipe for ckati:", err)
+		ctx.Fatalln("Error getting output pipe for kati:", err)
 	}
 	cmd.StartOrFatal()
 	// TODO: error out when Stderr contains any content
@@ -305,6 +305,7 @@ func runMakeProductConfig(ctx Context, config Config) {
 		"BUILD_BROKEN_USES_BUILD_STATIC_LIBRARY",
 		"RELEASE_BUILD_EXECUTION_METRICS",
 		"RELEASE_SRC_DIR_IS_READ_ONLY",
+		"RELEASE_USE_RKATI",
 	}, exportEnvVars...), BannerVars...)
 
 	makeVars, err := dumpMakeVars(ctx, config, config.Arguments(), allVars, true, "")
@@ -326,16 +327,8 @@ func runMakeProductConfig(ctx Context, config Config) {
 	config.SetNinjaArgs(strings.Fields(makeVars["NINJA_GOALS"]))
 	config.SetTargetDevice(makeVars["TARGET_DEVICE"])
 	config.SetTargetDeviceDir(makeVars["TARGET_DEVICE_DIR"])
-	if makeVars["RELEASE_SRC_DIR_IS_READ_ONLY"] == "true" {
-		// If the release config says source is read-only, then make it read-write only if
-		// BUILD_BROKEN_SRC_DIR_IS_WRITABLE=true.
-		config.sandboxConfig.SetSrcDirIsRO(makeVars["BUILD_BROKEN_SRC_DIR_IS_WRITABLE"] != "true")
-	} else {
-		// If the release config says source is not read-only, then make it read-only only if
-		// BUILD_BROKEN_SRC_DIR_IS_WRITABLE=false.
-		config.sandboxConfig.SetSrcDirIsRO(makeVars["BUILD_BROKEN_SRC_DIR_IS_WRITABLE"] == "false")
-	}
-	config.sandboxConfig.SetSrcDirRWAllowlist(strings.Fields(makeVars["BUILD_BROKEN_SRC_DIR_RW_ALLOWLIST"]))
+	config.useRkati = makeVars["RELEASE_USE_RKATI"] == "true" || os.Getenv("SOONG_USE_RKATI") == "true"
+	config.setupSandboxConfig(ctx, makeVars)
 
 	config.SetBuildBrokenDupRules(makeVars["BUILD_BROKEN_DUP_RULES"] == "true")
 	config.SetBuildBrokenUsesNetwork(makeVars["BUILD_BROKEN_USES_NETWORK"] == "true")

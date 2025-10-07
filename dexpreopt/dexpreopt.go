@@ -77,6 +77,9 @@ func GenerateDexpreoptRule(ctx android.BuilderContext, globalSoong *GlobalSoongC
 	var profile android.WritablePath
 	if generateProfile {
 		profile = profileCommand(ctx, globalSoong, global, module, rule)
+		if mc, ok := ctx.(android.ModuleContext); ok {
+			mc.ComplianceMetadataInfo().AddBuiltFiles(profile.String())
+		}
 	}
 	if generateBootProfile {
 		bootProfileCommand(ctx, globalSoong, global, module, rule)
@@ -498,6 +501,8 @@ func dexpreoptCommand(ctx android.BuilderContext, globalSoong *GlobalSoongConfig
 	}
 
 	cmd.Text("$(cat").Input(globalSoong.AssumeValueFlags).Text(")")
+
+	cmd.Text("$(cat").Input(globalSoong.ProfileCodeFlag).Text(")")
 
 	rule.Install(odexPath, odexInstallPath)
 	rule.Install(vdexPath, vdexInstallPath)

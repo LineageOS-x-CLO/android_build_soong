@@ -181,8 +181,10 @@ type ModuleContext interface {
 	InstallInSanitizerDir() bool
 	InstallInRamdisk() bool
 	InstallInVendorRamdisk() bool
+	InstallPathSkipFirstStageRamdisk() bool
 	InstallInVendorKernelRamdisk() bool
 	InstallInDebugRamdisk() bool
+	InstallInTestHarnessRamdisk() bool
 	InstallInRecovery() bool
 	InstallInRoot() bool
 	InstallInOdm() bool
@@ -278,6 +280,11 @@ type ModuleContext interface {
 	// GenerateBuildActions, i.e. all later accesses to the module will be via ModuleProxy and not direct access
 	// to the Module.
 	FreeModuleAfterGenerateBuildActions()
+
+	// ModulePhonyFiles registers the srcPaths as dependencies of the module name phony target.
+	// This is similar to OutputFiles, but can be used for files that are not intended to be
+	// consumed by other modules. These files are built as part of checkbuild.
+	ModulePhonyFiles(srcPaths ...Path)
 }
 
 type moduleContext struct {
@@ -286,6 +293,7 @@ type moduleContext struct {
 	packagingSpecs   []PackagingSpec
 	installFiles     InstallPaths
 	checkbuildFiles  Paths
+	modulePhonyFiles Paths
 	checkbuildTarget Path
 	uncheckedModule  bool
 	module           Module
@@ -346,14 +354,14 @@ var _ ModuleContext = &moduleContext{}
 
 func (m *moduleContext) ninjaError(params BuildParams, err error) (PackageContext, BuildParams) {
 	return pctx, BuildParams{
-		Rule:            ErrorRule,
+		Rule:            errorRule,
 		Description:     params.Description,
 		Output:          params.Output,
 		Outputs:         params.Outputs,
 		ImplicitOutput:  params.ImplicitOutput,
 		ImplicitOutputs: params.ImplicitOutputs,
 		Args: map[string]string{
-			"error": err.Error(),
+			"error": proptools.NinjaAndShellEscape(err.Error()),
 		},
 	}
 }
@@ -525,12 +533,20 @@ func (m *moduleContext) InstallInVendorRamdisk() bool {
 	return m.module.InstallInVendorRamdisk()
 }
 
+func (m *moduleContext) InstallPathSkipFirstStageRamdisk() bool {
+	return m.module.InstallPathSkipFirstStageRamdisk()
+}
+
 func (m *moduleContext) InstallInVendorKernelRamdisk() bool {
 	return m.module.InstallInVendorKernelRamdisk()
 }
 
 func (m *moduleContext) InstallInDebugRamdisk() bool {
 	return m.module.InstallInDebugRamdisk()
+}
+
+func (m *moduleContext) InstallInTestHarnessRamdisk() bool {
+	return m.module.InstallInTestHarnessRamdisk()
 }
 
 func (m *moduleContext) InstallInRecovery() bool {
@@ -1059,4 +1075,13 @@ func (c *moduleContext) SetTestSuiteInfo(info TestSuiteInfo) {
 
 func (c *moduleContext) FreeModuleAfterGenerateBuildActions() {
 	c.bp.FreeModuleAfterGenerateBuildActions()
+}
+
+func (m *moduleContext) ModulePhonyFiles(srcPaths ...Path) {
+	for _, srcPath := range srcPaths {
+		if srcPath == nil {
+			panic("ModulePhonyFiles() files cannot be nil")
+		}
+	}
+	m.modulePhonyFiles = append(m.modulePhonyFiles, srcPaths...)
 }

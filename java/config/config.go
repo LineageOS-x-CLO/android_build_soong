@@ -19,8 +19,6 @@ import (
 	"runtime"
 	"strings"
 
-	_ "github.com/google/blueprint/bootstrap"
-
 	"android/soong/android"
 	"android/soong/remoteexec"
 )
@@ -78,8 +76,6 @@ var (
 )
 
 func init() {
-	pctx.Import("github.com/google/blueprint/bootstrap")
-
 	pctx.StaticVariable("JavacHeapSize", "4096M")
 	pctx.StaticVariable("JavacHeapFlags", "-J-Xmx${JavacHeapSize}")
 
@@ -125,6 +121,9 @@ func init() {
 
 		// b/65004097: prevent using java.lang.invoke.StringConcatFactory when using -target 1.9
 		`-XDstringConcat=inline`,
+		// b/436191454: Remove methodParams in turbine classes, maintaining parity
+		// with soong's javac implementation.
+		`-XDturbine.noMethodParameters`,
 	}, " "))
 
 	pctx.StaticVariable("JavaVmFlags", strings.Join(javaVmFlagsList, " "))

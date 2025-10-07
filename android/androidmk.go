@@ -582,6 +582,10 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 	} else {
 		a.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
 	}
+        if moduleBuildTargetsInfo.ModulePhonyTarget != nil {
+                a.SetPath("LOCAL_ADDITIONAL_CHECKED_MODULE", moduleBuildTargetsInfo.ModulePhonyTarget)
+        }
+
         platformAvailabilityInfo := OtherModuleProviderOrDefault(ctx, mod, PlatformAvailabilityInfoProvider)
         a.SetBoolIfTrue("LOCAL_NOT_AVAILABLE_FOR_PLATFORM", platformAvailabilityInfo.NotAvailableToPlatform)
 
@@ -1199,25 +1203,29 @@ func shouldSkipAndroidMkProcessing(ctx ConfigurableEvaluatorContext, module *Mod
 		return true
 	}
 
+	return !shouldGeneratePhonyTargets(ctx, module)
+}
+
+func shouldGeneratePhonyTargets(ctx ConfigurableEvaluatorContext, module *ModuleBase) bool {
 	// On Mac, only expose host darwin modules to Make, as that's all we claim to support.
 	// In reality, some of them depend on device-built (Java) modules, so we can't disable all
 	// device modules in Soong, but we can hide them from Make (and thus the build user interface)
 	if runtime.GOOS == "darwin" && module.Os() != Darwin {
-		return true
+		return false
 	}
 
 	// Only expose the primary Darwin target, as Make does not understand Darwin+Arm64
 	if module.Os() == Darwin && module.Target().HostCross {
-		return true
+		return false
 	}
 
-	return !module.Enabled(ctx) ||
-		module.commonProperties.HideFromMake ||
+	return module.Enabled(ctx) &&
+		!module.commonProperties.HideFromMake &&
 		// Make does not understand LinuxBionic
-		module.Os() == LinuxBionic ||
+		module.Os() != LinuxBionic &&
 		// Make does not understand LinuxMusl, except when we are building with USE_HOST_MUSL=true
 		// and all host binaries are LinuxMusl
-		(module.Os() == LinuxMusl && module.Target().HostCross)
+		!(module.Os() == LinuxMusl && module.Target().HostCross)
 }
 
 // A utility func to format LOCAL_TEST_DATA outputs. See the comments on DataPath to understand how
@@ -1535,6 +1543,10 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 		helperInfo.SetPath("LOCAL_CHECKED_MODULE", moduleBuildTargetsInfo.CheckbuildTarget)
 	} else {
 		helperInfo.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
+	}
+
+	if moduleBuildTargetsInfo.ModulePhonyTarget != nil {
+		helperInfo.SetPath("LOCAL_ADDITIONAL_CHECKED_MODULE", moduleBuildTargetsInfo.ModulePhonyTarget)
 	}
 
 	if len(info.TestData) > 0 {

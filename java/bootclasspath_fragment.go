@@ -400,7 +400,7 @@ type BootclasspathFragmentApexContentInfo struct {
 // DexBootJarPathForContentModule returns the path to the dex boot jar for specified module.
 //
 // The dex boot jar is one which has had hidden API encoding performed on it.
-func (i BootclasspathFragmentApexContentInfo) DexBootJarPathForContentModule(module android.ModuleOrProxy) (android.Path, error) {
+func (i BootclasspathFragmentApexContentInfo) DexBootJarPathForContentModule(module android.ModuleProxy) (android.Path, error) {
 	// A bootclasspath_fragment cannot use a prebuilt library so Name() will return the base name
 	// without a prebuilt_ prefix so is safe to use as the key for the contentModuleDexJarPaths.
 	name := module.Name()
@@ -536,7 +536,7 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 	}
 
 	// Generate classpaths.proto config
-	b.generateClasspathProtoBuildActions(ctx)
+	classpathProtoOutputPath := b.generateClasspathProtoBuildActions(ctx)
 
 	moduleInfoJSON := ctx.ModuleInfoJSON()
 	moduleInfoJSON.Class = []string{"FAKE"}
@@ -570,7 +570,7 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 	// be output to Make but it does not really matter which variant is output. The default/platform
 	// variant is the first (ctx.PrimaryModule()) and is usually hidden from make so this just picks
 	// the last variant (ctx.FinalModule()).
-	if !ctx.IsFinalModule(ctx.Module()) {
+	if !ctx.IsFinalModule() {
 		b.HideFromMake()
 	}
 
@@ -582,6 +582,9 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 		Fragments:               b.properties.Fragments,
 		ProfilePathOnHost:       b.profilePath,
 	})
+
+	ctx.ComplianceMetadataInfo().AddBuiltFiles(classpathProtoOutputPath.String())
+	ctx.ComplianceMetadataInfo().AddBuiltFiles(hiddenAPIOutput.EncodedBootDexFilesByModule.bootDexJars().Strings()...)
 }
 
 // getProfileProviderApex returns the name of the apex that provides a boot image profile, or an
@@ -627,7 +630,7 @@ func (b *BootclasspathFragmentModule) provideApexContentInfo(ctx android.ModuleC
 }
 
 // generateClasspathProtoBuildActions generates all required build actions for classpath.proto config
-func (b *BootclasspathFragmentModule) generateClasspathProtoBuildActions(ctx android.ModuleContext) {
+func (b *BootclasspathFragmentModule) generateClasspathProtoBuildActions(ctx android.ModuleContext) android.OutputPath {
 	var classpathJars []classpathJar
 	configuredJars := b.configuredJars(ctx)
 	if "art" == proptools.String(b.properties.Image_name) {
@@ -636,7 +639,7 @@ func (b *BootclasspathFragmentModule) generateClasspathProtoBuildActions(ctx and
 	} else {
 		classpathJars = configuredJarListToClasspathJars(ctx, configuredJars, b.classpathType)
 	}
-	b.classpathFragmentBase().generateClasspathProtoBuildActions(ctx, configuredJars, classpathJars)
+	return b.classpathFragmentBase().generateClasspathProtoBuildActions(ctx, configuredJars, classpathJars)
 }
 
 func (b *BootclasspathFragmentModule) configuredJars(ctx android.ModuleContext) android.ConfiguredJarList {

@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"android/soong/android"
+	"android/soong/cc"
 	"android/soong/etc"
 	"android/soong/filesystem"
 	"android/soong/java"
@@ -55,6 +56,7 @@ func TestFileSystemCreatorSystemImageProps(t *testing.T) {
 						BoardAvbAlgorithm:     "SHA256_RSA4096",
 						BoardAvbRollbackIndex: "0",
 						BoardFileSystemType:   "ext4",
+						BuildingImage:         true,
 					},
 				}
 		}),
@@ -110,6 +112,14 @@ func TestFileSystemCreatorSystemImageProps(t *testing.T) {
 	)
 }
 
+func createProductPackagesSet(pkgs []string) map[string]android.ProductPackagesVariables {
+	productPackagesSet := make(map[string]android.ProductPackagesVariables)
+	productPackagesSet["all"] = android.ProductPackagesVariables{
+		ProductPackages: pkgs,
+	}
+	return productPackagesSet
+}
+
 func TestFileSystemCreatorSetPartitionDeps(t *testing.T) {
 	result := android.GroupFixturePreparers(
 		android.PrepareForIntegrationTestWithAndroid,
@@ -120,11 +130,12 @@ func TestFileSystemCreatorSetPartitionDeps(t *testing.T) {
 		java.PrepareForTestWithJavaBuildComponents,
 		java.PrepareForTestWithJavaDefaultModules,
 		android.FixtureModifyConfig(func(config android.Config) {
-			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages = []string{"bar", "baz"}
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"bar", "baz"})
 			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.PartitionQualifiedVariables =
 				map[string]android.PartitionQualifiedVariablesType{
 					"system": {
 						BoardFileSystemType: "ext4",
+						BuildingImage:       true,
 					},
 				}
 		}),
@@ -175,12 +186,13 @@ func TestFileSystemCreatorDepsWithNamespace(t *testing.T) {
 		java.PrepareForTestWithJavaBuildComponents,
 		java.PrepareForTestWithJavaDefaultModules,
 		android.FixtureModifyConfig(func(config android.Config) {
-			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages = []string{"bar"}
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"bar"})
 			config.TestProductVariables.NamespacesToExport = []string{"a/b"}
 			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.PartitionQualifiedVariables =
 				map[string]android.PartitionQualifiedVariablesType{
 					"system": {
 						BoardFileSystemType: "ext4",
+						BuildingImage:       true,
 					},
 				}
 		}),
@@ -253,7 +265,7 @@ func TestRemoveOverriddenModulesFromDeps(t *testing.T) {
 			`),
 		}),
 		android.FixtureModifyConfig(func(config android.Config) {
-			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages = []string{"libfoo", "libbar", "prebuiltA", "prebuiltB"}
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"libfoo", "libbar", "prebuiltA", "prebuiltB"})
 		}),
 	).RunTestWithBp(t, `
 java_library {
@@ -282,6 +294,16 @@ java_import {
 	android.AssertBoolEquals(t, "prebuiltA should not appear in deps because it has been overridden by prebuiltB. The latter is listed in PRODUCT_PACKAGES", false, prebuiltAInDeps)
 }
 
+func getModuleProp[T string | bool](m android.Module, matcher func(actual interface{}) T) T {
+	var defaultVal T
+	for _, prop := range m.GetProperties() {
+		if str := matcher(prop); str != defaultVal {
+			return str
+		}
+	}
+	return defaultVal
+}
+
 func TestPrebuiltEtcModuleGen(t *testing.T) {
 	result := android.GroupFixturePreparers(
 		android.PrepareForIntegrationTestWithAndroid,
@@ -303,11 +325,13 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 				"device/sample/firmware/firmware.bin:recovery/root/firmware-2.bin",
 				"device/sample/firmware/firmware.bin:recovery/root/lib/firmware/firmware.bin",
 				"device/sample/firmware/firmware.bin:recovery/root/lib/firmware/firmware-2.bin",
+				"packages/services/Car/car_product/init/init.car.rc:root/init.car.rc",
 			}
 			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.PartitionQualifiedVariables =
 				map[string]android.PartitionQualifiedVariablesType{
 					"system": {
 						BoardFileSystemType: "ext4",
+						BuildingImage:       true,
 					},
 				}
 		}),
@@ -324,21 +348,12 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 			"frameworks/base/data/keyboards/Vendor_0079_Product_18d4.kl": nil,
 			"device/sample/etc/apns-full-conf.xml":                       nil,
 			"device/sample/firmware/firmware.bin":                        nil,
+			"packages/services/Car/car_product/init/init.car.rc":         nil,
 		}),
 	).RunTest(t)
 
-	getModuleProp := func(m android.Module, matcher func(actual interface{}) string) string {
-		for _, prop := range m.GetProperties() {
-
-			if str := matcher(prop); str != "" {
-				return str
-			}
-		}
-		return ""
-	}
-
 	// check generated prebuilt_* module type install path and install partition
-	generatedModule := result.ModuleForTests(t, "system-frameworks_base_config-etc-0", "android_arm64_armv8-a").Module()
+	generatedModule := result.ModuleForTests(t, "system-frameworks_base_config-system_etc-0", "android_arm64_armv8-a").Module()
 	etcModule := generatedModule.(*etc.PrebuiltEtc)
 	android.AssertStringEquals(
 		t,
@@ -356,7 +371,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 	)
 
 	// check generated prebuilt_* module specifies correct relative_install_path property
-	generatedModule = result.ModuleForTests(t, "system-frameworks_base_data_keyboards-usr_keylayout_subdir-0", "android_arm64_armv8-a").Module()
+	generatedModule = result.ModuleForTests(t, "system-frameworks_base_data_keyboards-system_usr_keylayout_subdir-0", "android_arm64_armv8-a").Module()
 	etcModule = generatedModule.(*etc.PrebuiltEtc)
 	android.AssertStringEquals(
 		t,
@@ -405,7 +420,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 	)
 
 	// check that duplicate src file can exist in PRODUCT_COPY_FILES and generates separate modules
-	generatedModule0 := result.ModuleForTests(t, "product-device_sample_etc-etc-0", "android_arm64_armv8-a").Module()
+	generatedModule0 := result.ModuleForTests(t, "product-device_sample_etc-product_etc-0", "android_arm64_armv8-a").Module()
 	generatedModule1 := result.ModuleForTests(t, "product-device_sample_etc-etc-1", "android_arm64_armv8-a").Module()
 
 	// check that generated prebuilt_* module sets correct srcs and dsts property
@@ -470,7 +485,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 		}),
 	)
 
-	generatedModule0 = result.ModuleForTests(t, "system-device_sample_etc-foo-0", "android_common").Module()
+	generatedModule0 = result.ModuleForTests(t, "system-device_sample_etc-system_foo-0", "android_common").Module()
 	generatedModule1 = result.ModuleForTests(t, "system-device_sample_etc-foo-1", "android_common").Module()
 
 	// check that generated prebuilt_* module sets correct srcs and dsts property
@@ -536,7 +551,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 		}),
 	)
 
-	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-0", "android_recovery_arm64_armv8-a").Module()
+	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-recovery_root-0", "android_recovery_arm64_armv8-a").Module()
 	generatedModule1 = result.ModuleForTests(t, "recovery-device_sample_firmware-1", "android_recovery_common").Module()
 
 	// check generated prebuilt_* module specifies correct install path and relative install path
@@ -603,7 +618,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 		}),
 	)
 
-	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-lib_firmware-0", "android_recovery_common").Module()
+	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-recovery_root_lib_firmware-0", "android_recovery_common").Module()
 	generatedModule1 = result.ModuleForTests(t, "recovery-device_sample_firmware-lib_firmware-1", "android_recovery_common").Module()
 
 	// check generated prebuilt_* module specifies correct install path and relative install path
@@ -669,6 +684,20 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 			return ""
 		}),
 	)
+
+	generatedModule0 = result.ModuleForTests(t, "system-packages_services_Car_car_product_init-root-0", "android_arm64_armv8-a").Module()
+
+	android.AssertBoolEquals(
+		t,
+		"module expected to set install_in_root property",
+		true,
+		getModuleProp(generatedModule0, func(actual interface{}) bool {
+			if p, ok := actual.(*etc.PrebuiltRootProperties); ok {
+				return proptools.Bool(p.Install_in_root)
+			}
+			return false
+		}),
+	)
 }
 
 func TestPartitionOfOverrideModules(t *testing.T) {
@@ -697,7 +726,7 @@ func TestPartitionOfOverrideModules(t *testing.T) {
 		}),
 		android.FixtureModifyConfig(func(config android.Config) {
 			config.TestProductVariables.NamespacesToExport = []string{"mynamespace"}
-			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages = []string{"system_ext_override_app", "system_ext_override_app_in_namespace"}
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"system_ext_override_app", "system_ext_override_app_in_namespace"})
 		}),
 	).RunTestWithBp(t, `
 android_app {
@@ -759,7 +788,13 @@ func TestCrossPartitionRequiredModules(t *testing.T) {
 		}),
 		android.FixtureModifyConfig(func(config android.Config) {
 			config.TestProductVariables.NamespacesToExport = []string{"mynamespace"}
-			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages = []string{"some_app_in_namespace"}
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"some_app_in_namespace"})
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.PartitionQualifiedVariables =
+				map[string]android.PartitionQualifiedVariablesType{
+					"system_ext": {
+						BuildingImage: true,
+					},
+				}
 		}),
 	).RunTestWithBp(t, `
 		phony {
@@ -790,5 +825,52 @@ func TestCrossPartitionRequiredModules(t *testing.T) {
 		"system_ext staging dir expected to contain cross partition require deps",
 		strings.Join(systemExtStagingDirImplicitDeps.Strings(), " "),
 		"mynamespace/some-permissions/android_arm64_armv8-a/default-permissions.xml",
+	)
+}
+
+func TestCrossPartitionSharedLibDeps(t *testing.T) {
+	result := android.GroupFixturePreparers(
+		android.PrepareForIntegrationTestWithAndroid,
+		android.PrepareForTestWithAndroidBuildComponents,
+		android.PrepareForTestWithAllowMissingDependencies,
+		prepareForTestWithFsgenBuildComponents,
+		cc.PrepareForTestWithCcBuildComponents,
+		java.PrepareForTestWithJavaBuildComponents,
+		prepareMockRamdiksNodeList,
+		android.PrepareForTestWithNamespace,
+		android.FixtureMergeMockFs(android.MockFS{
+			"external/avb/test/data/testkey_rsa4096.pem": nil,
+			"build/soong/fsgen/Android.bp": []byte(`
+			soong_filesystem_creator {
+				name: "foo",
+			}
+		`),
+		}),
+		android.FixtureModifyConfig(func(config android.Config) {
+			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet = createProductPackagesSet([]string{"system_ext_bin"})
+		}),
+	).RunTestWithBp(t, `
+cc_binary {
+	name: "system_ext_bin",
+	shared_libs: ["system_lib"],
+	system_ext_specific: true,
+}
+cc_library_shared {
+	name: "system_lib",
+}
+`)
+	resolvedDeps := result.TestContext.Config().Get(fsGenStateOnceKey).(*FsGenState).fsDeps["system"]
+	xPartitionSharedLib := (*resolvedDeps)["system_lib"]
+	android.AssertIntEquals(
+		t,
+		"Expected single arch variant of cross partition shared lib dependency",
+		1,
+		len(xPartitionSharedLib.Arch),
+	)
+	android.AssertStringEquals(
+		t,
+		"Expected primary arch variant of cross partition shared lib dependency",
+		"arm64",
+		xPartitionSharedLib.Arch[0].String(),
 	)
 }

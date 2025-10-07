@@ -267,6 +267,11 @@ type UsesLibraryDependencyInfo struct {
 	ClassLoaderContexts dexpreopt.ClassLoaderContextMap
 }
 
+// Return a deep copy of ClassLoaderContexts.
+func (u *UsesLibraryDependencyInfo) GetClassLoaderContexts() dexpreopt.ClassLoaderContextMap {
+	return u.ClassLoaderContexts.DeepCopy()
+}
+
 type ProvidesUsesLibInfo struct {
 	ProvidesUsesLib *string
 }
@@ -656,6 +661,8 @@ var (
 		bootClasspathTag,
 		systemModulesTag,
 		java9LibTag,
+		composePluginTag,
+		composeEmbeddablePluginTag,
 		kotlinPluginTag,
 		syspropPublicStubDepTag,
 		instrumentationForTag,
@@ -765,7 +772,9 @@ type deps struct {
 	srcJars                 android.Paths
 	systemModules           *systemModules
 	aidlPreprocess          android.OptionalPath
-	kSnapshotFiles          map[string]android.Path
+	composeEmbeddablePlugin android.OptionalPath
+	composePlugin           android.OptionalPath	
+    kSnapshotFiles          map[string]android.Path
 	kotlinPlugins           android.Paths
 	aconfigProtoFiles       android.Paths
 
@@ -1190,7 +1199,7 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			j.dexpreopter.disableDexpreopt()
 		}
 	}
-	javaInfo := j.compile(ctx, nil, nil, nil, nil)
+	javaInfo := j.compile(ctx)
 
 	j.setInstallRules(ctx)
 
@@ -1274,7 +1283,7 @@ func buildComplianceMetadata(ctx android.ModuleContext) {
 	for _, paths := range ctx.GetOutputFiles().TaggedOutputFiles {
 		builtFiles = append(builtFiles, paths.Strings()...)
 	}
-	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.BUILT_FILES, android.SortedUniqueStrings(builtFiles))
+	complianceMetadataInfo.AddBuiltFiles(builtFiles...)
 
 	// Static deps
 	staticDepNames := make([]string, 0)
@@ -1619,6 +1628,11 @@ type testProperties struct {
 	// module, for example to include a custom Tradefed test runner.
 	Host_common_data []string `android:"path_host_common"`
 
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the host's arch variation. Useful for a device test that wants to depend on a host
+	// non-java module.
+	Host_first_data []string `android:"path_host_first"`
+
 	// Flag to indicate whether or not to create test config automatically. If AndroidTest.xml
 	// doesn't exist next to the Android.bp, this attribute doesn't need to be set to true
 	// explicitly.
@@ -1926,6 +1940,7 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Device_first_data)...)
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Device_first_prefer32_data)...)
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Host_common_data)...)
+	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Host_first_data)...)
 
 	j.extraTestConfigs = android.PathsForModuleSrc(ctx, j.testProperties.Test_options.Extra_test_configs)
 
@@ -2023,6 +2038,7 @@ func (j *Test) javaTestSetTestsuiteInfo(ctx android.ModuleContext) {
 		NeedsArchFolder:      ctx.Device(),
 		NonArchData:          testData,
 		PerTestcaseDirectory: proptools.Bool(j.testProperties.Per_testcase_directory),
+		IsUnitTest:           Bool(j.testProperties.Test_options.Unit_test),
 	})
 
 	android.SetProvider(ctx, JavaTestInfoProvider, JavaTestInfo{
@@ -2850,7 +2866,7 @@ func (al *ApiLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	annoSrcJar := android.PathForModuleOut(ctx, ctx.ModuleName(), "anno.srcjar")
 
 	TransformJavaToClasses(ctx, al.stubsJarWithoutStaticLibs, 0, android.Paths{},
-		android.Paths{al.stubsSrcJar}, annoSrcJar, javacFlags, android.Paths{})
+		android.Paths{al.stubsSrcJar}, annoSrcJar, javacFlags, android.Paths{}, nil)
 
 	builder := android.NewRuleBuilder(pctx, ctx)
 	builder.Command().
@@ -3317,7 +3333,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	j.combinedHeaderFile = headerJar.WithoutRel()
 	j.combinedImplementationFile = outputFile.WithoutRel()
 
-	j.maybeInstall(ctx, jarName, outputFile)
+	installFile := j.maybeInstall(ctx, jarName, outputFile)
 
 	j.exportAidlIncludeDirs = android.PathsForModuleSrc(ctx, j.properties.Aidl.Export_include_dirs)
 
@@ -3376,6 +3392,7 @@ func (j *Import) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	javaInfo := &JavaInfo{
+		InstallFile:                            installFile,
 		HeaderJars:                             android.PathsIfNonNil(j.combinedHeaderFile),
 		LocalHeaderJars:                        android.PathsIfNonNil(j.combinedHeaderFile),
 		TransitiveLibsHeaderJarsForR8:          j.transitiveLibsHeaderJarsForR8,
@@ -3422,9 +3439,9 @@ func (j *Import) addKSnapshot(ctx android.ModuleContext, jarFile android.Path) {
 	}
 }
 
-func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) {
+func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputFile android.Path) android.Path {
 	if !Bool(j.properties.Installable) {
-		return
+		return nil
 	}
 
 	var installDir android.InstallPath
@@ -3437,7 +3454,7 @@ func (j *Import) maybeInstall(ctx android.ModuleContext, jarName string, outputF
 	} else {
 		installDir = android.PathForModuleInstall(ctx, "framework")
 	}
-	ctx.InstallFile(installDir, jarName, outputFile)
+	return ctx.InstallFile(installDir, jarName, outputFile)
 }
 
 func (j *Import) HeaderJars() android.Paths {
@@ -3878,9 +3895,9 @@ func addCLCFromDep(ctx android.ModuleContext, depModule android.ModuleProxy,
 		}
 		clcMap.AddContext(ctx, dexpreopt.AnySdkVersion, *sdkLib, optional,
 			dep.DexJarBuildPath.PathOrNil(),
-			dep.UsesLibraryDependencyInfo.DexJarInstallPath, dep.UsesLibraryDependencyInfo.ClassLoaderContexts)
+			dep.UsesLibraryDependencyInfo.DexJarInstallPath, dep.UsesLibraryDependencyInfo.GetClassLoaderContexts())
 	} else {
-		clcMap.AddContextMap(dep.UsesLibraryDependencyInfo.ClassLoaderContexts, depName)
+		clcMap.AddContextMap(dep.UsesLibraryDependencyInfo.GetClassLoaderContexts(), depName)
 	}
 }
 

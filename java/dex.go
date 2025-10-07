@@ -83,7 +83,7 @@ type DexProperties struct {
 
 		// If true, optimize for size by removing unused code.  Defaults to true for apps,
 		// false for libraries and tests.
-		Shrink *bool
+		Shrink proptools.Configurable[bool] `android:"replace_instead_of_append"`
 
 		// If true, optimize bytecode.  Defaults to false.
 		Optimize proptools.Configurable[bool] `android:"replace_instead_of_append"`
@@ -540,6 +540,15 @@ func (d *dexer) dexCommonFlags(ctx android.ModuleContext,
 		}
 	}
 
+	if ctx.Config().UseR8MinimizedSyntheticNames() {
+		flags = append([]string{"-JDcom.android.tools.r8.desugar.minimizeSyntheticNames=1"}, flags...)
+	}
+
+	// Enable a safe form of list iteration rewriting for D8/R8, though note that D8 impact is
+	// conditional on the use of release mode. We *prepend* this flag to ensure application
+	// to the JVM environment, before other args that are passed along to D8/R8.
+	flags = append([]string{"-JDcom.android.tools.r8.enableListIterationRewriting=1"}, flags...)
+
 	// If the specified SDK level is 10000, then configure the compiler to use the
 	// current platform SDK level and to compile the build as a platform build.
 	var minApiFlagValue = effectiveVersion.FinalOrFutureInt()
@@ -705,7 +714,7 @@ func (d *dexer) r8Flags(ctx android.ModuleContext, dexParams *compileDexParams, 
 	}
 
 	// TODO(ccross): Don't shrink app instrumentation tests by default.
-	if !Bool(opt.Shrink) {
+	if !opt.Shrink.GetOrDefault(ctx, false) {
 		r8Flags = append(r8Flags, "-dontshrink")
 	}
 
@@ -813,7 +822,7 @@ func (d *dexer) compileDex(ctx android.ModuleContext, dexParams *compileDexParam
 	// Exclude kotlinc generated files when "exclude_kotlinc_generated_files" is set to true.
 	mergeZipsFlags := ""
 	if proptools.BoolDefault(d.dexProperties.Exclude_kotlinc_generated_files, false) {
-		mergeZipsFlags = "-stripFile META-INF/*.kotlin_module -stripFile **/*.kotlin_builtins"
+		mergeZipsFlags = "-stripFile META-INF/**/*.kotlin_module -stripFile **/*.kotlin_builtins"
 	}
 
 	useR8 := d.effectiveOptimizeEnabled(ctx)
@@ -1005,7 +1014,7 @@ type ProguardZips struct {
 	UsageZip    android.Path
 }
 
-func BuildProguardZips(ctx android.ModuleContext, modules []android.ModuleOrProxy) ProguardZips {
+func BuildProguardZips(ctx android.ModuleContext, modules []android.ModuleProxy) ProguardZips {
 	dictZip := android.PathForModuleOut(ctx, "proguard-dict.zip")
 	dictZipBuilder := android.NewRuleBuilder(pctx, ctx)
 	dictZipCmd := dictZipBuilder.Command().BuiltTool("soong_zip").Flag("-d").FlagWithOutput("-o ", dictZip)

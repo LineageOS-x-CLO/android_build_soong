@@ -583,6 +583,10 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		"${config.CommonGlobalCflags}",
 		fmt.Sprintf("${config.%sGlobalCflags}", hod))
 
+	if ctx.testBinary() || ctx.testLibrary() {
+		flags.Global.CommonFlags = append(flags.Global.CommonFlags, "${config.TestsCflags}")
+	}
+
 	if android.IsThirdPartyPath(modulePath) {
 		flags.Global.CommonFlags = append(flags.Global.CommonFlags, "${config.ExternalCflags}")
 	}
@@ -737,9 +741,7 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		flags.Local.CFlags = append(flags.Local.CFlags, "-Oz")
 		if !ctx.Config().IsEnvFalse("THINLTO_USE_MLGO") {
 			flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-enable-ml-inliner=release")
-			if config.ClangVersionAtLeast(ctx, 563880) {
-				flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-ml-inliner-model-selector=arm64-mixed")
-			}
+			flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-ml-inliner-model-selector=arm64-mixed")
 		}
 	}
 

@@ -553,11 +553,11 @@ func (r *RuleBuilder) build(name string, desc string) {
 
 	if len(r.missingDeps) > 0 {
 		r.ctx.Build(r.pctx, BuildParams{
-			Rule:        ErrorRule,
+			Rule:        errorRule,
 			Outputs:     r.Outputs(),
 			Description: desc,
 			Args: map[string]string{
-				"error": "missing dependencies: " + strings.Join(r.missingDeps, ", "),
+				"error": proptools.NinjaAndShellEscape("missing dependencies: " + strings.Join(r.missingDeps, ", ")),
 			},
 		})
 		return
@@ -939,7 +939,7 @@ func (r *RuleBuilder) build(name string, desc string) {
 		hasher := sha256.New()
 		hasher.Write([]byte(output.String()))
 		script := PathForOutput(r.ctx, "rule_builder_scripts", fmt.Sprintf("%x.sh", hasher.Sum(nil)))
-		commandString = "set -eu\n\n" + commandString + "\n"
+		commandString = "#!/usr/bin/env sh\nset -eu\n\n" + commandString + "\n"
 		WriteExecutableFileRuleVerbatim(r.ctx, script, commandString)
 		inputs = append(inputs, script)
 		commandString = script.String()

@@ -86,8 +86,10 @@ type Module interface {
 	InstallInSanitizerDir() bool
 	InstallInRamdisk() bool
 	InstallInVendorRamdisk() bool
+	InstallPathSkipFirstStageRamdisk() bool
 	InstallInVendorKernelRamdisk() bool
 	InstallInDebugRamdisk() bool
+	InstallInTestHarnessRamdisk() bool
 	InstallInRecovery() bool
 	InstallInRoot() bool
 	InstallInOdm() bool
@@ -227,6 +229,10 @@ type Dist struct {
 	// default output files provided by the modules, i.e. the result of calling
 	// OutputFiles("").
 	Tag *string `android:"arch_variant"`
+
+	// Only do the dist on java coverage builds (EMMA_INSTRUMENT=true).
+	// Used for disting java coverage reports which are not built normally.
+	Only_on_java_coverage_builds *bool
 }
 
 // NamedPath associates a path with a name. e.g. a license text path with a package name
@@ -412,11 +418,17 @@ type commonProperties struct {
 	// Whether this module is installed to vendor ramdisk
 	Vendor_ramdisk *bool
 
+	// Whether the install path skips first_stage_ramdisk subdirectory.
+	Install_path_skip_first_stage_ramdisk_dir *bool
+
 	// Whether this module is installed to vendor kernel ramdisk
 	Vendor_kernel_ramdisk *bool
 
 	// Whether this module is installed to debug ramdisk
 	Debug_ramdisk *bool
+
+	// Whether this module is installed to test harness ramdisk
+	Test_harness_ramdisk *bool
 
 	// Install to partition system_dlkm when set to true.
 	System_dlkm_specific *bool
@@ -519,6 +531,11 @@ type commonProperties struct {
 	// for example "" for core or "recovery" for recovery.  It will often be set to one of the
 	// constants in image.go, but can also be set to a custom value by individual module types.
 	ImageVariation string `blueprint:"mutated"`
+
+	// True if this module is mutated by the image mutator to a non-primary image variant, for
+	// example, a vendor module from a vendor_available module, or a recovery module from a
+	// recovery_available module.
+	IsNonPrimaryImageVariation bool `blueprint:"mutated"`
 
 	// The team (defined by the owner/vendor) who owns the property.
 	Team *string `android:"path"`
@@ -1249,6 +1266,9 @@ func (m *ModuleBase) Dists() []Dist {
 func (m *ModuleBase) GenerateTaggedDistFiles(ctx BaseModuleContext) TaggedDistFiles {
 	var distFiles TaggedDistFiles
 	for _, dist := range m.Dists() {
+		if proptools.Bool(dist.Only_on_java_coverage_builds) && !ctx.Config().JavaCoverageEnabled() {
+			continue
+		}
 		// If no tag is specified then it means to use the default dist paths so use
 		// the special tag name which represents that.
 		tag := proptools.StringDefault(dist.Tag, DefaultDistTag)
@@ -1437,6 +1457,10 @@ func (m *ModuleBase) PartitionTag(config DeviceConfig) string {
 		partition = "recovery"
 	} else if m.InstallInVendorDlkm() {
 		partition = "vendor_dlkm"
+	} else if m.InstallInDebugRamdisk() {
+		partition = "debug_ramdisk"
+	} else if m.InstallInTestHarnessRamdisk() {
+		partition = "test_harness_ramdisk"
 	}
 	return partition
 }
@@ -1571,12 +1595,20 @@ func (m *ModuleBase) InstallInVendorRamdisk() bool {
 	return Bool(m.commonProperties.Vendor_ramdisk)
 }
 
+func (m *ModuleBase) InstallPathSkipFirstStageRamdisk() bool {
+	return Bool(m.commonProperties.Install_path_skip_first_stage_ramdisk_dir)
+}
+
 func (m *ModuleBase) InstallInVendorKernelRamdisk() bool {
 	return Bool(m.commonProperties.Vendor_kernel_ramdisk)
 }
 
 func (m *ModuleBase) InstallInDebugRamdisk() bool {
 	return Bool(m.commonProperties.Debug_ramdisk)
+}
+
+func (m *ModuleBase) InstallInTestHarnessRamdisk() bool {
+	return Bool(m.commonProperties.Test_harness_ramdisk)
 }
 
 func (m *ModuleBase) InstallInRecovery() bool {
@@ -1629,6 +1661,10 @@ func (m *ModuleBase) Team() string {
 
 func (m *ModuleBase) setImageVariation(variant string) {
 	m.commonProperties.ImageVariation = variant
+}
+
+func (m *ModuleBase) setNonPrimaryImageVariation() {
+	m.commonProperties.IsNonPrimaryImageVariation = true
 }
 
 func (m *ModuleBase) ImageVariation() blueprint.Variation {
@@ -1687,94 +1723,133 @@ func (m *ModuleBase) VintfFragments(ctx ConfigurableEvaluatorContext) []string {
 // generateModuleTarget generates phony targets so that you can do `m <module-name>`.
 // It will be run on every variant of the module, so it relies on the fact that phony targets
 // are deduped to merge all the deps from different variants together.
-func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls []filePair) {
+func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls []FilePair) {
 	var namespacePrefix string
 	nameSpace := ctx.Namespace().Path
 	if nameSpace != "." {
 		namespacePrefix = strings.ReplaceAll(nameSpace, "/", ".") + "-"
 	}
-	shouldSkipAndroidMk := shouldSkipAndroidMkProcessing(ctx, m)
+	namespaceExportedToMake := m.ExportedToMake()
 
-	phony := func(suffix string, deps Paths) string {
+	phony := func(suffix string, deps Paths) Path {
 		if ctx.Config().KatiEnabled() {
 			suffix += "-soong"
 		}
-		var ret string
-		// Create a target without the namespace prefix if it's exported to make. One of the
-		// conditions for being exported to make is that the namespace is in
-		// PRODUCT_SOONG_NAMESPACES, so historically that would mean that make would create the
-		// phonies for those modules as if they weren't in any namespace.
-		if !shouldSkipAndroidMk {
-			ret = ctx.module.base().BaseModuleName() + suffix
-			ctx.Phony(ret, deps...)
-		}
-		// Create another phony for building with the namespace specified. This can be used
+
+		// Create a phony for building with the namespace specified. This can be used
 		// regardless of if the namespace is in PRODUCT_SOONG_NAMESPACES or not.
+		var phonyName string
 		if nameSpace != "." {
-			ctx.Phony(namespacePrefix+ctx.module.base().BaseModuleName()+suffix, deps...)
+			phonyName = namespacePrefix + ctx.module.base().BaseModuleName() + suffix
+			ctx.Phony(phonyName, deps...)
 		}
-		return ret
+
+		if namespaceExportedToMake {
+			// Create a target without the namespace prefix if it's exported to make. One of the
+			// conditions for being exported to make is that the namespace is in
+			// PRODUCT_SOONG_NAMESPACES, so historically that would mean that make would create the
+			// phonies for those modules as if they weren't in any namespace.
+			phonyName = ctx.module.base().BaseModuleName() + suffix
+			ctx.Phony(phonyName, deps...)
+		}
+
+		return PathForPhony(ctx, phonyName)
 	}
 
-	var deps Paths
 	var info ModuleBuildTargetsInfo
 
-	if len(ctx.installFiles) > 0 && !shouldSkipAndroidMk {
-		installFiles := ctx.installFiles.Paths()
-		name := phony("-install", installFiles)
-		if name != "" {
-			info.InstallTarget = PathForPhony(ctx, name)
+	var outputDeps Paths
+	var installDeps Paths
+
+	for _, p := range testSuiteInstalls {
+		installDeps = append(installDeps, p.Dst)
+	}
+	// Act as if you built the required dependencies as well when building the current module
+	for _, dep := range ctx.GetDirectDepsProxyWithTag(RequiredDepTag) {
+		if info, ok := OtherModuleProvider(ctx, dep, ModuleBuildTargetsProvider); ok {
+			if info.OutputsTarget != nil {
+				outputDeps = append(outputDeps, info.OutputsTarget)
+			}
+			if info.InstallTarget != nil {
+				installDeps = append(installDeps, info.InstallTarget)
+			}
 		}
-		deps = append(deps, installFiles...)
 	}
 
+	var installTarget Path
+	installFiles := slices.Concat(ctx.installFiles.Paths(), installDeps)
+	if len(installFiles) > 0 {
+		installTarget = phony("-"+ctx.ModuleSubDir()+"-install", installFiles)
+		phony("-install", Paths{installTarget})
+		info.InstallTarget = installTarget
+	}
+
+	var outputTarget Path
+	outputFiles, _ := outputFilesForModule(ctx, ctx.Module(), "")
+	outputFiles = append(outputFiles, outputDeps...)
+	outputFiles = append(outputFiles, ctx.modulePhonyFiles...)
+	if len(outputFiles) > 0 {
+		outputTarget = phony("-"+ctx.ModuleSubDir()+"-outputs", outputFiles)
+		phony("-outputs", Paths{outputTarget})
+	}
+
+	var modulePhonyTarget Path
+	if len(ctx.modulePhonyFiles) > 0 {
+		modulePhonyTarget = phony("-"+ctx.ModuleSubDir()+"-phony-files", ctx.modulePhonyFiles)
+		phony("-phony-files", Paths{modulePhonyTarget})
+	}
+
+	if ctx.Device() && ctx.Target().Arch.ArchType != ctx.Config().DevicePrimaryArchType() {
+		// Don't check build target module defined for the 2nd arch.
+		// https://source.corp.google.com/h/googleplex-android/platform/build/+/62ad5dbbffb05d4fc8d1136f753d42f40eadccd1:core/base_rules.mk;l=641-646;drc=d535e6f290f00c86babfa006167bf5055303e4c7;bpv=1;bpt=0
+		ctx.UncheckedModule()
+	}
 	// A module's -checkbuild phony targets should
 	// not be created if the module is not exported to make.
 	// Those could depend on the build target and fail to compile
 	// for the current build target.
-	if !shouldSkipAndroidMk && !ctx.uncheckedModule {
-		phony("-checkbuild", ctx.checkbuildFiles)
-		checkbuildTarget := phony("-"+ctx.ModuleSubDir()+"-checkbuild", ctx.checkbuildFiles)
-		if checkbuildTarget != "" {
-			info.CheckbuildTarget = PathForPhony(ctx, checkbuildTarget)
-		}
-		deps = append(deps, ctx.checkbuildFiles...)
-	}
-
-	if outputFiles, err := outputFilesForModule(ctx, ctx.Module(), ""); err == nil && len(outputFiles) > 0 && !shouldSkipAndroidMk {
-		phony("-outputs", outputFiles)
-		deps = append(deps, outputFiles...)
-	}
-
-	// Act as if you built the required dependencies as well when building the current module
-	for _, dep := range ctx.GetDirectDepsProxyWithTag(RequiredDepTag) {
-		if info, ok := OtherModuleProvider(ctx, dep, ModuleBuildTargetsProvider); ok {
-			deps = append(deps, info.AllDeps...)
+	var checkbuildTarget Path
+	if len(ctx.checkbuildFiles) > 0 {
+		checkbuildTarget = phony("-"+ctx.ModuleSubDir()+"-checkbuild", ctx.checkbuildFiles)
+		phony("-checkbuild", Paths{checkbuildTarget})
+		if !ctx.uncheckedModule {
+			info.CheckbuildTarget = checkbuildTarget
 		}
 	}
 
-	for _, p := range testSuiteInstalls {
-		deps = append(deps, p.dst)
+	var defaultTarget Paths
+	if installTarget != nil {
+		defaultTarget = Paths{installTarget}
+	} else if outputTarget != nil {
+		defaultTarget = Paths{outputTarget}
+	} else if checkbuildTarget != nil {
+		defaultTarget = Paths{checkbuildTarget}
 	}
 
-	if len(deps) > 0 {
-		phony("", deps)
-		if ctx.Device() {
-			// Generate a target suffix for use in atest etc.
-			phony("-target", deps)
-		} else {
-			// Generate a host suffix for use in atest etc.
-			phony("-host", deps)
-			if ctx.Target().HostCross {
-				// Generate a host-cross suffix for use in atest etc.
-				phony("-host-cross", deps)
-			}
+	if modulePhonyTarget != nil {
+		// Paths registered via `ModulePhonyFiles(...)` are always built as part of the default target.
+		defaultTarget = append(defaultTarget, modulePhonyTarget)
+	}
+
+	phony("", defaultTarget)
+	if ctx.Device() {
+		// Generate a target suffix for use in atest etc.
+		phony("-target", defaultTarget)
+	} else {
+		// Generate a host suffix for use in atest etc.
+		phony("-host", defaultTarget)
+		if ctx.Target().HostCross {
+			// Generate a host-cross suffix for use in atest etc.
+			phony("-host-cross", defaultTarget)
 		}
-
-		info.BlueprintDir = ctx.ModuleDir()
-		info.AllDeps = deps
-		SetProvider(ctx, ModuleBuildTargetsProvider, info)
 	}
+
+	info.ModulePhonyTarget = modulePhonyTarget
+	info.BlueprintDir = ctx.ModuleDir()
+	info.OutputsTarget = outputTarget
+	info.InstallTarget = installTarget
+	info.NamespaceExportedToMake = namespaceExportedToMake
+	SetProvider(ctx, ModuleBuildTargetsProvider, info)
 }
 
 func determineModuleKind(m *ModuleBase, ctx ModuleErrorContext) moduleKind {
@@ -1932,10 +2007,12 @@ var SourceFilesInfoProvider = blueprint.NewProvider[SourceFilesInfo]()
 // per-directory build targets.
 // @auto-generate: gob
 type ModuleBuildTargetsInfo struct {
-	InstallTarget    WritablePath
-	CheckbuildTarget WritablePath
-	BlueprintDir     string
-	AllDeps          Paths
+	InstallTarget           Path
+	OutputsTarget           Path
+	CheckbuildTarget        Path
+	ModulePhonyTarget       Path
+	NamespaceExportedToMake bool
+	BlueprintDir            string
 }
 
 var ModuleBuildTargetsProvider = blueprint.NewProvider[ModuleBuildTargetsInfo]()
@@ -1995,8 +2072,9 @@ type CommonModuleInfo struct {
 	ApexAvailable                                []string
 	// This field is different from the above one as it can have different values
 	// for cc, java library and sdkLibraryXml.
-	ApexAvailableFor []string
-	ImageVariation   blueprint.Variation
+	ApexAvailableFor           []string
+	ImageVariation             blueprint.Variation
+	IsNonPrimaryImageVariation bool
 }
 
 // @auto-generate: gob
@@ -2229,14 +2307,14 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		SetProvider(ctx, InstallFilesProvider, installFiles)
 	}
 
-	var testSuiteInstalls []filePair
+	var testSuiteInstalls []FilePair
 	if ctx.testSuiteInfoSet {
 		testSuiteInstalls = m.setupTestSuites(ctx, ctx.testSuiteInfo)
 	}
 
 	buildLicenseMetadata(ctx, ctx.licenseMetadataFile, testSuiteInstalls)
 
-	if m.Enabled(ctx) {
+	if shouldGeneratePhonyTargets(ctx, m) {
 		m.generateModuleTarget(ctx, testSuiteInstalls)
 	}
 	if ctx.Failed() {
@@ -2377,6 +2455,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		Team:                                         m.Team(),
 		PartitionTag:                                 m.PartitionTag(ctx.DeviceConfig()),
 		ImageVariation:                               m.module.ImageVariation(),
+		IsNonPrimaryImageVariation:                   m.commonProperties.IsNonPrimaryImageVariation,
 	}
 	if mm, ok := m.module.(interface {
 		MinSdkVersion(ctx EarlyModuleContext) ApiLevel
@@ -2468,7 +2547,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 
 func (m *ModuleBase) CleanupAfterBuildActions() {}
 
-func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []filePair {
+func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []FilePair {
 	// We skip test suites when using the ndk or aml abis, as the extra archs (x86_64 + arm64)
 	// both try to install to the same test file. This could be fixed by always using a per-module
 	// folder and an arch folder, but as you see later in this function we only conditionally use
@@ -2490,7 +2569,9 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []fi
 	if PrefixInList(info.TestSuites, "mcts-") && !InList("mcts", info.TestSuites) {
 		info.TestSuites = append(info.TestSuites, "mcts")
 	}
-
+	if info.IsUnitTest && ctx.Host() {
+		info.TestSuites = append(info.TestSuites, "host-unit-tests")
+	}
 	if len(info.TestSuites) == 0 {
 		info.TestSuites = []string{"null-suite"}
 	}
@@ -2513,7 +2594,7 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []fi
 		includeModuleFolder: true,
 	}}
 	for _, suite := range info.TestSuites {
-		if suiteInfo, ok := ctx.Config().productVariables.CompatibilityTestcases[suite]; ok {
+		if suiteInfo, ok := ctx.Config().CompatibilityTestcases()[suite]; ok {
 			rel, err := filepath.Rel(ctx.Config().OutDir(), suiteInfo.OutDir)
 			if err != nil {
 				panic(fmt.Sprintf("Could not make COMPATIBILITY_TESTCASES_OUT_%s (%s) relative to the out dir (%s)", suite, suiteInfo.OutDir, ctx.Config().OutDir()))
@@ -2540,8 +2621,8 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []fi
 		}
 	}
 
-	var installs []filePair
-	var oneVariantInstalls []filePair
+	var installs []FilePair
+	var oneVariantInstalls []FilePair
 
 	for _, suite := range suites {
 		mainFileName := name
@@ -2549,83 +2630,83 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []fi
 			mainFileName = info.MainFileStem
 		}
 		mainFileName += info.MainFileExt
-		mainFileInstall := joinWriteablePath(ctx, suite.dir, archDir, mainFileName)
+		mainFileInstall := JoinWriteablePath(ctx, suite.dir, archDir, mainFileName)
 		if !suite.includeModuleFolder {
-			mainFileInstall = joinWriteablePath(ctx, suite.dir, mainFileName)
+			mainFileInstall = JoinWriteablePath(ctx, suite.dir, mainFileName)
 		}
 		if info.MainFile == nil {
 			panic("mainfile was nil")
 		}
 
-		installs = append(installs, filePair{
-			src: info.MainFile,
-			dst: mainFileInstall,
+		installs = append(installs, FilePair{
+			Src: info.MainFile,
+			Dst: mainFileInstall,
 		})
 
 		for _, data := range info.Data {
-			dataOut := joinWriteablePath(ctx, suite.dir, archDir, data.ToRelativeInstallPath())
+			dataOut := JoinWriteablePath(ctx, suite.dir, archDir, data.ToRelativeInstallPath())
 			if !suite.includeModuleFolder {
-				dataOut = joinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
+				dataOut = JoinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
 			}
-			installs = append(installs, filePair{
-				src: data.SrcPath,
-				dst: dataOut,
+			installs = append(installs, FilePair{
+				Src: data.SrcPath,
+				Dst: dataOut,
 			})
 		}
 		for _, data := range info.NonArchData {
-			dataOut := joinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
-			installs = append(installs, filePair{
-				src: data.SrcPath,
-				dst: dataOut,
+			dataOut := JoinWriteablePath(ctx, suite.dir, data.ToRelativeInstallPath())
+			installs = append(installs, FilePair{
+				Src: data.SrcPath,
+				Dst: dataOut,
 			})
 		}
 		for _, data := range info.CompatibilitySupportFiles {
-			dataOut := joinWriteablePath(ctx, suite.dir, data.Rel())
-			installs = append(installs, filePair{
-				src: data,
-				dst: dataOut,
+			dataOut := JoinWriteablePath(ctx, suite.dir, data.Rel())
+			installs = append(installs, FilePair{
+				Src: data,
+				Dst: dataOut,
 			})
 		}
 
 		if !info.DisableTestConfig {
 			if info.ConfigFile != nil {
-				oneVariantInstalls = append(oneVariantInstalls, filePair{
-					src: info.ConfigFile,
-					dst: joinWriteablePath(ctx, suite.dir, name+".config"+info.ConfigFileSuffix),
+				oneVariantInstalls = append(oneVariantInstalls, FilePair{
+					Src: info.ConfigFile,
+					Dst: JoinWriteablePath(ctx, suite.dir, name+".config"+info.ConfigFileSuffix),
 				})
 			} else if config := ExistentPathForSource(ctx, ctx.ModuleDir(), "AndroidTest.xml"); config.Valid() {
-				oneVariantInstalls = append(oneVariantInstalls, filePair{
-					src: config.Path(),
-					dst: joinWriteablePath(ctx, suite.dir, name+".config"),
+				oneVariantInstalls = append(oneVariantInstalls, FilePair{
+					Src: config.Path(),
+					Dst: JoinWriteablePath(ctx, suite.dir, name+".config"),
 				})
 			}
 		}
 
 		dynamicConfig := ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
 		if dynamicConfig.Valid() {
-			oneVariantInstalls = append(oneVariantInstalls, filePair{
-				src: dynamicConfig.Path(),
-				dst: joinWriteablePath(ctx, suite.dir, name+".dynamic"),
+			oneVariantInstalls = append(oneVariantInstalls, FilePair{
+				Src: dynamicConfig.Path(),
+				Dst: JoinWriteablePath(ctx, suite.dir, name+".dynamic"),
 			})
 		}
 		for _, extraTestConfig := range info.ExtraConfigs {
 			if extraTestConfig == nil {
 				panic("ExtraTestConfig was nil")
 			}
-			oneVariantInstalls = append(oneVariantInstalls, filePair{
-				src: extraTestConfig,
-				dst: joinWriteablePath(ctx, suite.dir, pathtools.ReplaceExtension(extraTestConfig.Base(), "config")),
+			oneVariantInstalls = append(oneVariantInstalls, FilePair{
+				Src: extraTestConfig,
+				Dst: JoinWriteablePath(ctx, suite.dir, pathtools.ReplaceExtension(extraTestConfig.Base(), "config")),
 			})
 		}
 	}
 
 	SetProvider(ctx, TestSuiteInfoProvider, info)
-	SetProvider(ctx, testSuiteInstallsInfoProvider, testSuiteInstallsInfo{installs, oneVariantInstalls})
+	SetProvider(ctx, TestSuiteInstallsInfoProvider, TestSuiteInstallsInfo{installs, oneVariantInstalls})
 
 	return slices.Concat(installs, oneVariantInstalls)
 }
 
-func joinWriteablePath(ctx PathContext, path WritablePath, toJoin ...string) WritablePath {
+func JoinWriteablePath(ctx PathContext, path WritablePath, toJoin ...string) WritablePath {
 	switch p := path.(type) {
 	case InstallPath:
 		return p.Join(ctx, toJoin...)
@@ -3323,6 +3404,9 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 
 	ctx.VisitAllModuleProxies(func(module ModuleProxy) {
 		info := OtherModuleProviderOrDefault(ctx, module, ModuleBuildTargetsProvider)
+		if !info.NamespaceExportedToMake {
+			return
+		}
 
 		if info.CheckbuildTarget != nil {
 			checkbuildDeps = append(checkbuildDeps, info.CheckbuildTarget)

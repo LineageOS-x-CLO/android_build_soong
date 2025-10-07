@@ -21,11 +21,14 @@ import (
 	"sync"
 
 	"android/soong/android"
+	"android/soong/cc"
+	"android/soong/rust"
 
 	"github.com/google/blueprint/proptools"
 )
 
 func RegisterCollectFileSystemDepsMutators(ctx android.RegisterMutatorsContext) {
+	ctx.BottomUp("fs_recovery_fstab", setRecoveryFstabSrcs).MutatesGlobalState()
 	ctx.BottomUp("fs_collect_deps", collectDepsMutator).MutatesGlobalState()
 	ctx.BottomUp("fs_remove_deps", removeDepsMutator).MutatesGlobalState()
 	ctx.BottomUp("fs_cross_partition_required_deps", crossPartitionRequiredMutator).MutatesGlobalState()
@@ -71,10 +74,14 @@ type moduleToInstallationProps struct {
 	// Map of _all_ soong module names to their corresponding installation properties
 	// Should not be accessed directly to add entries; Use AddToMap instead.
 	moduleToPropsMap map[string]installationProperties
+
+	// TODO (b/420968370): Remove this after we enforce that all namespaces are valid.
+	baseModuleNameToPropsMap map[string][]installationProperties
 }
 
 func (m *moduleToInstallationProps) AddToMap(ctx android.BottomUpMutatorContext, prop *installationProperties) {
 	m.moduleToPropsMap[fullyQualifiedModuleName(ctx.ModuleName(), ctx.Namespace().Path)] = *prop
+	m.baseModuleNameToPropsMap[ctx.ModuleName()] = append(m.baseModuleNameToPropsMap[ctx.ModuleName()], *prop)
 }
 
 func (m *moduleToInstallationProps) Get(ctx android.BottomUpMutatorContext) (installationProperties, bool) {
@@ -112,13 +119,18 @@ type FsGenState struct {
 	avbKeyFilegroups map[string]string
 	// Name of all native bridge modules
 	nativeBridgeModules map[string]bool
+
+	// Name of the generated recovery fstab module name
+	recoveryFstabModuleName string
 }
 
 type installationProperties struct {
-	Required  []string
-	Overrides []string
-	Partition string
-	Namespace string
+	Required            []string
+	Overrides           []string
+	CcAndRustSharedLibs []string
+	Partition           string
+	Namespace           string
+	ArchType            android.ArchType
 }
 
 func defaultDepCandidateProps(config android.Config) *depCandidateProps {
@@ -129,32 +141,37 @@ func defaultDepCandidateProps(config android.Config) *depCandidateProps {
 	}
 }
 
-func productInstalledModules(ctx android.LoadHookContext) []string {
-	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
-	allInstalledModules := partitionVars.ProductPackages
+type DeviceConfigContext interface {
+	Config() android.Config
+	DeviceConfig() android.DeviceConfig
+}
+
+func productInstalledModules(ctx DeviceConfigContext, makefile string) []string {
+	productPkg := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet[makefile]
+	allInstalledModules := productPkg.ProductPackages
 	if ctx.Config().Debuggable() {
-		allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesDebug...)
+		allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesDebug...)
 		if ctx.Config().Eng() {
-			allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesEng...)
+			allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesEng...)
 		}
 		if android.InList("address", ctx.Config().SanitizeDevice()) {
-			allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesDebugAsan...)
+			allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesDebugAsan...)
 		}
 		if ctx.Config().IsEnvTrue("EMMA_INSTRUMENT") {
-			allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesDebugJavaCoverage...)
+			allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesDebugJavaCoverage...)
 		}
 	}
 	if android.InList("arm64", []string{ctx.DeviceConfig().DeviceArch(), ctx.DeviceConfig().DeviceSecondaryArch()}) {
-		allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesArm64...)
+		allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesArm64...)
 	}
 	if android.UncheckedFinalApiLevel(29).GreaterThanOrEqualTo(ctx.DeviceConfig().ShippingApiLevel()) {
-		allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesShippingApiLevel29...)
+		allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesShippingApiLevel29...)
 	}
 	if android.UncheckedFinalApiLevel(33).GreaterThanOrEqualTo(ctx.DeviceConfig().ShippingApiLevel()) {
-		allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesShippingApiLevel33...)
+		allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesShippingApiLevel33...)
 	}
 	if android.UncheckedFinalApiLevel(34).GreaterThanOrEqualTo(ctx.DeviceConfig().ShippingApiLevel()) {
-		allInstalledModules = append(allInstalledModules, partitionVars.ProductPackagesShippingApiLevel34...)
+		allInstalledModules = append(allInstalledModules, productPkg.ProductPackagesShippingApiLevel34...)
 	}
 
 	return allInstalledModules
@@ -163,7 +180,7 @@ func productInstalledModules(ctx android.LoadHookContext) []string {
 func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNames []string, avbpubkeyGenerated bool) *FsGenState {
 	return ctx.Config().Once(fsGenStateOnceKey, func() interface{} {
 		allInstalledModules := slices.Concat(
-			productInstalledModules(ctx),
+			productInstalledModules(ctx, "all"),
 			generatedPrebuiltEtcModuleNames,
 		)
 		candidatesMap := map[string]bool{}
@@ -213,8 +230,6 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"fs_config_dirs_system_dlkm":  defaultDepCandidateProps(ctx.Config()),
 					"fs_config_files_system_dlkm": defaultDepCandidateProps(ctx.Config()),
 					"notice_xml_system_dlkm":      defaultDepCandidateProps(ctx.Config()),
-					// build props are automatically added to `ALL_DEFAULT_INSTALLED_MODULES`
-					"system_dlkm-build.prop": defaultDepCandidateProps(ctx.Config()),
 				},
 				"vendor_dlkm": {
 					"fs_config_dirs_vendor_dlkm":  defaultDepCandidateProps(ctx.Config()),
@@ -227,9 +242,11 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"fs_config_files_odm_dlkm": defaultDepCandidateProps(ctx.Config()),
 					"notice_xml_odm_dlkm":      defaultDepCandidateProps(ctx.Config()),
 				},
-				"ramdisk":               {},
-				"vendor_ramdisk":        {},
-				"vendor_kernel_ramdisk": {},
+				"ramdisk":                     {},
+				"vendor_ramdisk":              {},
+				"vendor_ramdisk-debug":        {},
+				"vendor_ramdisk-test-harness": {},
+				"vendor_kernel_ramdisk":       {},
 				"recovery": {
 					"sepolicy.recovery":                     defaultDepCandidateProps(ctx.Config()),
 					"plat_file_contexts.recovery":           defaultDepCandidateProps(ctx.Config()),
@@ -247,9 +264,18 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 					"product_service_contexts.recovery":     defaultDepCandidateProps(ctx.Config()),
 					"product_property_contexts.recovery":    defaultDepCandidateProps(ctx.Config()),
 				},
+				"debug_ramdisk": {
+					"force_debuggable": defaultDepCandidateProps(ctx.Config()),
+				}, // TODO: move this to PRODUCT_PACKAGES
+				"test_harness_ramdisk": {
+					"adb_debug.test_harness.prop": defaultDepCandidateProps(ctx.Config()),
+				}, // TODO: move this to PRODUCT_PACKAGES
 			},
-			fsDepsMutex:                     sync.Mutex{},
-			moduleToInstallationProps:       moduleToInstallationProps{moduleToPropsMap: map[string]installationProperties{}},
+			fsDepsMutex: sync.Mutex{},
+			moduleToInstallationProps: moduleToInstallationProps{
+				moduleToPropsMap:         map[string]installationProperties{},
+				baseModuleNameToPropsMap: map[string][]installationProperties{},
+			},
 			generatedPrebuiltEtcModuleNames: generatedPrebuiltEtcModuleNames,
 			avbKeyFilegroups:                map[string]string{},
 			nativeBridgeModules:             map[string]bool{},
@@ -273,6 +299,10 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 		if name := createTargetRecoveryWipeModuleName(ctx); name != "" {
 			(*fsGenState.fsDeps["recovery"])[name] = defaultDepCandidateProps(ctx.Config())
 		}
+		if name := handleRecoveryFstab(ctx); name != "" {
+			(*fsGenState.fsDeps["recovery"])[name] = defaultDepCandidateProps(ctx.Config())
+			fsGenState.recoveryFstabModuleName = name
+		}
 
 		// VNDK APEXes are deprecated and are not supported and disabled for riscv64 arch.
 		// Adding these modules as deps of the auto generated riscv64 arch filesystem modules
@@ -282,6 +312,13 @@ func createFsGenState(ctx android.LoadHookContext, generatedPrebuiltEtcModuleNam
 			for _, vndkVersion := range ctx.DeviceConfig().ExtraVndkVersions() {
 				(*fsGenState.fsDeps["system_ext"])["com.android.vndk.v"+vndkVersion] = defaultDepCandidateProps(ctx.Config())
 			}
+		}
+
+		if ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BuildingSystemDlkmImage {
+			(*fsGenState.fsDeps["system_dlkm"])["system_dlkm-build.prop"] = defaultDepCandidateProps(ctx.Config())
+		} else {
+			// system_dlkm build.prop is installed in system partition if system_dlkm.img is not available
+			(*fsGenState.fsDeps["system"])["system_dlkm-build.prop"] = defaultDepCandidateProps(ctx.Config())
 		}
 
 		if ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BuildingOdmDlkmImage {
@@ -340,7 +377,14 @@ func collectDepsMutator(mctx android.BottomUpMutatorContext) {
 	fsGenState.fsDepsMutex.Lock()
 	defer fsGenState.fsDepsMutex.Unlock()
 
-	if _, ok := fsGenState.depCandidatesMap[mctx.ModuleName()]; ok {
+	moduleName := mctx.ModuleName()
+	if p, ok := m.(android.PrebuiltInterface); ok && p.Prebuilt() != nil {
+		if mm, ok := m.(interface{ BaseModuleName() string }); ok {
+			moduleName = mm.BaseModuleName()
+		}
+	}
+
+	if _, ok := fsGenState.depCandidatesMap[moduleName]; ok {
 		installPartition := m.PartitionTag(mctx.DeviceConfig())
 		// Only add the module as dependency when:
 		// - its enabled
@@ -364,17 +408,44 @@ func collectDepsMutator(mctx android.BottomUpMutatorContext) {
 		installPartition := "vendor_ramdisk"
 		if m.Enabled(mctx) && m.ExportedToMake() {
 			appendDepIfAppropriate(mctx, fsGenState.fsDeps[installPartition], installPartition, android.NativeBridgeDisabled, mctx.ModuleName())
+			appendDepIfAppropriate(mctx, fsGenState.fsDeps["vendor_ramdisk-debug"], installPartition, android.NativeBridgeDisabled, mctx.ModuleName())
+		}
+	} else if _, ok := fsGenState.depCandidatesMap[mctx.ModuleName()+".recovery"]; ok && mctx.Module().InstallInRecovery() {
+		installPartition := "recovery"
+		if m.Enabled(mctx) && m.ExportedToMake() {
+			appendDepIfAppropriate(mctx, fsGenState.fsDeps[installPartition], installPartition, android.NativeBridgeDisabled, mctx.ModuleName())
 		}
 	}
 
 	// store the map of module to (required,overrides) even if the module is not in PRODUCT_PACKAGES.
 	// the module might be installed transitively.
 	if m.Enabled(mctx) && m.ExportedToMake() {
+		var ccAndRustSharedLibs []string
+		if rustModule, ok := m.(*rust.Module); ok {
+			if !rustModule.StdLinkageIsRlibLinkage(mctx.Device()) {
+				for _, prop := range m.GetProperties() {
+					if rustCompilerProps, ok := prop.(*rust.BaseCompilerProperties); ok {
+						ccAndRustSharedLibs = rustCompilerProps.Rustlibs.GetOrDefault(mctx, nil)
+					}
+				}
+			}
+		}
+		if _, ok := m.(*cc.Module); ok {
+			for _, prop := range m.GetProperties() {
+				if linkerProps, ok := prop.(*cc.BaseLinkerProperties); ok {
+					deps := cc.CoalesceLibs(mctx, linkerProps, cc.Deps{})
+					ccAndRustSharedLibs = append(ccAndRustSharedLibs, deps.SharedLibs...)
+				}
+			}
+		}
+
 		fsGenState.moduleToInstallationProps.AddToMap(mctx, &installationProperties{
-			Required:  m.RequiredModuleNames(mctx),
-			Overrides: m.Overrides(),
-			Partition: m.PartitionTag(mctx.DeviceConfig()),
-			Namespace: mctx.Namespace().Path,
+			Required:            m.RequiredModuleNames(mctx),
+			CcAndRustSharedLibs: ccAndRustSharedLibs,
+			Overrides:           m.Overrides(),
+			Partition:           m.PartitionTag(mctx.DeviceConfig()),
+			Namespace:           mctx.Namespace().Path,
+			ArchType:            mctx.Target().Arch.ArchType,
 		})
 	}
 
@@ -439,8 +510,12 @@ func crossPartitionRequiredMutator(mctx android.BottomUpMutatorContext) {
 	defer fsGenState.fsDepsMutex.Unlock()
 	additionalCrossPartitionRequiredDeps := correctCrossPartitionRequiredDeps(mctx.Config())
 	fullyQualifiedModuleName := fullyQualifiedModuleName(mctx.ModuleName(), mctx.Namespace().Path)
-	if partition, ok := additionalCrossPartitionRequiredDeps[fullyQualifiedModuleName]; ok && mctx.Module().PartitionTag(mctx.DeviceConfig()) == partition {
-		appendDepIfAppropriate(mctx, fsGenState.fsDeps[partition], partition, android.NativeBridgeDisabled, mctx.ModuleName())
+	if xPartitionDep, ok := additionalCrossPartitionRequiredDeps[fullyQualifiedModuleName]; ok && mctx.Module().PartitionTag(mctx.DeviceConfig()) == xPartitionDep.partition {
+		// For shared libraries, add the dependency only if the archType of the dep and parent match.
+		addXPartitionDep := !xPartitionDep.isSharedLibDep || android.InList(mctx.Target().Arch.ArchType, xPartitionDep.archesOfRequiredSharedLibDep)
+		if addXPartitionDep {
+			appendDepIfAppropriate(mctx, fsGenState.fsDeps[xPartitionDep.partition], xPartitionDep.partition, android.NativeBridgeDisabled, mctx.ModuleName())
+		}
 	}
 }
 
@@ -480,18 +555,31 @@ func updatePartitionsOfOverrideModules(mctx android.BottomUpMutatorContext) {
 		}
 		base := override.GetOverriddenModuleName()
 		if strings.HasPrefix(base, "//") { // Has path prefix, which is either the path to the module or the namespace
-			pathOrNamspace := strings.TrimPrefix(strings.Split(base, ":")[0], "//")
+			base = strings.Split(base, ":")[1]
+
+			// TODO (b/420968370): Re-enable this after we enforce that all namespaces are valid.
+
+			//pathOrNamspace := strings.TrimPrefix(strings.Split(base, ":")[0], "//")
 			// If the path prefix is not within the exported namespace, it is likely that the
 			// prefix is the path to the module, not the namespace. In that case, drop the
 			// prefix as the non-namespace path prefix is not part of the fully qualified module
 			// name.
-			if !android.InList(pathOrNamspace, mctx.Config().ProductVariables().NamespacesToExport) {
-				base = strings.Split(base, ":")[1]
-			}
+			//if !android.InList(pathOrNamspace, mctx.Config().ProductVariables().NamespacesToExport) {
+			//	base = strings.Split(base, ":")[1]
+			//}
 		}
 
-		if baseModuleProps, ok := fsGenState.moduleToInstallationProps.GetFromFullyQualifiedModuleName(base); ok && mctx.Module().Enabled(mctx) && mctx.Module().ExportedToMake() {
-			partition := baseModuleProps.Partition
+		// TODO (b/420968370): Use fully qualifed name after we enforce that all namespaces are valid.
+		if baseModuleProps, ok := fsGenState.moduleToInstallationProps.baseModuleNameToPropsMap[base]; ok && mctx.Module().Enabled(mctx) && mctx.Module().ExportedToMake() {
+			basePartitionCandidates := []string{}
+			for _, ip := range baseModuleProps {
+				basePartitionCandidates = append(basePartitionCandidates, ip.Partition)
+			}
+			basePartitionCandidates = android.SortedUniqueStrings(basePartitionCandidates)
+			if len(basePartitionCandidates) > 1 {
+				mctx.ModuleErrorf("Could not determine partition of base module %s. Possible partitions %s\n", base, basePartitionCandidates)
+			}
+			partition := basePartitionCandidates[0]
 			appendDepIfAppropriate(mctx, fsDeps[partition], partition, android.NativeBridgeDisabled, mctx.Module().Name())
 		}
 	}
@@ -556,8 +644,18 @@ func removeOverriddenDeps(mctx android.BottomUpMutatorContext) {
 type directDepWithParentPartition struct {
 	// name of the install partition of the parent module
 	parentPartition string
+	parentArchType  android.ArchType
 	// fully qualified module name of the "required" direct dep
 	directDepName string
+	// whether this is a rustlib or native shared lib dependency
+	isSharedLibDep bool
+}
+
+type crossPartitionRequiredDep struct {
+	partition      string
+	isSharedLibDep bool
+	// Arches of the binary that requested the cross partition dependency.
+	archesOfRequiredSharedLibDep []android.ArchType
 }
 
 // This function is run only once to compute the list of transitive "required" dependencies
@@ -566,8 +664,8 @@ type directDepWithParentPartition struct {
 // filesystem modules. Thus, the module will not be included in the returning map even when the
 // install partition differs from that of the parent module if the module is not installed
 // for the target product.
-// The return value is a mapping of fully qualified module names to their install partition.
-func correctCrossPartitionRequiredDeps(config android.Config) map[string]string {
+// The return value is a mapping of fully qualified module name to their install partition and arch types.
+func correctCrossPartitionRequiredDeps(config android.Config) map[string]crossPartitionRequiredDep {
 	return config.Once(fsGenCrossPartitionRequiredDepsOnceKey, func() interface{} {
 		fsGenState := config.Get(fsGenStateOnceKey).(*FsGenState)
 		fsDeps := fsGenState.fsDeps
@@ -576,7 +674,7 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 		// Mapping of fully qualified module name to its list of install partition
 		// Given that a single module cannot be listed as deps of multiple filesystem modules,
 		// the key is a single string value instead of a list of strings
-		ret := make(map[string]string)
+		ret := make(map[string]crossPartitionRequiredDep)
 
 		// Add the pair of:
 		// 1. install partition of the top level dep module
@@ -589,8 +687,24 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 					for _, requiredModule := range props.Required {
 						moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
 							parentPartition: partition,
+							parentArchType:  props.ArchType,
 							directDepName:   fullyQualifiedModuleName(requiredModule, props.Namespace),
 						})
+					}
+					// system_ext-specific image variation is not created, thus system_ext
+					// rust or cc module will link against system rustlibs or shared libs.
+					// Since cross-partition installation is not supported in filesystem modules,
+					// system rustlibs or shared libs of system_ext_specific modules should be
+					// separately added as deps of the system image.
+					if partition == "system_ext" {
+						for _, sharedLibModule := range props.CcAndRustSharedLibs {
+							moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
+								parentPartition: partition,
+								parentArchType:  props.ArchType,
+								directDepName:   fullyQualifiedModuleName(sharedLibModule, props.Namespace),
+								isSharedLibDep:  true,
+							})
+						}
 					}
 				}
 			}
@@ -615,7 +729,18 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 			// mark the module visited.
 			if moduleProps, ok := moduleToInstallationProps.GetFromFullyQualifiedModuleName(visitingModule.directDepName); ok {
 				if moduleProps.Partition != visitingModule.parentPartition {
-					ret[visitingModule.directDepName] = moduleProps.Partition
+					if !visitingModule.isSharedLibDep || moduleProps.Partition == "system" {
+						if entry, exists := ret[visitingModule.directDepName]; exists {
+							archesOfRequiredSharedLibDep := append(entry.archesOfRequiredSharedLibDep, visitingModule.parentArchType)
+							entry.archesOfRequiredSharedLibDep = archesOfRequiredSharedLibDep
+						} else {
+							ret[visitingModule.directDepName] = crossPartitionRequiredDep{
+								partition:                    moduleProps.Partition,
+								isSharedLibDep:               visitingModule.isSharedLibDep,
+								archesOfRequiredSharedLibDep: []android.ArchType{visitingModule.parentArchType},
+							}
+						}
+					}
 				}
 				if _, ok := traversalMap[visitingModule.directDepName]; !ok {
 					traversalMap[visitingModule.directDepName] = true
@@ -625,11 +750,20 @@ func correctCrossPartitionRequiredDeps(config android.Config) map[string]string 
 							directDepName:   requiredModule,
 						})
 					}
+					if moduleProps.Partition == "system_ext" {
+						for _, rustLibModule := range moduleProps.CcAndRustSharedLibs {
+							moduleNamesStack = append(moduleNamesStack, directDepWithParentPartition{
+								parentPartition: moduleProps.Partition,
+								directDepName:   rustLibModule,
+								isSharedLibDep:  true,
+							})
+						}
+					}
 				}
 			}
 		}
 		return ret
-	}).(map[string]string)
+	}).(map[string]crossPartitionRequiredDep)
 }
 
 var HighPriorityDeps = []string{}
