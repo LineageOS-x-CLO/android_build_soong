@@ -317,39 +317,40 @@ type ProductVariables struct {
 
 	AppsDefaultVersionName *string `json:",omitempty"`
 
-    Allow_missing_dependencies       *bool    `json:",omitempty"`
-    Unbundled_build                  *bool    `json:",omitempty"`
-    Unbundled_build_apps             []string `json:",omitempty"`
-    Unbundled_build_image            *bool    `json:",omitempty"`
-    Always_use_prebuilt_sdks         *bool    `json:",omitempty"`
-    Skip_boot_jars_check             *bool    `json:",omitempty"`
-    Malloc_low_memory                *bool    `json:",omitempty"`
-    Malloc_zero_contents             *bool    `json:",omitempty"`
-    Malloc_pattern_fill_contents     *bool    `json:",omitempty"`
-    Safestack                        *bool    `json:",omitempty"`
-    HostStaticBinaries               *bool    `json:",omitempty"`
-    Binder32bit                      *bool    `json:",omitempty"`
-    UseABFS                          *bool    `json:",omitempty"`
-    UseRBE                           *bool    `json:",omitempty"`
-    UseREWrapper                     *bool    `json:",omitempty"`
-    UseRBEJAVAC                      *bool    `json:",omitempty"`
-    UseRBER8                         *bool    `json:",omitempty"`
-    UseRBED8                         *bool    `json:",omitempty"`
-    Debuggable                       *bool    `json:",omitempty"`
-    Eng                              *bool    `json:",omitempty"`
-    Treble_linker_namespaces         *bool    `json:",omitempty"`
-    Enforce_vintf_manifest           *bool    `json:",omitempty"`
-    Uml                              *bool    `json:",omitempty"`
-    Arc                              *bool    `json:",omitempty"`
-    MinimizeJavaDebugInfo            *bool    `json:",omitempty"`
-    Build_from_text_stub             *bool    `json:",omitempty"`
-    Real_hal                         *bool    `json:",omitempty"`
-    Qmaa_hal                         *bool    `json:",omitempty"`
-    Device_support_hwfde             *bool    `json:",omitempty"`
-    Device_support_hwfde_perf        *bool    `json:",omitempty"`
-    Unbundled_build_sdks_from_source *bool    `json:",omitempty"`
-    Device_page_size_agnostic        *bool    `json:",omitempty"`
-    Pdk                              *bool    `json:",omitempty"`
+	Allow_missing_dependencies       *bool    `json:",omitempty"`
+	Unbundled_build                  *bool    `json:",omitempty"`
+	Unbundled_build_apps             []string `json:",omitempty"`
+	Unbundled_build_image            *bool    `json:",omitempty"`
+	Always_use_prebuilt_sdks         *bool    `json:",omitempty"`
+	Skip_boot_jars_check             *bool    `json:",omitempty"`
+	Malloc_low_memory                *bool    `json:",omitempty"`
+	Malloc_zero_contents             *bool    `json:",omitempty"`
+	Malloc_pattern_fill_contents     *bool    `json:",omitempty"`
+	Safestack                        *bool    `json:",omitempty"`
+	HostStaticBinaries               *bool    `json:",omitempty"`
+	Binder32bit                      *bool    `json:",omitempty"`
+	UseABFS                          *bool    `json:",omitempty"`
+	UseRBE                           *bool    `json:",omitempty"`
+	UseREWrapper                     *bool    `json:",omitempty"`
+	UseRBEJAVAC                      *bool    `json:",omitempty"`
+	UseRBER8                         *bool    `json:",omitempty"`
+	UseRBED8                         *bool    `json:",omitempty"`
+	RBEContainerImage                *string  `json:",omitempty"`
+	Debuggable                       *bool    `json:",omitempty"`
+	Eng                              *bool    `json:",omitempty"`
+	Treble_linker_namespaces         *bool    `json:",omitempty"`
+	Enforce_vintf_manifest           *bool    `json:",omitempty"`
+	Uml                              *bool    `json:",omitempty"`
+	Arc                              *bool    `json:",omitempty"`
+	MinimizeJavaDebugInfo            *bool    `json:",omitempty"`
+	Build_from_text_stub             *bool    `json:",omitempty"`
+	Real_hal                         *bool    `json:",omitempty"`
+	Qmaa_hal                         *bool    `json:",omitempty"`
+	Device_support_hwfde             *bool    `json:",omitempty"`
+	Device_support_hwfde_perf        *bool    `json:",omitempty"`
+	Unbundled_build_sdks_from_source *bool    `json:",omitempty"`
+	Device_page_size_agnostic        *bool    `json:",omitempty"`
+	Pdk                              *bool    `json:",omitempty"`
 
 	BuildType *string `json:",omitempty"`
 

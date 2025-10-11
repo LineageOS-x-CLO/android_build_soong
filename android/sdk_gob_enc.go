@@ -8,11 +8,29 @@ import (
 )
 
 func init() {
+	BpPrintableBaseGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(BpPrintableBase) })
 	SdkMemberTraitBaseGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(SdkMemberTraitBase) })
 	SdkMemberTypeBaseGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(SdkMemberTypeBase) })
 	ExportedComponentsInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(ExportedComponentsInfo) })
 	AdditionalSdkInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(AdditionalSdkInfo) })
 	AdditionalSdkInfoPropertiesGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(AdditionalSdkInfoProperties) })
+}
+
+func (r BpPrintableBase) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
+	var err error
+	return err
+}
+
+func (r *BpPrintableBase) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
+	var err error
+
+	return err
+}
+
+var BpPrintableBaseGobRegId int16
+
+func (r BpPrintableBase) GetTypeId() int16 {
+	return BpPrintableBaseGobRegId
 }
 
 func (r SdkMemberTraitBase) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
@@ -49,43 +67,43 @@ func (r SdkMemberTypeBase) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) er
 	}
 
 	if r.OverridesPropertyNames == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.OverridesPropertyNames))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.OverridesPropertyNames)); err != nil {
 			return err
 		}
-		for k, v := range r.OverridesPropertyNames {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val1, val2 := range r.OverridesPropertyNames {
+			if err = gobtools.EncodeString(buf, val1); err != nil {
 				return err
 			}
-			if err = gobtools.EncodeSimple(buf, v); err != nil {
+			if err = gobtools.EncodeBool(buf, val2); err != nil {
 				return err
 			}
 		}
 	}
 
 	if r.SupportedLinkageNames == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.SupportedLinkageNames))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.SupportedLinkageNames)); err != nil {
 			return err
 		}
-		for val1 := 0; val1 < len(r.SupportedLinkageNames); val1++ {
-			if err = gobtools.EncodeString(buf, r.SupportedLinkageNames[val1]); err != nil {
+		for val3 := 0; val3 < len(r.SupportedLinkageNames); val3++ {
+			if err = gobtools.EncodeString(buf, r.SupportedLinkageNames[val3]); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.StripDisabled); err != nil {
+	if err = gobtools.EncodeBool(buf, r.StripDisabled); err != nil {
 		return err
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.BpPropertyNotRequired); err != nil {
+	if err = gobtools.EncodeBool(buf, r.BpPropertyNotRequired); err != nil {
 		return err
 	}
 
@@ -93,38 +111,38 @@ func (r SdkMemberTypeBase) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) er
 		return err
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.SupportsSdk); err != nil {
+	if err = gobtools.EncodeBool(buf, r.SupportsSdk); err != nil {
 		return err
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.HostOsDependent); err != nil {
+	if err = gobtools.EncodeBool(buf, r.HostOsDependent); err != nil {
 		return err
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.UseSourceModuleTypeInSnapshot); err != nil {
+	if err = gobtools.EncodeBool(buf, r.UseSourceModuleTypeInSnapshot); err != nil {
 		return err
 	}
 
-	val2 := r.PrebuiltsRequired == nil
-	if err = gobtools.EncodeSimple(buf, val2); err != nil {
+	val4 := r.PrebuiltsRequired == nil
+	if err = gobtools.EncodeBool(buf, val4); err != nil {
 		return err
 	}
-	if !val2 {
-		if err = gobtools.EncodeSimple(buf, (*r.PrebuiltsRequired)); err != nil {
+	if !val4 {
+		if err = gobtools.EncodeBool(buf, (*r.PrebuiltsRequired)); err != nil {
 			return err
 		}
 	}
 
 	if r.Traits == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Traits))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Traits)); err != nil {
 			return err
 		}
-		for val3 := 0; val3 < len(r.Traits); val3++ {
-			if err = gobtools.EncodeInterface(ctx, buf, r.Traits[val3]); err != nil {
+		for val5 := 0; val5 < len(r.Traits); val5++ {
+			if err = gobtools.EncodeInterface(ctx, buf, r.Traits[val5]); err != nil {
 				return err
 			}
 		}
@@ -140,49 +158,49 @@ func (r *SdkMemberTypeBase) Decode(ctx gobtools.EncContext, buf *bytes.Reader) e
 		return err
 	}
 
-	var val2 int32
-	err = gobtools.DecodeSimple[int32](buf, &val2)
+	var val2 int
+	err = gobtools.DecodeInt(buf, &val2)
 	if err != nil {
 		return err
 	}
 	if val2 != -1 {
 		r.OverridesPropertyNames = make(map[string]bool, val2)
 		for val3 := 0; val3 < int(val2); val3++ {
-			var k string
-			var v bool
-			err = gobtools.DecodeString(buf, &k)
+			var val4 string
+			var val5 bool
+			err = gobtools.DecodeString(buf, &val4)
 			if err != nil {
 				return err
 			}
-			err = gobtools.DecodeSimple[bool](buf, &v)
+			err = gobtools.DecodeBool(buf, &val5)
 			if err != nil {
 				return err
 			}
-			r.OverridesPropertyNames[k] = v
+			r.OverridesPropertyNames[val4] = val5
 		}
 	}
 
-	var val7 int32
-	err = gobtools.DecodeSimple[int32](buf, &val7)
+	var val9 int
+	err = gobtools.DecodeInt(buf, &val9)
 	if err != nil {
 		return err
 	}
-	if val7 != -1 {
-		r.SupportedLinkageNames = make([]string, val7)
-		for val8 := 0; val8 < int(val7); val8++ {
-			err = gobtools.DecodeString(buf, &r.SupportedLinkageNames[val8])
+	if val9 != -1 {
+		r.SupportedLinkageNames = make([]string, val9)
+		for val10 := 0; val10 < int(val9); val10++ {
+			err = gobtools.DecodeString(buf, &r.SupportedLinkageNames[val10])
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.StripDisabled)
+	err = gobtools.DecodeBool(buf, &r.StripDisabled)
 	if err != nil {
 		return err
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.BpPropertyNotRequired)
+	err = gobtools.DecodeBool(buf, &r.BpPropertyNotRequired)
 	if err != nil {
 		return err
 	}
@@ -192,48 +210,48 @@ func (r *SdkMemberTypeBase) Decode(ctx gobtools.EncContext, buf *bytes.Reader) e
 		return err
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.SupportsSdk)
+	err = gobtools.DecodeBool(buf, &r.SupportsSdk)
 	if err != nil {
 		return err
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.HostOsDependent)
+	err = gobtools.DecodeBool(buf, &r.HostOsDependent)
 	if err != nil {
 		return err
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.UseSourceModuleTypeInSnapshot)
+	err = gobtools.DecodeBool(buf, &r.UseSourceModuleTypeInSnapshot)
 	if err != nil {
 		return err
 	}
 
-	var val17 bool
-	if err = gobtools.DecodeSimple(buf, &val17); err != nil {
+	var val19 bool
+	if err = gobtools.DecodeBool(buf, &val19); err != nil {
 		return err
 	}
-	if !val17 {
-		var val16 bool
-		err = gobtools.DecodeSimple[bool](buf, &val16)
+	if !val19 {
+		var val18 bool
+		err = gobtools.DecodeBool(buf, &val18)
 		if err != nil {
 			return err
 		}
-		r.PrebuiltsRequired = &val16
+		r.PrebuiltsRequired = &val18
 	}
 
-	var val20 int32
-	err = gobtools.DecodeSimple[int32](buf, &val20)
+	var val22 int
+	err = gobtools.DecodeInt(buf, &val22)
 	if err != nil {
 		return err
 	}
-	if val20 != -1 {
-		r.Traits = make([]SdkMemberTrait, val20)
-		for val21 := 0; val21 < int(val20); val21++ {
-			if val23, err := gobtools.DecodeInterface(ctx, buf); err != nil {
+	if val22 != -1 {
+		r.Traits = make([]SdkMemberTrait, val22)
+		for val23 := 0; val23 < int(val22); val23++ {
+			if val25, err := gobtools.DecodeInterface(ctx, buf); err != nil {
 				return err
-			} else if val23 == nil {
-				r.Traits[val21] = nil
+			} else if val25 == nil {
+				r.Traits[val23] = nil
 			} else {
-				r.Traits[val21] = val23.(SdkMemberTrait)
+				r.Traits[val23] = val25.(SdkMemberTrait)
 			}
 		}
 	}
@@ -251,11 +269,11 @@ func (r ExportedComponentsInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffe
 	var err error
 
 	if r.Components == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Components))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Components)); err != nil {
 			return err
 		}
 		for val1 := 0; val1 < len(r.Components); val1++ {
@@ -270,8 +288,8 @@ func (r ExportedComponentsInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffe
 func (r *ExportedComponentsInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	var val2 int32
-	err = gobtools.DecodeSimple[int32](buf, &val2)
+	var val2 int
+	err = gobtools.DecodeInt(buf, &val2)
 	if err != nil {
 		return err
 	}
@@ -323,36 +341,36 @@ func (r AdditionalSdkInfoProperties) Encode(ctx gobtools.EncContext, buf *bytes.
 	var err error
 
 	if r.Nested == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Nested))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Nested)); err != nil {
 			return err
 		}
-		for k, v := range r.Nested {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val1, val2 := range r.Nested {
+			if err = gobtools.EncodeString(buf, val1); err != nil {
 				return err
 			}
-			if err = v.Encode(ctx, buf); err != nil {
+			if err = val2.Encode(ctx, buf); err != nil {
 				return err
 			}
 		}
 	}
 
 	if r.Properties == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Properties))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Properties)); err != nil {
 			return err
 		}
-		for k, v := range r.Properties {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val3, val4 := range r.Properties {
+			if err = gobtools.EncodeString(buf, val3); err != nil {
 				return err
 			}
-			if err = gobtools.EncodeString(buf, v); err != nil {
+			if err = gobtools.EncodeString(buf, val4); err != nil {
 				return err
 			}
 		}
@@ -363,46 +381,46 @@ func (r AdditionalSdkInfoProperties) Encode(ctx gobtools.EncContext, buf *bytes.
 func (r *AdditionalSdkInfoProperties) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	var val1 int32
-	err = gobtools.DecodeSimple[int32](buf, &val1)
+	var val1 int
+	err = gobtools.DecodeInt(buf, &val1)
 	if err != nil {
 		return err
 	}
 	if val1 != -1 {
 		r.Nested = make(map[string]AdditionalSdkInfoProperties, val1)
 		for val2 := 0; val2 < int(val1); val2++ {
-			var k string
-			var v AdditionalSdkInfoProperties
-			err = gobtools.DecodeString(buf, &k)
+			var val3 string
+			var val4 AdditionalSdkInfoProperties
+			err = gobtools.DecodeString(buf, &val3)
 			if err != nil {
 				return err
 			}
-			if err = v.Decode(ctx, buf); err != nil {
+			if err = val4.Decode(ctx, buf); err != nil {
 				return err
 			}
-			r.Nested[k] = v
+			r.Nested[val3] = val4
 		}
 	}
 
-	var val5 int32
-	err = gobtools.DecodeSimple[int32](buf, &val5)
+	var val7 int
+	err = gobtools.DecodeInt(buf, &val7)
 	if err != nil {
 		return err
 	}
-	if val5 != -1 {
-		r.Properties = make(map[string]string, val5)
-		for val6 := 0; val6 < int(val5); val6++ {
-			var k string
-			var v string
-			err = gobtools.DecodeString(buf, &k)
+	if val7 != -1 {
+		r.Properties = make(map[string]string, val7)
+		for val8 := 0; val8 < int(val7); val8++ {
+			var val9 string
+			var val10 string
+			err = gobtools.DecodeString(buf, &val9)
 			if err != nil {
 				return err
 			}
-			err = gobtools.DecodeString(buf, &v)
+			err = gobtools.DecodeString(buf, &val10)
 			if err != nil {
 				return err
 			}
-			r.Properties[k] = v
+			r.Properties[val9] = val10
 		}
 	}
 
