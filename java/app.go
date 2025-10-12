@@ -240,8 +240,6 @@ type AndroidApp struct {
 
 	android.ApexBundleDepsInfo
 
-	javaApiUsedByOutputFile android.ModuleOutPath
-
 	privAppAllowlist android.OptionalPath
 
 	requiredModuleNames []string
@@ -2022,6 +2020,7 @@ type AndroidAppCertificateProperties struct {
 	Certificate *string
 }
 
+// @auto-generate: gob
 type AndroidAppCertificateInfo struct {
 	Certificate Certificate
 }

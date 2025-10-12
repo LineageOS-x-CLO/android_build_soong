@@ -26,7 +26,7 @@ func (r AconfigDeclarationsProviderData) Encode(ctx gobtools.EncContext, buf *by
 		return err
 	}
 
-	if err = gobtools.EncodeSimple(buf, r.Exportable); err != nil {
+	if err = gobtools.EncodeBool(buf, r.Exportable); err != nil {
 		return err
 	}
 
@@ -53,7 +53,7 @@ func (r *AconfigDeclarationsProviderData) Decode(ctx gobtools.EncContext, buf *b
 		return err
 	}
 
-	err = gobtools.DecodeSimple[bool](buf, &r.Exportable)
+	err = gobtools.DecodeBool(buf, &r.Exportable)
 	if err != nil {
 		return err
 	}
@@ -87,18 +87,18 @@ func (r AconfigReleaseDeclarationsProviderData) Encode(ctx gobtools.EncContext, 
 	var err error
 
 	if r.Data == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Data))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Data)); err != nil {
 			return err
 		}
-		for k, v := range r.Data {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val1, val2 := range r.Data {
+			if err = gobtools.EncodeString(buf, val1); err != nil {
 				return err
 			}
-			if err = v.Encode(ctx, buf); err != nil {
+			if err = val2.Encode(ctx, buf); err != nil {
 				return err
 			}
 		}
@@ -109,24 +109,24 @@ func (r AconfigReleaseDeclarationsProviderData) Encode(ctx gobtools.EncContext, 
 func (r *AconfigReleaseDeclarationsProviderData) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	var val1 int32
-	err = gobtools.DecodeSimple[int32](buf, &val1)
+	var val1 int
+	err = gobtools.DecodeInt(buf, &val1)
 	if err != nil {
 		return err
 	}
 	if val1 != -1 {
 		r.Data = make(map[string]AconfigDeclarationsProviderData, val1)
 		for val2 := 0; val2 < int(val1); val2++ {
-			var k string
-			var v AconfigDeclarationsProviderData
-			err = gobtools.DecodeString(buf, &k)
+			var val3 string
+			var val4 AconfigDeclarationsProviderData
+			err = gobtools.DecodeString(buf, &val3)
 			if err != nil {
 				return err
 			}
-			if err = v.Decode(ctx, buf); err != nil {
+			if err = val4.Decode(ctx, buf); err != nil {
 				return err
 			}
-			r.Data[k] = v
+			r.Data[val3] = val4
 		}
 	}
 
@@ -178,11 +178,11 @@ func (r CodegenInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 	var err error
 
 	if r.AconfigDeclarations == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.AconfigDeclarations))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.AconfigDeclarations)); err != nil {
 			return err
 		}
 		for val1 := 0; val1 < len(r.AconfigDeclarations); val1++ {
@@ -193,11 +193,11 @@ func (r CodegenInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 	}
 
 	if r.IntermediateCacheOutputPaths == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.IntermediateCacheOutputPaths))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.IntermediateCacheOutputPaths)); err != nil {
 			return err
 		}
 		for val2 := 0; val2 < len(r.IntermediateCacheOutputPaths); val2++ {
@@ -208,11 +208,11 @@ func (r CodegenInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 	}
 
 	if r.Srcjars == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.Srcjars))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.Srcjars)); err != nil {
 			return err
 		}
 		for val3 := 0; val3 < len(r.Srcjars); val3++ {
@@ -223,18 +223,18 @@ func (r CodegenInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 	}
 
 	if r.ModeInfos == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.ModeInfos))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.ModeInfos)); err != nil {
 			return err
 		}
-		for k, v := range r.ModeInfos {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val4, val5 := range r.ModeInfos {
+			if err = gobtools.EncodeString(buf, val4); err != nil {
 				return err
 			}
-			if err = v.Encode(ctx, buf); err != nil {
+			if err = val5.Encode(ctx, buf); err != nil {
 				return err
 			}
 		}
@@ -245,8 +245,8 @@ func (r CodegenInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 func (r *CodegenInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	var val2 int32
-	err = gobtools.DecodeSimple[int32](buf, &val2)
+	var val2 int
+	err = gobtools.DecodeInt(buf, &val2)
 	if err != nil {
 		return err
 	}
@@ -260,8 +260,8 @@ func (r *CodegenInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 		}
 	}
 
-	var val7 int32
-	err = gobtools.DecodeSimple[int32](buf, &val7)
+	var val7 int
+	err = gobtools.DecodeInt(buf, &val7)
 	if err != nil {
 		return err
 	}
@@ -278,8 +278,8 @@ func (r *CodegenInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 		}
 	}
 
-	var val13 int32
-	err = gobtools.DecodeSimple[int32](buf, &val13)
+	var val13 int
+	err = gobtools.DecodeInt(buf, &val13)
 	if err != nil {
 		return err
 	}
@@ -296,24 +296,24 @@ func (r *CodegenInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 		}
 	}
 
-	var val17 int32
-	err = gobtools.DecodeSimple[int32](buf, &val17)
+	var val17 int
+	err = gobtools.DecodeInt(buf, &val17)
 	if err != nil {
 		return err
 	}
 	if val17 != -1 {
 		r.ModeInfos = make(map[string]ModeInfo, val17)
 		for val18 := 0; val18 < int(val17); val18++ {
-			var k string
-			var v ModeInfo
-			err = gobtools.DecodeString(buf, &k)
+			var val19 string
+			var val20 ModeInfo
+			err = gobtools.DecodeString(buf, &val19)
 			if err != nil {
 				return err
 			}
-			if err = v.Decode(ctx, buf); err != nil {
+			if err = val20.Decode(ctx, buf); err != nil {
 				return err
 			}
-			r.ModeInfos[k] = v
+			r.ModeInfos[val19] = val20
 		}
 	}
 
@@ -330,27 +330,27 @@ func (r aconfigPropagatingDeclarationsInfo) Encode(ctx gobtools.EncContext, buf 
 	var err error
 
 	if r.AconfigFiles == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.AconfigFiles))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.AconfigFiles)); err != nil {
 			return err
 		}
-		for k, v := range r.AconfigFiles {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val1, val2 := range r.AconfigFiles {
+			if err = gobtools.EncodeString(buf, val1); err != nil {
 				return err
 			}
-			if v == nil {
-				if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+			if val2 == nil {
+				if err = gobtools.EncodeInt(buf, -1); err != nil {
 					return err
 				}
 			} else {
-				if err = gobtools.EncodeSimple(buf, int32(len(v))); err != nil {
+				if err = gobtools.EncodeInt(buf, len(val2)); err != nil {
 					return err
 				}
-				for val1 := 0; val1 < len(v); val1++ {
-					if err = gobtools.EncodeInterface(ctx, buf, v[val1]); err != nil {
+				for val3 := 0; val3 < len(val2); val3++ {
+					if err = gobtools.EncodeInterface(ctx, buf, val2[val3]); err != nil {
 						return err
 					}
 				}
@@ -359,18 +359,18 @@ func (r aconfigPropagatingDeclarationsInfo) Encode(ctx gobtools.EncContext, buf 
 	}
 
 	if r.ModeInfos == nil {
-		if err = gobtools.EncodeSimple(buf, int32(-1)); err != nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeSimple(buf, int32(len(r.ModeInfos))); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.ModeInfos)); err != nil {
 			return err
 		}
-		for k, v := range r.ModeInfos {
-			if err = gobtools.EncodeString(buf, k); err != nil {
+		for val4, val5 := range r.ModeInfos {
+			if err = gobtools.EncodeString(buf, val4); err != nil {
 				return err
 			}
-			if err = v.Encode(ctx, buf); err != nil {
+			if err = val5.Encode(ctx, buf); err != nil {
 				return err
 			}
 		}
@@ -381,59 +381,59 @@ func (r aconfigPropagatingDeclarationsInfo) Encode(ctx gobtools.EncContext, buf 
 func (r *aconfigPropagatingDeclarationsInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	var val1 int32
-	err = gobtools.DecodeSimple[int32](buf, &val1)
+	var val1 int
+	err = gobtools.DecodeInt(buf, &val1)
 	if err != nil {
 		return err
 	}
 	if val1 != -1 {
 		r.AconfigFiles = make(map[string]Paths, val1)
 		for val2 := 0; val2 < int(val1); val2++ {
-			var k string
-			var v Paths
-			err = gobtools.DecodeString(buf, &k)
+			var val3 string
+			var val4 Paths
+			err = gobtools.DecodeString(buf, &val3)
 			if err != nil {
 				return err
 			}
-			var val6 int32
-			err = gobtools.DecodeSimple[int32](buf, &val6)
+			var val8 int
+			err = gobtools.DecodeInt(buf, &val8)
 			if err != nil {
 				return err
 			}
-			if val6 != -1 {
-				v = make([]Path, val6)
-				for val7 := 0; val7 < int(val6); val7++ {
-					if val9, err := gobtools.DecodeInterface(ctx, buf); err != nil {
+			if val8 != -1 {
+				val4 = make([]Path, val8)
+				for val9 := 0; val9 < int(val8); val9++ {
+					if val11, err := gobtools.DecodeInterface(ctx, buf); err != nil {
 						return err
-					} else if val9 == nil {
-						v[val7] = nil
+					} else if val11 == nil {
+						val4[val9] = nil
 					} else {
-						v[val7] = val9.(Path)
+						val4[val9] = val11.(Path)
 					}
 				}
 			}
-			r.AconfigFiles[k] = v
+			r.AconfigFiles[val3] = val4
 		}
 	}
 
-	var val10 int32
-	err = gobtools.DecodeSimple[int32](buf, &val10)
+	var val12 int
+	err = gobtools.DecodeInt(buf, &val12)
 	if err != nil {
 		return err
 	}
-	if val10 != -1 {
-		r.ModeInfos = make(map[string]ModeInfo, val10)
-		for val11 := 0; val11 < int(val10); val11++ {
-			var k string
-			var v ModeInfo
-			err = gobtools.DecodeString(buf, &k)
+	if val12 != -1 {
+		r.ModeInfos = make(map[string]ModeInfo, val12)
+		for val13 := 0; val13 < int(val12); val13++ {
+			var val14 string
+			var val15 ModeInfo
+			err = gobtools.DecodeString(buf, &val14)
 			if err != nil {
 				return err
 			}
-			if err = v.Decode(ctx, buf); err != nil {
+			if err = val15.Decode(ctx, buf); err != nil {
 				return err
 			}
-			r.ModeInfos[k] = v
+			r.ModeInfos[val14] = val15
 		}
 	}
 
