@@ -104,7 +104,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 		)
 		switch {
 		case config.StartReproxy():
-			ctx.Printf("with reclient\n")
+			ctx.Verbosef("with reclient\n")
 			args = append(args, "--config", "reclient")
 			if config.RemoteParallel() != 0 {
 				args = append(args, "--remote_jobs", strconv.Itoa(config.RemoteParallel()))
@@ -112,7 +112,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 			// Explicitly turn off reapi in Siso.
 			args = append(args, "--project=", "--reapi_address=", "--reapi_instance=")
 		case config.UseRBEproxy():
-			ctx.Printf("with rbeproxy\n")
+			ctx.Verbosef("with rbeproxy\n")
 			if config.RemoteParallel() != 0 {
 				args = append(args, "--remote_jobs", strconv.Itoa(config.RemoteParallel()))
 			}
@@ -128,7 +128,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 			}
 			args = append(args, "--reapi_insecure")
 		default:
-			ctx.Printf("local only\n")
+			ctx.Verbosef("local only\n")
 		}
 	default:
 		// NINJA_NINJA or NINJA_NINJAGO.
@@ -149,6 +149,13 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 			args = append(args,
 				"-w", "missingoutfile=err",
 			)
+		}
+
+		if sandboxing, ok := config.Environment().Get("SOONG_ACTION_SANDBOXING"); ok && sandboxing == "nsjail" {
+			ninjaArgs = append(ninjaArgs, []string{
+				"-o", fmt.Sprintf("nsjail=%s", config.PrebuiltBuildTool("nsjail")),
+				"-o", fmt.Sprintf("nsjail_workdir=%s", filepath.Join(config.SoongOutDir(), "action_sandboxing_workdir")),
+			}...)
 		}
 	}
 	args = append(args, ninjaArgs...)
@@ -294,11 +301,6 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 			"SOONG_USE_N2",
 			"RUST_BACKTRACE",
 			"RUST_LOG",
-
-			// SOONG_USE_PARTIAL_COMPILE only determines which half of the rule we execute.
-			// When it transitions true => false, we build phony target "partialcompileclean",
-			// which removes all files that could have been created while it was true.
-			"SOONG_USE_PARTIAL_COMPILE",
 
 			// Directory for ExecutionMetrics
 			"SOONG_METRICS_AGGREGATION_DIR",

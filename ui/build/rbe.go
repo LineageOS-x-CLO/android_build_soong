@@ -228,10 +228,10 @@ func createSisoCredsHelper(ctx Context, config Config) (string, error) {
 	if helperPath == "" {
 		return "", fmt.Errorf("missing RBE_credentials_helper")
 	}
-	ctx.Printf("Using '%s %s' for RBE credentials helper\n", helperPath, helperArgs)
+	ctx.Verbosef("Using '%s %s' for RBE credentials helper\n", helperPath, helperArgs)
 	cacheDir := config.rbeCacheDir()
 	helperArgs = strings.TrimSpace(helperArgs)
-	args := []string{helperPath, helperArgs, "--cache_dir", cacheDir}
+	args := []string{helperPath, helperArgs, "--cache_dir", cacheDir, "-bazel_compat"}
 	cmdFile := filepath.Join(cacheDir, "soong-convert-command")
 	err := os.WriteFile(cmdFile, []byte(strings.Join(args, " ")), 0666)
 	return "build/soong/scripts/siso-creds-helper.py", err
@@ -273,7 +273,8 @@ func startRBEproxy(ctx Context, config Config) {
 	}
 
 	cmd := Command(ctx, config, e, "startRbeproxy bootstrap", executable, args...)
-	ctx.Printf("Starting RBE proxy: %s\n", cmd)
+	ctx.Printf("Starting RBE proxy\n")
+	ctx.Verbosef("RBE proxy command: %s\n", cmd)
 	cmd.Stdin = strings.NewReader("")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
