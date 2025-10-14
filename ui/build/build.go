@@ -35,6 +35,7 @@ func SetupOutDir(ctx Context, config Config) {
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "Android.mk"))
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "CleanSpec.mk"))
 	ensureDirectoriesExist(ctx, config.SoongOutDir())
+	ensureDirectoriesExist(ctx, filepath.Join(config.SoongOutDir(), "action_sandboxing_workdir"))
 
 	// The ninja_build file is used by our buildbots to understand that the output
 	// can be parsed as ninja output.
@@ -369,6 +370,12 @@ func Build(ctx Context, config Config) {
 	}
 
 	// Everything below here depends on product config.
+
+	// Write SOONG_USE_PARTIAL_COMPILE so it can be sourced by rules that use it.
+	shFile := config.DeviceUsePartialCompile()
+	ensureDirectoriesExist(ctx, filepath.Dir(shFile))
+	value, _ := config.environ.Get("SOONG_USE_PARTIAL_COMPILE")
+	writeValueIfChanged(ctx, shFile, fmt.Sprintf("\nexport SOONG_USE_PARTIAL_COMPILE=%s\n", value))
 
 	if inList("installclean", config.Arguments()) ||
 		inList("install-clean", config.Arguments()) {
