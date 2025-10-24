@@ -11,6 +11,7 @@ bootstrap_go_package {
         "soong",
         "soong-android",
         "soong-java",
+        "soong-phony",
     ],
     srcs: [
         "test_suites.go",
@@ -70,6 +71,12 @@ test_suite_package {
 
 test_suite_package {
     name: "host-unit-tests",
+    include_common_host_shared_libs_symlinks_in_main_zip: true,
+    include_host_shared_libs_in_main_zip: true,
+}
+
+test_suite_package {
+    name: "sdv-host-unit-tests",
     include_common_host_shared_libs_symlinks_in_main_zip: true,
     include_host_shared_libs_in_main_zip: true,
 }

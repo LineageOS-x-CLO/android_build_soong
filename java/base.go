@@ -375,7 +375,7 @@ type OverridableProperties struct {
 
 	// if not blank, set the minimum version of the sdk that the compiled artifacts will run against.
 	// Defaults to sdk_version if not set. See sdk_version for possible values.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
 }
 
 // Functionality common to Module and Import
@@ -591,8 +591,6 @@ type Module struct {
 	// list of the xref extraction files
 	kytheFiles       android.Paths
 	kytheKotlinFiles android.Paths
-
-	hideApexVariantFromMake bool
 
 	sdkVersion    android.SdkSpec
 	minSdkVersion android.ApiLevel
@@ -824,7 +822,7 @@ func (j *Module) setApiMapper(value bool) {
 	j.properties.ApiMapper = value
 }
 
-func (j *Module) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (j *Module) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(j.deviceProperties.Sdk_version))
 }
 
@@ -832,9 +830,10 @@ func (j *Module) SystemModules() string {
 	return proptools.String(j.deviceProperties.System_modules)
 }
 
-func (j *Module) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
-	if j.overridableProperties.Min_sdk_version != nil {
-		return android.ApiLevelFrom(ctx, *j.overridableProperties.Min_sdk_version)
+func (j *Module) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
+	minSdkVersion := j.overridableProperties.Min_sdk_version.Get(j.ConfigurableEvaluator(ctx))
+	if minSdkVersion.IsPresent() {
+		return android.ApiLevelFrom(ctx, minSdkVersion.Get())
 	}
 	return j.SdkVersion(ctx).ApiLevel
 }
@@ -1354,6 +1353,8 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			j.addKSnapshot(ctx, hj)
 		}
 
+		overridableMinSdkVersion := j.overridableProperties.Min_sdk_version.Get(ctx)
+
 		j.outputFile = j.headerJarFile
 		return &JavaInfo{
 			HeaderJars:                          android.PathsIfNonNil(j.headerJarFile),
@@ -1369,7 +1370,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 			StubsLinkType:                       j.stubsLinkType,
 			AconfigIntermediateCacheOutputPaths: deps.aconfigProtoFiles,
 			SdkVersion:                          j.SdkVersion(ctx),
-			OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
+			HasOverrideMinSdkVersion:            overridableMinSdkVersion.IsPresent(),
 			Installable:                         BoolDefault(j.properties.Installable, true),
 			KSnapshotFiles:                      j.kSnapshotFiles,
 		}
@@ -1762,7 +1763,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 		args := map[string]string{
 			"jarArgs": "-P META-INF/services/ " + strings.Join(proptools.NinjaAndShellEscapeList(zipargs), " "),
 		}
-		if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_ZIP") {
+		if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_ZIP") {
 			rule = zipRE
 			args["implicits"] = strings.Join(services.Strings(), ",")
 		}
@@ -2126,6 +2127,9 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 	if deps.headerJarOverride.Valid() {
 		j.headerJarFile = deps.headerJarOverride.Path()
 	}
+
+	overridableMinSdkVersion := j.overridableProperties.Min_sdk_version.Get(ctx)
+
 	return &JavaInfo{
 		HeaderJars:               android.PathsIfNonNil(j.headerJarFile),
 		LocalHeaderJarsPreJarjar: android.PathsIfNonNil(combinedHeaderJarFile),
@@ -2155,7 +2159,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 		AconfigIntermediateCacheOutputPaths: j.aconfigCacheFiles,
 		SdkVersion:                          j.SdkVersion(ctx),
 		OutputFile:                          j.outputFile,
-		OverrideMinSdkVersion:               j.overridableProperties.Min_sdk_version,
+		HasOverrideMinSdkVersion:            overridableMinSdkVersion.IsPresent(),
 		Installable:                         BoolDefault(j.properties.Installable, true),
 	}
 }
@@ -2263,7 +2267,7 @@ func (j *Module) compileJavaClasses(ctx android.ModuleContext, jarName string, i
 		TransformJavaToClasses(ctx, classes, idx, srcFiles, srcJars, annoSrcJar, flags, extraJarDeps, genAnnoSrcJars)
 	}
 
-	if ctx.Config().EmitXrefRules() && ctx.Module() == ctx.PrimaryModule() {
+	if ctx.Config().EmitXrefRules() && ctx.IsPrimaryModule() {
 		extractionFile := android.PathForModuleOut(ctx, kzipName)
 		emitXrefRule(ctx, extractionFile, idx, srcFiles, srcJars, flags, extraJarDeps)
 		j.kytheFiles = append(j.kytheFiles, extractionFile)

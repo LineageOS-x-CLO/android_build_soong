@@ -328,7 +328,7 @@ func (c Config) ReleaseAconfigStorageVersion() string {
 
 // TODO: b/414412266 Remove this flag after feature released.
 func (c Config) ReleaseJarjarFlagsInFramework() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_JARJAR_FLAGS_IN_FRAMEWORK")
+	return c.GetBuildFlagBool("RELEASE_JARJAR_FLAGS_IN_FRAMEWORK")
 }
 
 func (c Config) ReleaseMainlineBetaNamespaceConfig() string {
@@ -337,6 +337,10 @@ func (c Config) ReleaseMainlineBetaNamespaceConfig() string {
 	} else {
 		return ""
 	}
+}
+
+func (c Config) ReleaseRemoveBetaFlagsFromAconfigFlagsPb() bool {
+	return c.GetBuildFlagBool("RELEASE_REMOVE_BETA_FLAGS_FROM_ACONFIG_FLAGS_PB")
 }
 
 // A DeviceConfig object represents the configuration for a particular device
@@ -447,7 +451,9 @@ type config struct {
 }
 
 type partialCompileFlags struct {
-	// Whether to use d8 instead of r8
+	// Whether to use d8 instead of r8.
+	// Known issue (b/428178183): Super Partition overflow is probable when
+	// many outputs are built with this flag.
 	Use_d8 bool
 
 	// Whether to disable stub validation for partial compile builds.
@@ -473,12 +479,12 @@ type partialCompileFlags struct {
 	// Add others as needed.
 }
 
-// These are the flags when `SOONG_PARTIAL_COMPILE=default`.
-var defaultPartialCompileFlags = partialCompileFlags{}
+// These are the flags when `SOONG_PARTIAL_COMPILE=false`.
+var falsePartialCompileFlags = partialCompileFlags{}
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=true`.
-var enabledPartialCompileFlags = partialCompileFlags{
-	Use_d8:                         true,
+var truePartialCompileFlags = partialCompileFlags{
+	Use_d8:                         false,
 	Disable_stub_validation:        true,
 	Enable_inc_kotlin:              false,
 	Enable_inc_javac:               true,
@@ -488,15 +494,17 @@ var enabledPartialCompileFlags = partialCompileFlags{
 }
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=all`.
-var allPartialCompileFlags = partialCompileFlags{
-	Use_d8:                         true,
-	Disable_stub_validation:        true,
-	Enable_inc_javac:               true,
-	Enable_inc_kotlin:              true,
-	Enable_inc_d8:                  true,
-	Enable_inc_kotlin_java_dep:     true,
-	Enable_inc_d8_outside_platform: true,
-}
+// Include everything from `SOONG_PARTIAL_COMPILE=true`, and flags
+// that have known issues.
+var allPartialCompileFlags = func() (flags partialCompileFlags) {
+	flags = truePartialCompileFlags
+	// b/428178183
+	flags.Use_d8 = true
+	return
+}()
+
+// These are the flags when `SOONG_PARTIAL_COMPILE=default`.
+var defaultPartialCompileFlags = falsePartialCompileFlags
 
 type deviceConfig struct {
 	config *config
@@ -573,11 +581,11 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 		switch tok {
 		// Big toggle switches.
 		case "false":
-			ret = partialCompileFlags{}
+			ret = falsePartialCompileFlags
 		case "default":
 			ret = defaultPartialCompileFlags
 		case "true":
-			ret = enabledPartialCompileFlags
+			ret = truePartialCompileFlags
 		case "all":
 			ret = allPartialCompileFlags
 
@@ -1097,6 +1105,10 @@ func (c *config) TargetsJava21() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_TARGET_JAVA_21")
 }
 
+func (c *config) BuildWithJdk25() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_BUILD_WITH_JDK_25")
+}
+
 // EnvDeps returns the environment variables this build depends on. The first
 // call to this function blocks future reads from the environment.
 func (c *config) EnvDeps() map[string]string {
@@ -1131,6 +1143,12 @@ func (c *config) DisplayBuildNumber() bool {
 // don't rebuild on every incremental build when the build number changes.
 func (c *config) BuildFingerprintFile(ctx PathContext) Path {
 	return PathForArbitraryOutput(ctx, "target", "product", *c.deviceNameToInstall, String(c.productVariables.BuildFingerprintFile))
+}
+
+// BuildSystemFingerprintFile returns the path to a text file containing
+// metadata representing the current build's fingerprint for the system image.
+func (c *config) BuildSystemFingerprintFile(ctx PathContext) Path {
+	return PathForArbitraryOutput(ctx, "target", "product", *c.deviceNameToInstall, String(c.productVariables.BuildSystemFingerprintFile))
 }
 
 // BuildNumberFile returns the path to a text file containing metadata
@@ -1566,20 +1584,24 @@ func (c *config) UseRBE() bool {
 	return Bool(c.productVariables.UseRBE)
 }
 
+func (c *config) UseREWrapper() bool {
+	return Bool(c.productVariables.UseREWrapper)
+}
+
 func (c *config) UseRBEJAVAC() bool {
-	return Bool(c.productVariables.UseRBEJAVAC)
+	return Bool(c.productVariables.UseRBEJAVAC) && c.UseREWrapper()
 }
 
 func (c *config) UseRBER8() bool {
-	return Bool(c.productVariables.UseRBER8)
+	return Bool(c.productVariables.UseRBER8) && c.UseREWrapper()
 }
 
 func (c *config) UseRBED8() bool {
-	return Bool(c.productVariables.UseRBED8)
+	return Bool(c.productVariables.UseRBED8) && c.UseREWrapper()
 }
 
 func (c *config) UseRemoteBuild() bool {
-	return c.UseRBE()
+	return c.UseRBE() && c.UseREWrapper()
 }
 
 func (c *config) RunErrorProne() bool {

@@ -494,9 +494,13 @@ type dexpreoptBootJars struct {
 	dexpreoptConfigForMake android.WritablePath
 
 	// Build path to the boot framework profile.
-	// This is used as the `OutputFile` in `AndroidMkEntries`.
-	// A non-nil value ensures that this singleton module does not get skipped in AndroidMkEntries processing.
+	// This is used as the `OutputFile` in `PrepareAndroidMKProviderInfo`.
+	// A non-nil value ensures that this singleton module does not get skipped in PrepareAndroidMKProviderInfo processing.
 	bootFrameworkProfile android.WritablePath
+
+	// Install path of the unstrippped primary boot image in $ANDROID_PRODUCT_OUT/symbols.
+	// This will be used for building symbols.zip file.
+	defaultBootImageSymbolInstalls android.Paths
 }
 
 func (dbj *dexpreoptBootJars) DepsMutator(ctx android.BottomUpMutatorContext) {
@@ -629,6 +633,7 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 	d.otherImages = make([]*bootImageConfig, 0, len(imageConfigs)-1)
 	var profileInstalls android.RuleBuilderInstalls
 	var artBootImageHostInstalls android.RuleBuilderInstalls
+	var symbolicOutputInfos android.SymbolicOutputInfos
 	for _, name := range getImageNames() {
 		config := imageConfigs[name]
 		if config != d.defaultBootImage {
@@ -661,7 +666,7 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 		symbolsInstallHostDir := android.PathForHostInstall(ctx, "", "symbols")
 		for _, variant := range config.variants {
 			for _, install := range variant.unstrippedInstalls {
-				var dst android.WritablePath
+				var dst android.InstallPath
 				if variant.target.Os.Class == android.Host {
 					dst = symbolsInstallHostDir.Join(ctx, strings.TrimPrefix(install.To, "/"))
 				} else {
@@ -674,9 +679,23 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 				})
 				// Add the install to dexpreopt_bootjar.$name_$arch phony
 				ctx.Phony(fmt.Sprintf("dexpreopt_bootjar.%s_%s", config.name, variant.target.Arch.ArchType), dst)
+				// Add the device variant of the primary boot image to symbols.zip
+				if config.name == "boot" && variant.target.Os.Class == android.Device {
+					// This struct will be used for Make symbols.zip
+					d.defaultBootImageSymbolInstalls = append(
+						d.defaultBootImageSymbolInstalls,
+						dst,
+					)
+					// This struct will be used for Soong symbols.zip
+					symbolicOutputInfos = append(symbolicOutputInfos, &android.SymbolicOutputInfo{
+						UnstrippedOutputFile: install.From,
+						SymbolicOutputPath:   dst,
+					})
+				}
 			}
 		}
 	}
+	android.SetProvider(ctx, android.SymbolInfosProvider, symbolicOutputInfos)
 	if len(profileInstalls) > 0 {
 		android.SetProvider(ctx, profileInstallInfoProvider, profileInstallInfo{
 			profileInstalls:            profileInstalls,
@@ -1552,6 +1571,7 @@ func dumpOatRules(ctx android.ModuleContext, image *bootImageConfig) {
 			FlagWithArg("--image=", strings.Join(imageLocationsOnHost, ":")).Implicits(image.imagesDeps.Paths()).
 			FlagWithOutput("--output=", output).
 			FlagWithArg("--instruction-set=", arch.String())
+		cmd.Text("$(cat").Input(globalSoong.ProfileCodeFlag).Text(")")
 		if image.target.Os == android.Android {
 			cmd.Text("$(cat").Input(globalSoong.UffdGcFlag).Text(")")
 		}
@@ -1629,11 +1649,20 @@ func (d *dexpreoptBootJars) MakeVars(ctx android.MakeVarsContext) {
 
 // Add one of the outputs in `OutputFile`
 // This ensures that this singleton module does not get skipped when writing out/soong/Android-*.mk
-func (d *dexpreoptBootJars) AndroidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{{
+func (d *dexpreoptBootJars) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(d.bootFrameworkProfile),
-	}}
+	}
+	info.PrimaryInfo.FooterStrings = append(info.PrimaryInfo.FooterStrings,
+		fmt.Sprintf(
+			"ALL_MODULES.%s.SYMBOLIC_OUTPUT_PATH := %s",
+			d.Name(),
+			strings.Join(d.defaultBootImageSymbolInstalls.Strings(), " "),
+		))
+
+	return info
 }
 
 // artBootImages is a thin wrapper around `dex_bootjars`.
@@ -1705,9 +1734,11 @@ func (d *artBootImages) installFile(ctx android.ModuleContext, ruleBuilderInstal
 }
 
 // Set `OutputFile` expclitly so that this module does not get elided when generating out/soong/Android-*.mk
-func (d *artBootImages) AndroidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{{
+func (d *artBootImages) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: d.outputFile,
-	}}
+	}
+	return info
 }

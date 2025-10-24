@@ -37,7 +37,7 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 
 	var deps android.Paths
 	var depsNoImg android.Paths // subset of deps without any img files. used for sbom creation.
-
+	installedFilesMap := make(map[android.Path]bool)
 	for _, partition := range android.SortedKeys(filesystemInfos) {
 		info := filesystemInfos[partition]
 		imgInstallPath := android.PathForModuleInPartitionInstall(ctx, "", partition+".img")
@@ -92,10 +92,15 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 				}
 				ctx.Phony(info.ModuleName, fip.FullInstallPath)
 				ctx.Phony(partition, fip.FullInstallPath)
-				deps = append(deps, fip.FullInstallPath)
-				depsNoImg = append(depsNoImg, fip.FullInstallPath)
 				ctx.Phony("sync_"+partition, fip.FullInstallPath)
 				ctx.Phony("sync", fip.FullInstallPath)
+
+				if info.Prebuilt {
+					continue
+				}
+
+				deps = append(deps, fip.FullInstallPath)
+				depsNoImg = append(depsNoImg, fip.FullInstallPath)
 			}
 		}
 
@@ -103,7 +108,7 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 
 		// Copy installed-files(.txt|.json) to staging dir for makepush
 		for _, installedFiles := range info.InstalledFilesDepSet.ToList() {
-			if installedFiles.Json != nil {
+			if _, exists := installedFilesMap[installedFiles.Json]; !exists && installedFiles.Json != nil {
 				installPath := android.PathForModuleInPartitionInstall(ctx, "", installedFiles.Json.Base())
 				ctx.Build(pctx, android.BuildParams{
 					Rule:   android.Cp,
@@ -111,8 +116,9 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 					Output: installPath,
 				})
 				deps = append(deps, installPath)
+				installedFilesMap[installedFiles.Json] = true
 			}
-			if installedFiles.Txt != nil {
+			if _, exists := installedFilesMap[installedFiles.Txt]; !exists && installedFiles.Txt != nil {
 				installPath := android.PathForModuleInPartitionInstall(ctx, "", installedFiles.Txt.Base())
 				ctx.Build(pctx, android.BuildParams{
 					Rule:   android.Cp,
@@ -120,6 +126,7 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 					Output: installPath,
 				})
 				deps = append(deps, installPath)
+				installedFilesMap[installedFiles.Txt] = true
 			}
 		}
 	}
@@ -127,9 +134,13 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 	a.createComplianceMetadataTimestamp(ctx, depsNoImg)
 
 	// List all individual files to be copied to PRODUCT_OUT here
-	if a.deviceProps.Bootloader != nil {
-		bootloader := ctx.GetDirectDepProxyWithTag(*a.deviceProps.Bootloader, bootloaderDepTag)
-		files := android.OutputFilesForModule(ctx, bootloader, "")
+	bootloaderDepTags := []blueprint.DependencyTag{bootloaderDepTag, tzswDepTag}
+	ctx.VisitDirectDepsProxy(func(child android.ModuleProxy) {
+		tag := ctx.OtherModuleDependencyTag(child)
+		if !android.InList(tag, bootloaderDepTags) {
+			return
+		}
+		files := android.OutputFilesForModule(ctx, child, "")
 		for _, file := range files {
 			installPath := android.PathForModuleInPartitionInstall(ctx, "", file.Base())
 			ctx.Build(pctx, android.BuildParams{
@@ -139,7 +150,7 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 			})
 			deps = append(deps, installPath)
 		}
-	}
+	})
 
 	copyBootImg := func(prop *string, type_ string) {
 		if proptools.String(prop) != "" {

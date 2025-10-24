@@ -54,6 +54,7 @@ var (
 
 		"--gcc-toolchain=${LinuxGccRoot}",
 
+                "-Wl,--build-id=md5",
 	}
 
 	linuxGlibcLdflags = []string{

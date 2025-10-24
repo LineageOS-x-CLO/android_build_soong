@@ -404,7 +404,11 @@ type overridableProperties struct {
 
 	// The minimum SDK version that this APEX must support at minimum. This is usually set to
 	// the SDK version that the APEX was first introduced.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
+
+	// Mainline beta namespace. Each mainline module would have a dedicated server side
+	// namespace to support flag based A/B feature testing on mainline beta population.
+	Beta_namespace *string
 }
 
 // installPair stores a path to a built object and its install location.  It is used for holding
@@ -2532,7 +2536,7 @@ func (a *apexBundle) minSdkVersionValue(ctx android.MinSdkVersionFromValueContex
 	// Only override the minSdkVersion value on Apexes which already specify
 	// a min_sdk_version (it's optional for non-updatable apexes), and that its
 	// min_sdk_version value is lower than the one to override with.
-	minApiLevel := android.MinSdkVersionFromValue(ctx, proptools.String(a.overridableProperties.Min_sdk_version))
+	minApiLevel := android.MinSdkVersionFromValue(ctx, a.overridableProperties.Min_sdk_version.GetOrDefault(a.ConfigurableEvaluator(ctx), ""))
 	if minApiLevel.IsNone() {
 		return ""
 	}
@@ -2547,7 +2551,7 @@ func (a *apexBundle) minSdkVersionValue(ctx android.MinSdkVersionFromValueContex
 }
 
 // Returns apex's min_sdk_version SdkSpec, honoring overrides
-func (a *apexBundle) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
+func (a *apexBundle) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
 	return a.minSdkVersion(ctx)
 }
 

@@ -47,14 +47,6 @@ type Module interface {
 	// For more information, see Module.GenerateBuildActions within Blueprint's module_ctx.go
 	GenerateAndroidBuildActions(ModuleContext)
 
-	// CleanupAfterBuildActions is called after ModuleBase.GenerateBuildActions is finished.
-	// If all interactions with this module are handled via providers instead of direct access
-	// to the module then it can free memory attached to the module.
-	// This is a temporary measure to reduce memory usage, eventually blueprint's reference
-	// to the Module should be dropped after GenerateAndroidBuildActions once all accesses
-	// can be done through providers.
-	CleanupAfterBuildActions()
-
 	// Add dependencies to the components of a module, i.e. modules that are created
 	// by the module and which are considered to be part of the creating module.
 	//
@@ -1421,7 +1413,9 @@ func (m *ModuleBase) RequiresStableAPIs(ctx BaseModuleContext) bool {
 
 func (m *ModuleBase) PartitionTag(config DeviceConfig) string {
 	partition := "system"
-	if m.SocSpecific() {
+	if m.module.InstallInData() {
+		partition = "userdata"
+	} else if m.SocSpecific() {
 		// A SoC-specific module could be on the vendor partition at
 		// "vendor" or the system partition at "system/vendor".
 		if config.VendorPath() == "vendor" {
@@ -1772,6 +1766,8 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 			}
 			if info.InstallTarget != nil {
 				installDeps = append(installDeps, info.InstallTarget)
+			} else if info.OutputsTarget != nil {
+				installDeps = append(installDeps, info.OutputsTarget)
 			}
 		}
 	}
@@ -2045,16 +2041,14 @@ type CommonModuleInfo struct {
 	IsStubsModule       bool
 	Host                bool
 	IsApexModule        bool
-	// The primary licenses property, may be nil, records license metadata for the module.
-	PrimaryLicensesProperty *applicableLicensesProperty
-	Owner                   string
-	Vendor                  bool
-	Proprietary             bool
-	SocSpecific             bool
-	ProductSpecific         bool
-	SystemExtSpecific       bool
-	DeviceSpecific          bool
-	UseGenericConfig        bool
+	Owner               string
+	Vendor              bool
+	Proprietary         bool
+	SocSpecific         bool
+	ProductSpecific     bool
+	SystemExtSpecific   bool
+	DeviceSpecific      bool
+	UseGenericConfig    bool
 	// When set to true, this module is not installed to the full install path (ex: under
 	// out/target/product/<name>/<partition>). It can be installed only to the packaging
 	// modules like android_filesystem.
@@ -2413,7 +2407,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}
 
 	if len(ctx.phonies) > 0 {
-		SetProvider(ctx, ModulePhonyProvider, ModulePhonyInfo{
+		SetProvider(ctx, ModulePhonyProvider, PhonyInfo{
 			Phonies: ctx.phonies,
 		})
 	}
@@ -2434,7 +2428,6 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		HideFromMake:                     m.commonProperties.HideFromMake,
 		SkipInstall:                      m.commonProperties.SkipInstall,
 		Host:                             m.Host(),
-		PrimaryLicensesProperty:          m.primaryLicensesProperty,
 		Owner:                            m.module.Owner(),
 		SocSpecific:                      Bool(m.commonProperties.Soc_specific),
 		Vendor:                           Bool(m.commonProperties.Vendor),
@@ -2458,12 +2451,14 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		IsNonPrimaryImageVariation:                   m.commonProperties.IsNonPrimaryImageVariation,
 	}
 	if mm, ok := m.module.(interface {
-		MinSdkVersion(ctx EarlyModuleContext) ApiLevel
+		MinSdkVersion(ctx MinSdkVersionFromValueContext) ApiLevel
 	}); ok {
 		ver := mm.MinSdkVersion(ctx)
 		commonData.MinSdkVersion.ApiLevel = &ver
-	} else if mm, ok := m.module.(interface{ MinSdkVersion() string }); ok {
-		ver := mm.MinSdkVersion()
+	} else if mm, ok := m.module.(interface {
+		MinSdkVersion(ctx ConfigurableEvaluatorContext) string
+	}); ok {
+		ver := mm.MinSdkVersion(ctx)
 		// Compile against the current platform
 		if ver == "" {
 			commonData.MinSdkVersion.IsPlatform = true
@@ -2474,7 +2469,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}
 
 	if mm, ok := m.module.(interface {
-		SdkVersion(ctx EarlyModuleContext) ApiLevel
+		SdkVersion(ctx ConfigContext) ApiLevel
 	}); ok {
 		ver := mm.SdkVersion(ctx)
 		if !ver.IsNone() {
@@ -2511,8 +2506,14 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			HostToolPath: h.HostToolPath()})
 	}
 
-	if p, ok := m.module.(AndroidMkProviderInfoProducer); ok && !commonData.SkipAndroidMkProcessing {
-		SetProvider(ctx, AndroidMkInfoProvider, p.PrepareAndroidMKProviderInfo(ctx.Config()))
+	var hasAndroidMkProvider bool
+	if ctx.Config().KatiEnabled() {
+		if p, ok := m.module.(AndroidMkProviderInfoProducer); ok && !commonData.SkipAndroidMkProcessing {
+			hasAndroidMkProvider = true
+			if info := p.PrepareAndroidMKProviderInfo(ctx.Config()); info != nil {
+				SetProvider(ctx, AndroidMkInfoProvider, info)
+			}
+		}
 	}
 
 	if s, ok := m.module.(SourceFileGenerator); ok {
@@ -2542,10 +2543,12 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		})
 	}
 
-	m.module.CleanupAfterBuildActions()
+	if !ctx.Config().KatiEnabled() || hasAndroidMkProvider {
+		// If building in Soong-only mode or the Android.mk generation has been converted to a provider
+		// then there are no references directly to the Module and it can be freed.
+		ctx.bp.FreeModuleAfterGenerateBuildActions()
+	}
 }
-
-func (m *ModuleBase) CleanupAfterBuildActions() {}
 
 func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []FilePair {
 	// We skip test suites when using the ndk or aml abis, as the extra archs (x86_64 + arm64)
@@ -2872,7 +2875,6 @@ type ConfigContext interface {
 }
 
 type ConfigurableEvaluatorContext interface {
-	OtherModuleProviderContext
 	Config() Config
 	OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt string, args ...interface{})
 	HasMutatorFinished(mutatorName string) bool
@@ -3134,6 +3136,14 @@ type sourceOrOutputDependencyTag struct {
 
 func sourceOrOutputDepTag(moduleName, tag string) blueprint.DependencyTag {
 	return sourceOrOutputDependencyTag{moduleName: moduleName, tag: tag}
+}
+
+// IsSourceDepTag returns true if the supplied blueprint.DependencyTag is one that was
+// used to add dependencies by either ExtractSourceDeps, ExtractSourcesDeps or automatically for
+// properties tagged with `android:"path"`.
+func IsSourceDepTag(depTag blueprint.DependencyTag) bool {
+	_, ok := depTag.(sourceOrOutputDependencyTag)
+	return ok
 }
 
 // IsSourceDepTagWithOutputTag returns true if the supplied blueprint.DependencyTag is one that was
@@ -3538,9 +3548,3 @@ func CheckBlueprintSyntax(ctx BaseModuleContext, filename string, contents strin
 	bpctx := ctx.blueprintBaseModuleContext()
 	return blueprint.CheckBlueprintSyntax(bpctx.ModuleFactories(), filename, contents)
 }
-
-type HideApexVariantFromMakeInfo struct {
-	HideApexVariantFromMake bool
-}
-
-var HideApexVariantFromMakeProvider = blueprint.NewProvider[HideApexVariantFromMakeInfo]()

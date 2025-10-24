@@ -16,8 +16,12 @@ package build
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -34,12 +38,13 @@ type Cmd struct {
 
 	ctx    Context
 	config Config
+	event  *TraceEvent
 	name   string
 
 	started time.Time
 }
 
-func Command(ctx Context, config Config, name string, executable string, args ...string) *Cmd {
+func Command(ctx Context, config Config, event *TraceEvent, name string, executable string, args ...string) *Cmd {
 	ret := &Cmd{
 		Cmd:         exec.CommandContext(ctx.Context, executable, args...),
 		Environment: config.Environment().Copy(),
@@ -47,6 +52,7 @@ func Command(ctx Context, config Config, name string, executable string, args ..
 
 		ctx:    ctx,
 		config: config,
+		event:  event,
 		name:   name,
 	}
 
@@ -67,8 +73,8 @@ func (c *Cmd) prepare() {
 
 func (c *Cmd) report() {
 	if state := c.Cmd.ProcessState; state != nil {
-		if c.ctx.Metrics != nil {
-			c.ctx.Metrics.EventTracer.AddProcResInfo(c.name, state)
+		if c.event != nil {
+			c.event.AddProcResInfo(c.name, state)
 		}
 		rusage := state.SysUsage().(*syscall.Rusage)
 		c.ctx.Verbosef("%q finished with exit code %d (%s real, %s user, %s system, %dMB maxrss)",
@@ -78,6 +84,20 @@ func (c *Cmd) report() {
 			c.Cmd.ProcessState.SystemTime().Round(time.Millisecond),
 			rusage.Maxrss/1024)
 	}
+}
+
+// fatal reports a fatal error to the event if present, as well as to the context.
+func (c *Cmd) fatal(str string) {
+	if c.event != nil {
+		c.event.SetFatalOrPanicMessage(str)
+	}
+	c.ctx.Fatal(str)
+}
+
+// fatalf reports a fatal error to the event if present, as well as to the context.
+func (c *Cmd) fatalf(format string, args ...interface{}) {
+	str := fmt.Sprintf(format, args...)
+	c.fatal(str)
 }
 
 func (c *Cmd) Start() error {
@@ -112,10 +132,10 @@ func (c *Cmd) Wait() error {
 	return err
 }
 
-// StartOrFatal is equivalent to Start, but handles the error with a call to ctx.Fatal
+// StartOrFatal is equivalent to Start, but handles the error with a call to fatal
 func (c *Cmd) StartOrFatal() {
 	if err := c.Start(); err != nil {
-		c.ctx.Fatalf("Failed to run %s: %v", c.name, err)
+		c.fatalf("Failed to run %s: %v", c.name, err)
 	}
 }
 
@@ -124,23 +144,23 @@ func (c *Cmd) reportError(err error) {
 		return
 	}
 	if e, ok := err.(*exec.ExitError); ok {
-		c.ctx.Fatalf("%s failed with: %v", c.name, e.ProcessState.String())
+		c.fatalf("%s failed with: %v", c.name, e.ProcessState.String())
 	} else {
-		c.ctx.Fatalf("Failed to run %s: %v", c.name, err)
+		c.fatalf("Failed to run %s: %v", c.name, err)
 	}
 }
 
-// RunOrFatal is equivalent to Run, but handles the error with a call to ctx.Fatal
+// RunOrFatal is equivalent to Run, but handles the error with a call to fatal
 func (c *Cmd) RunOrFatal() {
 	c.reportError(c.Run())
 }
 
-// WaitOrFatal is equivalent to Wait, but handles the error with a call to ctx.Fatal
+// WaitOrFatal is equivalent to Wait, but handles the error with a call to fatal
 func (c *Cmd) WaitOrFatal() {
 	c.reportError(c.Wait())
 }
 
-// OutputOrFatal is equivalent to Output, but handles the error with a call to ctx.Fatal
+// OutputOrFatal is equivalent to Output, but handles the error with a call to fatal
 func (c *Cmd) OutputOrFatal() []byte {
 	ret, err := c.Output()
 	c.reportError(err)
@@ -148,7 +168,7 @@ func (c *Cmd) OutputOrFatal() []byte {
 }
 
 // CombinedOutputOrFatal is equivalent to CombinedOutput, but handles the error with
-// a call to ctx.Fatal
+// a call to fatal
 func (c *Cmd) CombinedOutputOrFatal() []byte {
 	ret, err := c.CombinedOutput()
 	c.reportError(err)
@@ -157,7 +177,7 @@ func (c *Cmd) CombinedOutputOrFatal() []byte {
 
 // RunAndPrintOrFatal will run the command, then after finishing
 // print any output, then handling any errors with a call to
-// ctx.Fatal
+// fatal
 func (c *Cmd) RunAndPrintOrFatal() {
 	ret, err := c.CombinedOutput()
 	st := c.ctx.Status.StartTool()
@@ -173,11 +193,11 @@ func (c *Cmd) RunAndPrintOrFatal() {
 }
 
 // RunAndStreamOrFatal will run the command, while running print
-// any output, then handle any errors with a call to ctx.Fatal
+// any output, then handle any errors with a call to fatal
 func (c *Cmd) RunAndStreamOrFatal() {
 	out, err := c.StdoutPipe()
 	if err != nil {
-		c.ctx.Fatal(err)
+		c.fatal(err.Error())
 	}
 	c.Stderr = c.Stdout
 
@@ -194,11 +214,86 @@ func (c *Cmd) RunAndStreamOrFatal() {
 		} else if err == io.EOF {
 			break
 		} else if err != nil {
-			c.ctx.Fatal(err)
+			c.fatal(err.Error())
 		}
 	}
 
 	err = c.Wait()
 	st.Finish()
 	c.reportError(err)
+}
+
+type credRefresher struct {
+	path    string
+	args    string
+	expires time.Time
+}
+
+type credHelperResp struct {
+	Expiry string `json:"expiry"` // UnixDate
+}
+
+func credRefresh(ctx Context, args, path string) (time.Time, error) {
+	cmd := exec.Command(path, strings.Split(args, " ")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdin = strings.NewReader("")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return time.Time{}, err
+	}
+	var resp credHelperResp
+	err = json.Unmarshal(stdout.Bytes(), &resp)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse(time.UnixDate, resp.Expiry)
+}
+
+func newCredRefresher(ctx Context, config Config) (*credRefresher, error) {
+	path, ok := config.Environment().Get("RBE_credentials_helper")
+	if !ok {
+		path = "execrel://"
+	}
+	if strings.HasPrefix(path, "execrel://") {
+		relpath, _ := strings.CutPrefix(path, "execrel://")
+		dir, ok := config.Environment().Get("RBE_DIR")
+		if !ok {
+			dir = "prebuilts/remoteexecution-client/live"
+		}
+		// Use the one from RBE_DIR.
+		path = filepath.Join(dir, relpath, "credshelper")
+	}
+	args, ok := config.Environment().Get("RBE_credentials_helper_args")
+	expires, err := credRefresh(ctx, args, path)
+	if err != nil {
+		return nil, err
+	}
+	return &credRefresher{
+		path:    path,
+		args:    args,
+		expires: expires,
+	}, nil
+}
+
+func (cr *credRefresher) run(ctx Context, quit <-chan bool) {
+	for {
+		wait := time.Until(cr.expires)
+		ctx.Printf("cred expires %s - valid for %s", cr.expires, wait)
+		// Wait until 30 seconds before our credentials expire.
+		if wait.Seconds() > 30 {
+			wait -= time.Duration(30 * 1000000000)
+		}
+		select {
+		case <-time.After(wait):
+			expires, err := credRefresh(ctx, cr.args, cr.path)
+			if err != nil {
+				return
+			}
+			cr.expires = expires
+		case <-quit:
+			return
+		}
+	}
 }

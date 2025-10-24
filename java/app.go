@@ -538,7 +538,7 @@ func (a *AndroidApp) checkAppSdkVersions(ctx android.ModuleContext) {
 		if !a.SdkVersion(ctx).Stable() {
 			ctx.PropertyErrorf("sdk_version", "Updatable apps must use stable SDKs, found %v", a.SdkVersion(ctx))
 		}
-		if String(a.overridableProperties.Min_sdk_version) == "" {
+		if a.overridableProperties.Min_sdk_version.GetOrDefault(ctx, "") == "" {
 			ctx.PropertyErrorf("updatable", "updatable apps must set min_sdk_version.")
 		}
 
@@ -984,11 +984,8 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	if !apexInfo.IsForPlatform() {
-		a.hideApexVariantFromMake = true
+		a.HideFromMake()
 	}
-	android.SetProvider(ctx, android.HideApexVariantFromMakeProvider, android.HideApexVariantFromMakeInfo{
-		HideApexVariantFromMake: a.hideApexVariantFromMake,
-	})
 
 	a.aapt.useEmbeddedNativeLibs = a.useEmbeddedNativeLibs(ctx)
 	a.aapt.useEmbeddedDex = Bool(a.appProperties.Use_embedded_dex)
@@ -1260,7 +1257,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 		complianceMetadataInfo.AddBuiltFiles(a.outputFile.String())
 	}
 
-	if !a.hideApexVariantFromMake && !a.IsHideFromMake() {
+	if !a.IsHideFromMake() {
 		if a.embeddedJniLibs {
 			cc.CopySymbolsAndSetSymbolsInfoProvider(ctx, &cc.SymbolInfos{
 				Symbols: a.GetJniSymbolInfos(ctx, a.installPathForJNISymbols),
@@ -1284,8 +1281,8 @@ func (a *AndroidApp) setOutputFiles(ctx android.ModuleContext) {
 }
 
 type appDepsInterface interface {
-	SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec
-	MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel
+	SdkVersion(ctx android.ConfigContext) android.SdkSpec
+	MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel
 	RequiresStableAPIs(ctx android.BaseModuleContext) bool
 }
 

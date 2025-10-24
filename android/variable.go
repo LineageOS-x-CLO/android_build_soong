@@ -228,12 +228,13 @@ type ProductVariables struct {
 	// Suffix to add to generated Makefiles
 	Make_suffix *string `json:",omitempty"`
 
-	BuildId              *string `json:",omitempty"`
-	BuildFingerprintFile *string `json:",omitempty"`
-	BuildNumberFile      *string `json:",omitempty"`
-	BuildHostnameFile    *string `json:",omitempty"`
-	BuildThumbprintFile  *string `json:",omitempty"`
-	DisplayBuildNumber   *bool   `json:",omitempty"`
+	BuildId                    *string `json:",omitempty"`
+	BuildFingerprintFile       *string `json:",omitempty"`
+	BuildNumberFile            *string `json:",omitempty"`
+	BuildHostnameFile          *string `json:",omitempty"`
+	BuildSystemFingerprintFile *string `json:",omitempty"`
+	BuildThumbprintFile        *string `json:",omitempty"`
+	DisplayBuildNumber         *bool   `json:",omitempty"`
 
 	Platform_display_version_name          *string  `json:",omitempty"`
 	Platform_version_name                  *string  `json:",omitempty"`
@@ -315,38 +316,39 @@ type ProductVariables struct {
 
 	AppsDefaultVersionName *string `json:",omitempty"`
 
-	Allow_missing_dependencies       *bool    `json:",omitempty"`
-	Unbundled_build                  *bool    `json:",omitempty"`
-	Unbundled_build_apps             []string `json:",omitempty"`
-	Unbundled_build_image            *bool    `json:",omitempty"`
-	Always_use_prebuilt_sdks         *bool    `json:",omitempty"`
-	Skip_boot_jars_check             *bool    `json:",omitempty"`
-	Malloc_low_memory                *bool    `json:",omitempty"`
-	Malloc_zero_contents             *bool    `json:",omitempty"`
-	Malloc_pattern_fill_contents     *bool    `json:",omitempty"`
-	Safestack                        *bool    `json:",omitempty"`
-	HostStaticBinaries               *bool    `json:",omitempty"`
-	Binder32bit                      *bool    `json:",omitempty"`
-	UseABFS                          *bool    `json:",omitempty"`
-	UseRBE                           *bool    `json:",omitempty"`
-	UseRBEJAVAC                      *bool    `json:",omitempty"`
-	UseRBER8                         *bool    `json:",omitempty"`
-	UseRBED8                         *bool    `json:",omitempty"`
-	Debuggable                       *bool    `json:",omitempty"`
-	Eng                              *bool    `json:",omitempty"`
-	Treble_linker_namespaces         *bool    `json:",omitempty"`
-	Enforce_vintf_manifest           *bool    `json:",omitempty"`
-	Uml                              *bool    `json:",omitempty"`
-	Arc                              *bool    `json:",omitempty"`
-	MinimizeJavaDebugInfo            *bool    `json:",omitempty"`
-	Build_from_text_stub             *bool    `json:",omitempty"`
-	Real_hal                         *bool    `json:",omitempty"`
-	Qmaa_hal                         *bool    `json:",omitempty"`
-	Device_support_hwfde             *bool    `json:",omitempty"`
-	Device_support_hwfde_perf        *bool    `json:",omitempty"`
-	Unbundled_build_sdks_from_source *bool    `json:",omitempty"`
-	Device_page_size_agnostic        *bool    `json:",omitempty"`
-	Pdk                              *bool    `json:",omitempty"`
+    Allow_missing_dependencies       *bool    `json:",omitempty"`
+    Unbundled_build                  *bool    `json:",omitempty"`
+    Unbundled_build_apps             []string `json:",omitempty"`
+    Unbundled_build_image            *bool    `json:",omitempty"`
+    Always_use_prebuilt_sdks         *bool    `json:",omitempty"`
+    Skip_boot_jars_check             *bool    `json:",omitempty"`
+    Malloc_low_memory                *bool    `json:",omitempty"`
+    Malloc_zero_contents             *bool    `json:",omitempty"`
+    Malloc_pattern_fill_contents     *bool    `json:",omitempty"`
+    Safestack                        *bool    `json:",omitempty"`
+    HostStaticBinaries               *bool    `json:",omitempty"`
+    Binder32bit                      *bool    `json:",omitempty"`
+    UseABFS                          *bool    `json:",omitempty"`
+    UseRBE                           *bool    `json:",omitempty"`
+    UseREWrapper                     *bool    `json:",omitempty"`
+    UseRBEJAVAC                      *bool    `json:",omitempty"`
+    UseRBER8                         *bool    `json:",omitempty"`
+    UseRBED8                         *bool    `json:",omitempty"`
+    Debuggable                       *bool    `json:",omitempty"`
+    Eng                              *bool    `json:",omitempty"`
+    Treble_linker_namespaces         *bool    `json:",omitempty"`
+    Enforce_vintf_manifest           *bool    `json:",omitempty"`
+    Uml                              *bool    `json:",omitempty"`
+    Arc                              *bool    `json:",omitempty"`
+    MinimizeJavaDebugInfo            *bool    `json:",omitempty"`
+    Build_from_text_stub             *bool    `json:",omitempty"`
+    Real_hal                         *bool    `json:",omitempty"`
+    Qmaa_hal                         *bool    `json:",omitempty"`
+    Device_support_hwfde             *bool    `json:",omitempty"`
+    Device_support_hwfde_perf        *bool    `json:",omitempty"`
+    Unbundled_build_sdks_from_source *bool    `json:",omitempty"`
+    Device_page_size_agnostic        *bool    `json:",omitempty"`
+    Pdk                              *bool    `json:",omitempty"`
 
 	BuildType *string `json:",omitempty"`
 
@@ -623,6 +625,7 @@ type PartitionQualifiedVariablesType struct {
 	BoardErofsCompressor        string `json:",omitempty"`
 	BoardErofsCompressHints     string `json:",omitempty"`
 	BoardErofsPclusterSize      string `json:",omitempty"`
+	BoardErofsBlockSize         string `json:",omitempty"`
 	BoardExtfsInodeCount        string `json:",omitempty"`
 	BoardExtfsRsvPct            string `json:",omitempty"`
 	BoardF2fsSloadCompressFlags string `json:",omitempty"`
@@ -686,6 +689,7 @@ type PartitionVariables struct {
 	BoardErofsCompressor           string `json:",omitempty"`
 	BoardErofsCompressorHints      string `json:",omitempty"`
 	BoardErofsPclusterSize         string `json:",omitempty"`
+	BoardErofsBlockSize            string `json:",omitempty"`
 	BoardErofsShareDupBlocks       string `json:",omitempty"`
 	BoardErofsUseLegacyCompression string `json:",omitempty"`
 	BoardExt4ShareDupBlocks        string `json:",omitempty"`
@@ -728,17 +732,20 @@ type PartitionVariables struct {
 	BoardPrebuiltDtboImage16kb        string   `json:",omitempty"`
 	BoardDtboPartitionSize            string   `json:",omitempty"`
 	Board16kOtaUseIncremental         bool     `json:",omitempty"`
+	Board16kOtaMoveVendor             bool     `json:",omitempty"`
 	BoardPrebuiltDtbDir               string   `json:",omitempty"`
 	BoardKernelModules16K             []string `json:",omitempty"`
 	BoardKernelModulesLoad16K         []string `json:",omitempty"`
 	BuildingDebugBootImage            bool     `json:",omitempty"`
 	BuildingDebugVendorBootImage      bool     `json:",omitempty"`
+	BoardVendorRamdiskFragments       []string `json:",omitempty"`
 
 	// Radio stuff
-	AbOtaRadioPartitions      []string `json:",omitempty"`
-	BootloaderFilePath        string   `json:",omitempty"`
-	AbOtaBootloaderPartitions []string `json:",omitempty"`
-	BoardRadioImagePath       string   `json:",omitempty"`
+	AbOtaRadioPartitions       []string `json:",omitempty"`
+	BootloaderFilePath         string   `json:",omitempty"`
+	AbOtaBootloaderPartitions  []string `json:",omitempty"`
+	BoardRadioImagePath        string   `json:",omitempty"`
+	BoardPrebuiltTzswImagePath string   `json:",omitempty"`
 
 	// pvmfw stuff
 	BoardUsesPvmfwImage              bool   `json:",omitempty"`
@@ -793,8 +800,14 @@ type PartitionVariables struct {
 	EnforceArtifactPathRequirements             string              `json:",omitempty"`
 	ArtifactPathRequirementAllowedList          []string            `json:",omitempty"`
 	ArtifactPathRequirementProducts             []string            `json:",omitempty"`
+	ArtifactPathRequirementSyspropAllowedList   []string            `json:",omitempty"`
+	ProductSystemProperties                     []string            `json:",omitempty"`
+	ProductSystemDefaultProperties              []string            `json:",omitempty"`
 	ArtifactPathRequirementsOfMakefile          map[string][]string `json:",omitempty"`
 	ArtifactPathAllowedListOfMakefile           map[string][]string `json:",omitempty"`
+	SystemPropertiesOfMakefile                  map[string][]string `json:",omitempty"`
+	SystemDefaultPropertiesOfMakefile           map[string][]string `json:",omitempty"`
+	DeviceFcmFileOfMakefile                     map[string][]string `json:",omitempty"`
 	ArtifactPathRequirementsIsRelaxedOfMakefile map[string]bool     `json:",omitempty"`
 
 	BuildingSystemDlkmImage             bool     `json:",omitempty"`
@@ -847,6 +860,8 @@ type PartitionVariables struct {
 	TargetRecoveryFstabDefault string `json:",omitempty"`
 
 	VendorBlobsLicense string `json:",omitempty"`
+
+	MinimalFontFootprint bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {

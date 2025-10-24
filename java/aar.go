@@ -1053,7 +1053,9 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	maps.Copy(a.kSnapshotFiles, a.aapt.kSnapshotFiles)
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
-	a.hideApexVariantFromMake = !apexInfo.IsForPlatform()
+	if !apexInfo.IsForPlatform() {
+		a.HideFromMake()
+	}
 
 	a.stem = proptools.StringDefault(a.overridableProperties.Stem, ctx.ModuleName())
 
@@ -1202,7 +1204,7 @@ type AARImportProperties struct {
 	Sdk_version *string
 	// If not blank, set the minimum version of the sdk that the compiled artifacts will run against.
 	// Defaults to sdk_version if not set. See sdk_version for possible values.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
 	// List of java static libraries that the included ARR (android library prebuilts) has dependencies to.
 	Static_libs proptools.Configurable[[]string]
 	// List of java libraries that the included ARR (android library prebuilts) has dependencies to.
@@ -1247,8 +1249,6 @@ type AARImport struct {
 	resourcesNodesDepSet depset.DepSet[*resourcesNode]
 	manifestsDepSet      depset.DepSet[android.Path]
 
-	hideApexVariantFromMake bool
-
 	aarPath     android.Path
 	jniPackages android.Paths
 
@@ -1259,7 +1259,7 @@ type AARImport struct {
 	classLoaderContexts dexpreopt.ClassLoaderContextMap
 }
 
-func (a *AARImport) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (a *AARImport) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(a.properties.Sdk_version))
 }
 
@@ -1267,9 +1267,10 @@ func (a *AARImport) SystemModules() string {
 	return ""
 }
 
-func (a *AARImport) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
-	if a.properties.Min_sdk_version != nil {
-		return android.ApiLevelFrom(ctx, *a.properties.Min_sdk_version)
+func (a *AARImport) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
+	minSdkVersion := a.properties.Min_sdk_version.Get(a.ConfigurableEvaluator(ctx))
+	if minSdkVersion.IsPresent() {
+		return android.ApiLevelFrom(ctx, minSdkVersion.Get())
 	}
 	return a.SdkVersion(ctx).ApiLevel
 }
@@ -1382,7 +1383,9 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.minSdkVersion = a.MinSdkVersion(ctx)
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
-	a.hideApexVariantFromMake = !apexInfo.IsForPlatform()
+	if !apexInfo.IsForPlatform() {
+		a.HideFromMake()
+	}
 
 	aarName := ctx.ModuleName() + ".aar"
 	a.aarPath = android.PathForModuleSrc(ctx, a.properties.Aars[0])

@@ -121,18 +121,23 @@ type DeviceProperties struct {
 
 	Pvmfw PvmfwProperties
 
-	Ramdisk_16k *string
-
 	Vendor_blobs_license *string `android:"path"`
 
 	// For saving those partition filesystems being created which are for gathering filesystem
 	// infos but not going to create images for the device.
 	InfoPartitionProps PartitionNameProperties
+
+	// This is used for fontchain_lint, it will not check emoji if Minimal_font_footprint is true.
+	Minimal_font_footprint *bool
+
+	// Name of the prebuilt tzsw partition.
+	Tzsw *string
 }
 
 type PvmfwProperties struct {
-	Image          *string `android:"path"`
-	Binary         *string `android:"path"`
+	Image *string `android:"path"`
+	// Name of the pvmfw raw_binary module
+	Binary_name    *string
 	Avbkey         *string `android:"path"`
 	Partition_size *int64
 }
@@ -196,6 +201,9 @@ type fileContextsDepTagType struct {
 type bootloaderDepTagType struct {
 	blueprint.BaseDependencyTag
 }
+type tzswDepTagType struct {
+	blueprint.BaseDependencyTag
+}
 type dtboDepTagType struct {
 	blueprint.BaseDependencyTag
 }
@@ -209,15 +217,21 @@ type androidInfoDepTagType struct {
 	blueprint.BaseDependencyTag
 }
 
+type pvmfwRawBinaryDepTagType struct {
+	blueprint.BaseDependencyTag
+}
+
 var superPartitionDepTag superPartitionDepTagType
 var filesystemDepTag partitionDepTagType
 var targetFilesMetadataDepTag targetFilesMetadataDepTagType
 var fileContextsDepTag fileContextsDepTagType
 var bootloaderDepTag bootloaderDepTagType
+var tzswDepTag tzswDepTagType
 var dtboDepTag dtboDepTagType
-var radioDepTag dtboDepTagType
+var radioDepTag radioDepTagType
 var ramdisk16kDepTag ramdisk16kDepTagType
 var androidInfoDepTag androidInfoDepTagType
+var pvmfwRawBinaryDepTag pvmfwRawBinaryDepTagType
 
 func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	addDependencyIfDefined := func(dep *string) {
@@ -259,6 +273,9 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	if a.deviceProps.Bootloader != nil {
 		ctx.AddDependency(ctx.Module(), bootloaderDepTag, *a.deviceProps.Bootloader)
 	}
+	if a.deviceProps.Tzsw != nil {
+		ctx.AddDependency(ctx.Module(), tzswDepTag, *a.deviceProps.Tzsw)
+	}
 	if a.deviceProps.Dtbo_image != nil {
 		ctx.AddDependency(ctx.Module(), dtboDepTag, *a.deviceProps.Dtbo_image)
 	}
@@ -268,11 +285,11 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	if a.deviceProps.Radio_partition_name != nil {
 		ctx.AddDependency(ctx.Module(), radioDepTag, *a.deviceProps.Radio_partition_name)
 	}
-	if a.deviceProps.Ramdisk_16k != nil {
-		ctx.AddDependency(ctx.Module(), ramdisk16kDepTag, *a.deviceProps.Ramdisk_16k)
-	}
 	if a.deviceProps.Android_info != nil {
 		ctx.AddDependency(ctx.Module(), androidInfoDepTag, *a.deviceProps.Android_info)
+	}
+	if a.deviceProps.Pvmfw.Binary_name != nil {
+		ctx.AddDependency(ctx.Module(), pvmfwRawBinaryDepTag, *a.deviceProps.Pvmfw.Binary_name)
 	}
 	// Add system-build.prop even system partition is not building.
 	ctx.AddDependency(ctx.Module(), filesystemDepTag, "system-build.prop")
@@ -468,6 +485,7 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.hostInitVerifierCheck(ctx)
 	a.findSharedUIDViolation(ctx)
 	a.checkPartitionSizes(ctx)
+	a.fontchainLint(ctx)
 }
 
 func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.DependencyTag) {
@@ -519,6 +537,9 @@ func (a *androidDevice) allInstalledModules(ctx android.ModuleContext, includeIn
 	allOwners := make(map[string][]installedOwnerInfo)
 
 	for _, partition := range android.SortedKeys(fsInfoMap) {
+		if fsInfoMap[partition].Prebuilt {
+			continue
+		}
 		fsInfo := fsInfoMap[partition]
 		for _, owner := range fsInfo.Owners.ToList() {
 			allOwners[owner.Name] = append(allOwners[owner.Name], installedOwnerInfo{
@@ -533,6 +554,9 @@ func (a *androidDevice) allInstalledModules(ctx android.ModuleContext, includeIn
 		commonInfo, ok := android.OtherModuleProvider(ctx, mod, android.CommonModuleInfoProvider)
 		if !(ok && commonInfo.ExportedToMake) {
 			return false
+		}
+		if info, ok := fsInfoMap[commonInfo.PartitionTag]; !ok || info.Prebuilt {
+			return true
 		}
 		prebuiltInfo := android.OtherModuleProviderOrDefault(ctx, mod, android.PrebuiltInfoProvider)
 		name := android.OtherModuleNameWithPossibleOverride(ctx, mod)
@@ -556,11 +580,30 @@ func (a *androidDevice) allInstalledModules(ctx android.ModuleContext, includeIn
 	return ret
 }
 
+// Returns the extra symbols and ELF mapping paths that are not included in allInstalledModules
+// but need to be included in the device-generated symbols.zip
+func (a *androidDevice) getExtraSymbols(ctx android.ModuleContext) *android.SymbolicOutputInfos {
+	var extraSymbols android.SymbolicOutputInfos
+
+	if a.deviceProps.Pvmfw.Binary_name != nil {
+		pvmfwBin := ctx.GetDirectDepProxyWithTag(*a.deviceProps.Pvmfw.Binary_name, pvmfwRawBinaryDepTag)
+		if info, ok := android.OtherModuleProvider(ctx, pvmfwBin, RawBinaryInfoProvider); ok {
+			extraSymbols = append(extraSymbols, info.SrcSymbolInfos...)
+		}
+	}
+
+	return &extraSymbols
+}
+
 func (a *androidDevice) buildSymbolsZip(ctx android.ModuleContext, allInstalledModules []android.ModuleProxy) {
 	a.symbolsZipFile = android.PathForModuleOut(ctx, "symbols.zip")
 	a.symbolsMappingFile = android.PathForModuleOut(ctx, "symbols-mapping.textproto")
-	allInstalledSymbolsPaths, allInstalledSymbolsMappingPaths := android.BuildSymbolsZip(ctx, allInstalledModules, a.symbolsZipFile, a.symbolsMappingFile)
+
+	allInstalledSymbolsPaths, allInstalledSymbolsMappingPaths := android.BuildSymbolsZip(
+		ctx, allInstalledModules, a.getExtraSymbols(ctx), a.symbolsZipFile, a.symbolsMappingFile)
+
 	if !ctx.Config().KatiEnabled() {
+		ctx.Phony("symbols-zip", a.symbolsZipFile, a.symbolsMappingFile)
 		ctx.Phony("symbols-files", allInstalledSymbolsPaths...)
 		ctx.Phony("symbols-mappings", allInstalledSymbolsMappingPaths...)
 		ctx.Phony("droidcore-unbundled", android.PathForPhony(ctx, "symbols-files"), android.PathForPhony(ctx, "symbols-mappings"))
@@ -658,12 +701,27 @@ func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 			bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_debug_partition_name), filesystemDepTag)
 			bootImgInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, BootimgInfoProvider)
 			ctx.DistForGoal("droidcore-unbundled", bootImgInfo.Output)
+			ramdiskInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, FilesystemProvider)
+			if ramdiskInfo.Output != nil {
+				ctx.DistForGoal("droidcore-unbundled", ramdiskInfo.Output)
+			}
+
 		}
 		// vendor_boot-test-harness
 		if a.partitionProps.Vendor_boot_test_harness_partition_name != nil {
 			bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_test_harness_partition_name), filesystemDepTag)
 			bootImgInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, BootimgInfoProvider)
 			ctx.DistForGoal("droidcore-unbundled", bootImgInfo.Output)
+			ramdiskInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, FilesystemProvider)
+			if ramdiskInfo.Output != nil {
+				ctx.DistForGoal("droidcore-unbundled", ramdiskInfo.Output)
+			}
+		}
+		// tzsw
+		if a.deviceProps.Tzsw != nil {
+			tzswImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.deviceProps.Tzsw), tzswDepTag)
+			files := android.OutputFilesForModule(ctx, tzswImg, "")
+			ctx.DistForGoal("droidcore-unbundled", files...)
 		}
 
 		if a.withLicenseFile != nil {
@@ -717,6 +775,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 		targetFilesZipCopy{a.partitionProps.Ramdisk_partition_name, "BOOT/RAMDISK"}, // For products without init_boot
 		targetFilesZipCopy{a.partitionProps.Vendor_boot_partition_name, "VENDOR_BOOT/RAMDISK"},
 		targetFilesZipCopy{a.partitionProps.Vendor_kernel_boot_partition_name, "VENDOR_KERNEL_BOOT/RAMDISK"},
+		targetFilesZipCopy{a.partitionProps.Userdata_partition_name, "DATA"},
 	}
 
 	filesystemsToCopy := []targetFilesystemZipCopy{}
@@ -777,6 +836,7 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 			a.rootDirForFsConfigTimestamp = rootDirForFsConfigTimestamp
 		}
 	}
+
 	// Copy cmdline, kernel etc. files of boot images
 	if a.partitionProps.Vendor_boot_partition_name != nil {
 		bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Vendor_boot_partition_name), filesystemDepTag)
@@ -847,6 +907,14 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 			builder.Command().Textf("cp ").Input(bootloaderFile[0]).Textf(" %s/IMAGES/bootloader", targetFilesDir.String())
 		}
 	}
+	if a.deviceProps.Tzsw != nil {
+		tzswImg := ctx.GetDirectDepProxyWithTag(*a.deviceProps.Tzsw, tzswDepTag)
+		files := android.OutputFilesForModule(ctx, tzswImg, "")
+		builder.Command().
+			Textf("mkdir -p %s/RADIO && cp -t %s/RADIO ", targetFilesDir, targetFilesDir).
+			Inputs(files)
+	}
+
 	if a.partitionProps.Boot_16k_partition_name != nil {
 		bootImg := ctx.GetDirectDepProxyWithTag(proptools.String(a.partitionProps.Boot_16k_partition_name), filesystemDepTag)
 		if bootImgInfo := android.OtherModuleProviderOrDefault(ctx, bootImg, BootimgInfoProvider); bootImgInfo.Output != nil {
@@ -870,18 +938,14 @@ func (a *androidDevice) buildTargetFilesZip(ctx android.ModuleContext, allInstal
 		pvmfwImg := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Image))
 		builder.Command().Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).Input(pvmfwImg).Textf(" %s/PREBUILT_IMAGES/pvmfw.img", targetFilesDir.String())
 	}
-	if a.deviceProps.Pvmfw.Binary != nil {
-		pvmfwBin := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Binary))
-		builder.Command().Textf("mkdir -p %s/PVMFW/ && cp", targetFilesDir.String()).Input(pvmfwBin).Textf(" %s/PVMFW/pvmfw_bin", targetFilesDir.String())
+	if a.deviceProps.Pvmfw.Binary_name != nil {
+		pvmfwBin := ctx.GetDirectDepProxyWithTag(proptools.String(a.deviceProps.Pvmfw.Binary_name), pvmfwRawBinaryDepTag)
+		file := android.OutputFileForModule(ctx, pvmfwBin, "")
+		builder.Command().Textf("mkdir -p %s/PVMFW/ && cp", targetFilesDir.String()).Input(file).Textf(" %s/PVMFW/pvmfw_bin", targetFilesDir.String())
 	}
 	if a.deviceProps.Pvmfw.Avbkey != nil {
 		pvbmfwAvbkey := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Avbkey))
 		builder.Command().Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).Input(pvbmfwAvbkey).Textf(" %s/PREBUILT_IMAGES/pvmfw_embedded.avbpubkey", targetFilesDir.String())
-	}
-	if a.deviceProps.Ramdisk_16k != nil {
-		ramdisk16k := ctx.GetDirectDepProxyWithTag(proptools.String(a.deviceProps.Ramdisk_16k), ramdisk16kDepTag)
-		info := android.OtherModuleProviderOrDefault(ctx, ramdisk16k, FilesystemProvider)
-		builder.Command().Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).Input(info.Output).Textf(" %s/PREBUILT_IMAGES/ramdisk_16k.img", targetFilesDir.String())
 	}
 
 	// Force copy build.prop for system partition even there's no system partition for this product to reflect the logic in make.
@@ -981,22 +1045,54 @@ func (a *androidDevice) copyPrebuiltImages(ctx android.ModuleContext, builder *a
 // partial implementation of vendor ramdisk fragments in target_files.zip
 func (a *androidDevice) copyVendorRamdiskFragments(ctx android.ModuleContext, builder *android.RuleBuilder, targetFilesDir android.Path) {
 	var vendorRamdiskFragments []string
-	if a.deviceProps.Ramdisk_16k != nil {
-		vendorRamdiskFragments = append(vendorRamdiskFragments, "16K")
-		ramdisk16k := ctx.GetDirectDepProxyWithTag(proptools.String(a.deviceProps.Ramdisk_16k), ramdisk16kDepTag)
-		info := android.OtherModuleProviderOrDefault(ctx, ramdisk16k, FilesystemProvider)
-		builder.Command().
-			Textf("mkdir -p %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/16K/", targetFilesDir.String()).
-			Text(" && cp").
-			Input(info.Output).
-			Textf(" %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/16K/prebuilt_ramdisk", targetFilesDir.String())
-
-		builder.Command().
-			Textf("echo --ramdisk_name 16K > %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/16K/mkbootimg_args", targetFilesDir)
+	if a.partitionProps.Vendor_boot_partition_name != nil {
+		vendorBootPartition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Vendor_boot_partition_name, filesystemDepTag)
+		if info, ok := android.OtherModuleProvider(ctx, vendorBootPartition, ramdiskFragmentsInfoProvider); ok {
+			for _, fragmentInfo := range info {
+				vendorRamdiskFragments = append(vendorRamdiskFragments, fragmentInfo.Ramdisk_name)
+				// Copy the files to VENDOR_BOOT/RAMDISK_FRAGMENTS
+				if fragmentInfo.RootDir == nil {
+					// Copy to prebuilt ramdisk. This is used by 16K ramdisk fragment
+					builder.Command().
+						Textf("mkdir -p %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/%s/", targetFilesDir.String(), fragmentInfo.Ramdisk_name).
+						Text(" && cp").
+						Input(fragmentInfo.Output).
+						Textf(" %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/%s/prebuilt_ramdisk", targetFilesDir.String(), fragmentInfo.Ramdisk_name)
+				} else {
+					builder.Command().
+						Textf("mkdir -p %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/%s/RAMDISK && ", targetFilesDir, fragmentInfo.Ramdisk_name).
+						BuiltTool("acp").
+						Textf("-rd %s/. %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/%s/RAMDISK", fragmentInfo.RootDir.String(), targetFilesDir, fragmentInfo.Ramdisk_name).
+						Implicit(fragmentInfo.Output) // so that the staging dir is built
+				}
+				// Special-case 16K handling
+				// 1. Copy the filesytem to PREBUILT_IMAGES/ramdisk_16k.img
+				// 2. Skip --ramdisk_type, as this is not recognized by mkbootfs
+				extraMkbootimgArgs := ""
+				if fragmentInfo.Ramdisk_name == "16K" {
+					builder.Command().
+						Textf("mkdir -p %s/PREBUILT_IMAGES/ && cp", targetFilesDir.String()).
+						Input(fragmentInfo.Output).
+						Textf(" %s/PREBUILT_IMAGES/ramdisk_16k.img", targetFilesDir.String())
+				} else {
+					extraMkbootimgArgs = fmt.Sprintf("--ramdisk_type %s ", fragmentInfo.Ramdisk_name)
+				}
+				// Create a file for mkbootimg
+				builder.Command().Textf(
+					"echo \"%s--ramdisk_name %s\" > %s/VENDOR_BOOT/RAMDISK_FRAGMENTS/%s/mkbootimg_args",
+					extraMkbootimgArgs,
+					fragmentInfo.Ramdisk_name,
+					targetFilesDir,
+					fragmentInfo.Ramdisk_name,
+				)
+			}
+		} else {
+			ctx.ModuleErrorf("Vendor boot partition %s does set BootimgInfoProvider\n", vendorBootPartition.Name())
+		}
 	}
 
 	if len(vendorRamdiskFragments) > 0 {
-		builder.Command().Textf("echo %s > %s/VENDOR_BOOT/vendor_ramdisk_fragments", strings.Join(vendorRamdiskFragments, ""), targetFilesDir)
+		builder.Command().Textf("echo %s > %s/VENDOR_BOOT/vendor_ramdisk_fragments", strings.Join(vendorRamdiskFragments, " "), targetFilesDir)
 	}
 }
 
@@ -1153,6 +1249,7 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	// Pack dynamic_partitions_info.txt to target-file.
 	superPartitionName := a.partitionProps.Super_partition_name
 	if superPartitionName == nil {
+		// Even if a super partition isn't actually built, its information needs to be included in misc_info.txt if dynamic partitioning is enabled. This is for its later use with merge_target_files alongside other targets.
 		superPartitionName = a.deviceProps.InfoPartitionProps.Super_partition_name
 	}
 	if superPartitionName != nil {
@@ -1267,10 +1364,10 @@ func (a *androidDevice) createFastbootInfo(ctx android.ModuleContext) android.Pa
 // TODO (b/399788119): Complete the migration of misc_info.txt
 func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 	buildType := func() string {
-		if ctx.Config().Debuggable() {
-			return "userdebug"
-		} else if ctx.Config().Eng() {
+		if ctx.Config().Eng() {
 			return "eng"
+		} else if ctx.Config().Debuggable() {
+			return "userdebug"
 		} else {
 			return "user"
 		}
@@ -1334,6 +1431,12 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 	// ramdisk uses `compressed_cpio` fs_type
 	// https://cs.android.com/android/_/android/platform/build/+/30f05352c3e6f4333c77d4af66c253572d3ea6c9:core/Makefile;l=5923-5925;drc=519f75666431ee2926e0ec8991c682b28a4c9521;bpv=1;bpt=0
 	if _, ok := fsInfos["ramdisk"]; ok {
+		// http://b/428047677#comment3
+		// TODO: Consider using `BOARD_RAMDISK_USE_LZ4` instead.
+		builder.Command().Textf("echo lz4_ramdisks=true >> %s", miscInfo)
+	} else if _, ok := fsInfos["vendor_ramdisk"]; ok {
+		// http://b/428047677#comment3
+		// TODO: Consider using `BOARD_RAMDISK_USE_LZ4` instead.
 		builder.Command().Textf("echo lz4_ramdisks=true >> %s", miscInfo)
 	}
 	// recovery_mount_options
@@ -1386,8 +1489,12 @@ func (a *androidDevice) addMiscInfo(ctx android.ModuleContext) android.Path {
 		builder.Command().Textf("echo boot_images=boot.img >> %s", miscInfo)
 	}
 
-	if a.partitionProps.Super_partition_name != nil {
-		superPartition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Super_partition_name, superPartitionDepTag)
+	superPartitionName := a.partitionProps.Super_partition_name
+	if superPartitionName == nil {
+		superPartitionName = a.deviceProps.InfoPartitionProps.Super_partition_name
+	}
+	if superPartitionName != nil {
+		superPartition := ctx.GetDirectDepProxyWithTag(*superPartitionName, superPartitionDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, superPartition, SuperImageProvider); ok {
 			// cat dynamic_partition_info.txt
 			builder.Command().Text("cat").Input(info.DynamicPartitionsInfo).Textf(" >> %s", miscInfo)

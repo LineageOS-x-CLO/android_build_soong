@@ -16,6 +16,7 @@ package java
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -165,6 +166,9 @@ type DroiddocProperties struct {
 
 	// Compat config XML. Generates compat change documentation if set.
 	Compat_config *string `android:"path"`
+
+	// The directory name to publish the generated documentation under out/target/common/docs.
+	Publish_dir *string
 }
 
 // Common flags passed down to build rule
@@ -249,7 +253,7 @@ func JavadocHostFactory() android.Module {
 	return module
 }
 
-func (j *Javadoc) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (j *Javadoc) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(j.properties.Sdk_version))
 }
 
@@ -257,7 +261,7 @@ func (j *Javadoc) SystemModules() string {
 	return proptools.String(j.properties.System_modules)
 }
 
-func (j *Javadoc) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
+func (j *Javadoc) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
 	return j.SdkVersion(ctx).ApiLevel
 }
 
@@ -861,6 +865,12 @@ func (d *Droiddoc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		FlagWithOutput("-o ", d.docZip).
 		FlagWithArg("-C ", outDir.String()).
 		FlagWithArg("-D ", outDir.String())
+
+	if String(d.properties.Publish_dir) != "" {
+		publishDir := path.Join("out/target/common/docs", String(d.properties.Publish_dir))
+		rule.Command().Text("mkdir -p").Text(publishDir)
+		rule.Command().Text("unzip -qo").Input(d.docZip).Text("-d").Text(publishDir)
+	}
 
 	rule.Restat()
 

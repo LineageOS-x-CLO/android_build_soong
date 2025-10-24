@@ -56,7 +56,7 @@ func init() {
 }
 
 // Which builder are we using?
-type ninjaCommandType = int
+type ninjaCommandType int
 
 const (
 	_ = iota
@@ -65,6 +65,23 @@ const (
 	NINJA_SISO
 	NINJA_NINJAGO
 )
+
+var NINJA_DEFAULT ninjaCommandType = NINJA_NINJA
+
+func (n ninjaCommandType) String() string {
+	switch n {
+	case NINJA_NINJA:
+		return "ninja"
+	case NINJA_N2:
+		return "n2"
+	case NINJA_SISO:
+		return "siso"
+	case NINJA_NINJAGO:
+		return "ninjago"
+	default:
+		return fmt.Sprintf("%v", int(n))
+	}
+}
 
 type Config struct{ *configImpl }
 
@@ -148,27 +165,11 @@ type configImpl struct {
 	// Which builder are we using
 	ninjaCommand ninjaCommandType
 
-	// Whether this build has a target that needs to disable SOONG_USE_PARTIAL_COMPILE.
-	disableUsePartialCompile bool
+	// Control which JDK is used for builds
+	useJdk25 bool
 
-	// Whether the user requested partial compile.
-	partialCompileRequested bool
-}
-
-// Some of the speed optimizations (such as using d8 instead of r8) used in partial
-// compile cause the size of image to become too large.  To avoid this, some ninja
-// targets force SOONG_USE_PARTIAL_COMPILE=false.
-// This list is missing a great many targets which could cause the image to be too
-// large.  Rather than try to be complete, it only includes targets which we know
-// are commonly used by Java/Kotlin developers.
-//
-// Without this automation, the developer would do an initial build -- which would
-// fail -- and then need to run `SOONG_USE_PARTIAL_COMPILE=false m ...` to rebuild
-// before beginning their inner loop work.  See also b/409810224.
-var disableUsePartialCompileArgs = map[string]bool{
-	"droid":       true,
-	"sync":        true,
-	"systemimage": true,
+	// The directory where Siso config can be found.
+	sisoConfigDir string
 }
 
 type NinjaWeightListSource uint
@@ -293,6 +294,21 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	}
 	ret.parseArgs(ctx, args)
 
+	switch os.Getenv("SOONG_NINJA") {
+	case "n2":
+		ret.ninjaCommand = NINJA_N2
+	case "siso":
+		ret.ninjaCommand = NINJA_SISO
+	case "ninjago":
+		ret.ninjaCommand = NINJA_NINJAGO
+	default:
+		if os.Getenv("SOONG_USE_N2") == "true" {
+			ret.ninjaCommand = NINJA_N2
+		} else {
+			ret.ninjaCommand = NINJA_DEFAULT
+		}
+	}
+
 	if value, ok := ret.environ.Get("SOONG_ONLY"); ok && !ret.skipKatiControlledByFlags {
 		if value == "true" || value == "1" || value == "y" || value == "yes" {
 			ret.soongOnlyRequested = true
@@ -304,6 +320,10 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 			ret.skipKati = false
 			ret.skipKatiNinja = false
 		}
+	}
+
+	if ret.environ.IsEnvTrue("SOONG_INCREMENTAL_ANALYSIS") {
+		ret.incrementalBuildActions = true
 	}
 
 	if ret.ninjaWeightListSource == HINT_FROM_SOONG {
@@ -345,6 +365,31 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 			// Explicitly set USE_RBE env variable to false when we cannot run
 			// an RBE build to avoid ninja local execution pool issues.
 			ret.environ.Set("USE_RBE", "false")
+			ret.environ.Set("USE_REWRAPPER", "false")
+		}
+	}
+
+	// If we are not using Siso, force USE_REWRAPPER to be the same as USE_RBE.
+	// If we are using Siso, force USE_REWRAPPER=false when USE_RBE is not "true".
+	// These are separate only for Siso.
+	rbeValue, ok := ret.environ.Get("USE_RBE")
+	rewrapperValue, _ := ret.environ.Get("USE_REWRAPPER")
+	if ret.ninjaCommand != NINJA_SISO {
+		if rbeValue != rewrapperValue {
+			if ok {
+				ret.environ.Set("USE_REWRAPPER", rbeValue)
+			} else {
+				ret.environ.Unset("USE_REWRAPPER")
+			}
+		}
+	} else {
+		if rbeValue != "true" && rewrapperValue == "true" {
+			ret.environ.Set("USE_REWRAPPER", "false")
+		}
+		if value, ok := ret.environ.Get("SISO_CONFIG_DIR"); ok {
+			ret.sisoConfigDir = value
+		} else {
+			ret.sisoConfigDir = "build/soong/siso_config"
 		}
 	}
 
@@ -368,17 +413,7 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	// This simplifies the generated Ninja rules, so that they only need to check for the empty string.
 	if value, ok := ret.environ.Get("SOONG_USE_PARTIAL_COMPILE"); ok {
 		if value == "true" || value == "1" || value == "y" || value == "yes" {
-			ret.partialCompileRequested = true
 			value = "true"
-			if ret.disableUsePartialCompile {
-				// Allow the user to try using partial compile when we would normally force it off to avoid
-				// superpartition overflow.
-				if ret.environ.IsEnvTrue("SOONG_HONOR_USE_PARTIAL_COMPILE") {
-					ret.disableUsePartialCompile = false
-				} else {
-					value = ""
-				}
-			}
 		} else {
 			value = ""
 		}
@@ -393,20 +428,6 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 			} else {
 				ctx.Verbosef("SOONG_RUN_CIPD_PROXY_SERVER (%q) is not a valid boolean", value)
 			}
-		}
-	}
-
-	ret.ninjaCommand = NINJA_NINJA
-	switch os.Getenv("SOONG_NINJA") {
-	case "n2":
-		ret.ninjaCommand = NINJA_N2
-	case "siso":
-		ret.ninjaCommand = NINJA_SISO
-	case "ninjago":
-		ret.ninjaCommand = NINJA_NINJAGO
-	default:
-		if os.Getenv("SOONG_USE_N2") == "true" {
-			ret.ninjaCommand = NINJA_N2
 		}
 	}
 
@@ -529,38 +550,7 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 		ctx.Fatalln("Directory names containing spaces are not supported")
 	}
 
-	// Configure Java-related variables, including adding it to $PATH
-	java8Home := filepath.Join("prebuilts/jdk/jdk8", ret.HostPrebuiltTag())
-	java21Home := filepath.Join("prebuilts/jdk/jdk21", ret.HostPrebuiltTag())
-	javaHome := func() string {
-		if override, ok := ret.environ.Get("OVERRIDE_ANDROID_JAVA_HOME"); ok {
-			return override
-		}
-		if toolchain11, ok := ret.environ.Get("EXPERIMENTAL_USE_OPENJDK11_TOOLCHAIN"); ok && toolchain11 != "true" {
-			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK11_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
-		}
-		if toolchain17, ok := ret.environ.Get("EXPERIMENTAL_USE_OPENJDK17_TOOLCHAIN"); ok && toolchain17 != "true" {
-			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK17_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
-		}
-		if toolchain21, ok := ret.environ.Get("EXPERIMENTAL_USE_OPENJDK21_TOOLCHAIN"); ok && toolchain21 != "true" {
-			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK21_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
-		}
-		return java21Home
-	}()
-	absJavaHome := absPath(ctx, javaHome)
-
-	ret.configureLocale(ctx)
-
-	newPath := []string{filepath.Join(absJavaHome, "bin")}
-	if path, ok := ret.environ.Get("PATH"); ok && path != "" {
-		newPath = append(newPath, path)
-	}
-
-	ret.environ.Unset("OVERRIDE_ANDROID_JAVA_HOME")
-	ret.environ.Set("JAVA_HOME", ret.sandboxPath(wd, absJavaHome))
-	ret.environ.Set("ANDROID_JAVA_HOME", ret.sandboxPath(wd, javaHome))
-	ret.environ.Set("ANDROID_JAVA8_HOME", ret.sandboxPath(wd, java8Home))
-	ret.environ.Set("PATH", strings.Join(newPath, string(filepath.ListSeparator)))
+	ConfigJavaEnvironment(ctx, ret)
 
 	// b/286885495, https://bugzilla.redhat.com/show_bug.cgi?id=2227130: some versions of Fedora include patches
 	// to unzip to enable zipbomb detection that incorrectly handle zip64 and data descriptors and fail on large
@@ -599,6 +589,48 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	return c
 }
 
+func ConfigJavaEnvironment(ctx Context, config *configImpl) {
+	// Configure Java-related variables, including adding it to $PATH
+	java8Home := filepath.Join("prebuilts/jdk/jdk8", config.HostPrebuiltTag())
+	java21Home := filepath.Join("prebuilts/jdk/jdk21", config.HostPrebuiltTag())
+	java25Home := filepath.Join("prebuilts/jdk/jdk25", config.HostPrebuiltTag())
+	javaHome := func() string {
+		if override, ok := config.environ.Get("OVERRIDE_ANDROID_JAVA_HOME"); ok {
+			return override
+		}
+		if toolchain11, ok := config.environ.Get("EXPERIMENTAL_USE_OPENJDK11_TOOLCHAIN"); ok && toolchain11 != "true" {
+			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK11_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
+		}
+		if toolchain17, ok := config.environ.Get("EXPERIMENTAL_USE_OPENJDK17_TOOLCHAIN"); ok && toolchain17 != "true" {
+			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK17_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
+		}
+		if toolchain21, ok := config.environ.Get("EXPERIMENTAL_USE_OPENJDK21_TOOLCHAIN"); ok && toolchain21 != "true" {
+			ctx.Fatalln("The environment variable EXPERIMENTAL_USE_OPENJDK21_TOOLCHAIN is no longer supported. An OpenJDK 21 toolchain is now the global default.")
+		}
+		if config.useJdk25 {
+			return java25Home
+		}
+		return java21Home
+	}()
+	absJavaHome := absPath(ctx, javaHome)
+
+	config.configureLocale(ctx)
+
+	newPath := []string{filepath.Join(absJavaHome, "bin")}
+	if path, ok := config.environ.Get("PATH"); ok && path != "" {
+		newPath = append(newPath, path)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		ctx.Fatalln("Failed to get working directory:", err)
+	}
+	config.environ.Set("JAVA_HOME", config.sandboxPath(wd, absJavaHome))
+	config.environ.Set("ANDROID_JAVA_HOME", config.sandboxPath(wd, javaHome))
+	config.environ.Set("ANDROID_JAVA8_HOME", config.sandboxPath(wd, java8Home))
+	config.environ.Set("PATH", strings.Join(newPath, string(filepath.ListSeparator)))
+}
+
 // NewBuildActionConfig returns a build configuration based on the build action. The arguments are
 // processed based on the build action and extracts any arguments that belongs to the build action.
 func NewBuildActionConfig(action BuildAction, dir string, ctx Context, args ...string) Config {
@@ -633,8 +665,8 @@ func QueryProductReleaseConfigMaps(ctx Context, config Config) chan *productRele
 }
 
 func getProductReleaseConfigMaps(ctx Context, config Config, mapsCh chan *productReleaseConfigMapsInfo) {
-	ctx.BeginTrace(metrics.RunKati, "SetProductReleaseConfigMaps")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunKati, "SetProductReleaseConfigMaps")
+	defer e.End()
 
 	ret := &productReleaseConfigMapsInfo{}
 
@@ -743,6 +775,12 @@ func buildConfig(config Config) *smpb.BuildConfig {
 	}
 	if value, ok := config.environ.Get("SOONG_USE_PARTIAL_COMPILE"); ok {
 		ensure().UsePartialCompile = proto.String(value)
+	}
+	if value, ok := config.environ.Get("NETWORK_FILE_SYSTEM_TYPE"); ok {
+		ensure().NetworkFileSystemType = proto.String(value)
+	}
+	if value, ok := config.environ.Get("METRICS_BUILD_TRIGGER"); ok {
+		ensure().BuildTrigger = proto.String(value)
 	}
 	c := &smpb.BuildConfig{
 		UseRbe:                proto.Bool(config.UseRBE()),
@@ -1096,15 +1134,8 @@ func (c *configImpl) parseArgs(ctx Context, args []string) {
 			if arg == "checkbuild" {
 				c.checkbuild = true
 			}
-			if disableUsePartialCompileArgs[arg] {
-				c.disableUsePartialCompile = true
-			}
 			c.arguments = append(c.arguments, arg)
 		}
-	}
-	// The default target needs disableUsePartialCompile.
-	if len(args) == 0 {
-		c.disableUsePartialCompile = true
 	}
 }
 
@@ -1128,7 +1159,7 @@ func validateNinjaWeightList(weightListFilePath string) (err error) {
 }
 
 func (c *configImpl) configureLocale(ctx Context) {
-	cmd := Command(ctx, Config{c}, "locale", "locale", "-a")
+	cmd := Command(ctx, Config{c}, nil, "locale", "locale", "-a")
 	output, err := cmd.Output()
 
 	var locales []string
@@ -1373,7 +1404,8 @@ func (c *configImpl) TargetBuildVariant() string {
 	if v, ok := c.environ.Get("TARGET_BUILD_VARIANT"); ok {
 		return v
 	}
-	panic("TARGET_BUILD_VARIANT is not defined")
+	// By default, TARGET_BUILD_VARIANT=eng.
+	return "eng"
 }
 
 func (c *configImpl) KatiArgs() []string {
@@ -1501,8 +1533,29 @@ func (c *configImpl) UseRBE() bool {
 	return false
 }
 
-func (c *configImpl) StartRBE() bool {
+func (c *configImpl) UseRewrapper() bool {
 	if !c.UseRBE() {
+		return false
+	}
+
+	v, ok := c.Environment().Get("USE_REWRAPPER")
+	v = strings.TrimSpace(v)
+	switch {
+	case v == "true":
+		return true
+	case v == "false":
+		return false
+	case !ok, v == "":
+		// SISO defaults to false, others default to true.
+		return c.ninjaCommand != NINJA_SISO
+	default:
+		return true
+	}
+}
+
+func (c *configImpl) StartReproxy() bool {
+	// Only start reproxy if we are using rewrapper.
+	if !c.UseRewrapper() {
 		return false
 	}
 
@@ -1825,6 +1878,9 @@ func (c *configImpl) N2Bin() string {
 }
 
 func (c *configImpl) SisoBin() string {
+	// TODO(b/374176257): remove this once Siso is built from source.
+	return filepath.Join("prebuilts/siso", c.HostPrebuiltTag(), "siso")
+
 	path := c.PrebuiltBuildTool("siso")
 	// Use musl instead of glibc because glibc on the build server is old and has bugs
 	return strings.ReplaceAll(path, "/linux-x86/", "/linux_musl-x86/")
@@ -1909,6 +1965,10 @@ func (c *configImpl) LogsDir() string {
 // MkFileMetrics returns the file path for make-related metrics.
 func (c *configImpl) MkMetrics() string {
 	return filepath.Join(c.LogsDir(), "mk_metrics.pb")
+}
+
+func (c *configImpl) SisoConfigDir() string {
+	return c.sisoConfigDir
 }
 
 func (c *configImpl) SetEmptyNinjaFile(v bool) {

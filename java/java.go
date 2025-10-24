@@ -458,13 +458,13 @@ type JavaInfo struct {
 
 	DexpreopterInfo *DexpreopterInfo
 
-	XrefJavaFiles         android.Paths
-	XrefKotlinFiles       android.Paths
-	OverrideMinSdkVersion *string
-	CompileDex            *bool
-	SystemModules         string
-	Installable           bool
-	ApexDependencyInfo    *ApexDependencyInfo
+	XrefJavaFiles            android.Paths
+	XrefKotlinFiles          android.Paths
+	HasOverrideMinSdkVersion bool
+	CompileDex               *bool
+	SystemModules            string
+	Installable              bool
+	ApexDependencyInfo       *ApexDependencyInfo
 
 	MaxSdkVersion android.ApiLevel
 }
@@ -827,6 +827,7 @@ const (
 	JAVA_VERSION_11          = 11
 	JAVA_VERSION_17          = 17
 	JAVA_VERSION_21          = 21
+	JAVA_VERSION_25          = 25
 )
 
 func (v javaVersion) String() string {
@@ -847,6 +848,8 @@ func (v javaVersion) String() string {
 		return "17"
 	case JAVA_VERSION_21:
 		return "21"
+	case JAVA_VERSION_25:
+		return "25"
 	default:
 		return "unsupported"
 	}
@@ -891,6 +894,8 @@ func normalizeJavaVersion(ctx android.BaseModuleContext, javaVersion string) jav
 		return JAVA_VERSION_17
 	case "21":
 		return JAVA_VERSION_21
+	case "25":
+		return JAVA_VERSION_25
 	case "10", "12", "13", "14", "15", "16":
 		ctx.PropertyErrorf("java_version", "Java language level %s is not supported", javaVersion)
 		return JAVA_VERSION_UNSUPPORTED
@@ -1151,7 +1156,8 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	// Check min_sdk_version of the transitive dependencies if this module is created from
 	// java_sdk_library.
-	if j.overridableProperties.Min_sdk_version != nil && j.SdkLibraryName() != nil {
+	overridableMinSdkVersion := j.overridableProperties.Min_sdk_version.Get(ctx)
+	if overridableMinSdkVersion.IsPresent() && j.SdkLibraryName() != nil {
 		j.CheckDepsMinSdkVersion(ctx)
 	}
 
@@ -1179,7 +1185,7 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	if !apexInfo.IsForPlatform() {
-		j.hideApexVariantFromMake = true
+		j.HideFromMake()
 	}
 
 	j.checkSdkVersions(ctx)
@@ -1249,6 +1255,18 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			ClassesJar:         j.implementationAndResourcesJar,
 		})
 	}
+
+	if ctx.Os() == android.Windows {
+		// Make does not support Windows Java modules
+		j.HideFromMake()
+	} else if !j.ApexModuleBase.AvailableFor(android.AvailableToPlatform) && !j.hostDexNeeded() {
+		// Platform variant.  If not available for the platform, we don't need Make module, unless
+		// hostdex is enabled, in which case only the hostdex variant is visible to make.
+		j.HideFromMake()
+	} else if proptools.Bool(j.properties.Headers_only) {
+		// If generating headers only then don't expose to Make.
+		j.HideFromMake()
+	}
 }
 
 func (j *Library) javaLibraryModuleInfoJSON(ctx android.ModuleContext) *android.ModuleInfoJSON {
@@ -1270,9 +1288,6 @@ func (j *Library) javaLibraryModuleInfoJSON(ctx android.ModuleContext) *android.
 		hostDexModuleInfoJSON.SupportedVariantsOverride = []string{"HOST"}
 	}
 
-	if j.hideApexVariantFromMake {
-		moduleInfoJSON.Disabled = true
-	}
 	return moduleInfoJSON
 }
 
@@ -1375,6 +1390,7 @@ func (j *Library) createApiXmlFile(ctx android.ModuleContext) {
 			Output: j.apiXmlFile,
 		})
 		ctx.DistForGoal("dist_files", j.apiXmlFile)
+		ctx.SetOutputFiles(android.Paths{j.apiXmlFile}, ".api.xml")
 	}
 }
 
@@ -1463,7 +1479,7 @@ func (p *librarySdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberCo
 
 	// If the min_sdk_version was set then add the canonical representation of the API level to the
 	// snapshot.
-	if javaInfo.OverrideMinSdkVersion != nil {
+	if javaInfo.HasOverrideMinSdkVersion {
 		canonical, err := android.ReplaceFinalizedCodenames(mctx.Config(), commonInfo.MinSdkVersion.ApiLevel.String())
 		if err != nil {
 			ctx.ModuleErrorf("%s", err)
@@ -2573,7 +2589,7 @@ func metalavaStubCmd(ctx android.ModuleContext, rule *android.RuleBuilder,
 	cmd := rule.Command()
 	cmd.FlagWithArg("ANDROID_PREFS_ROOT=", homeDir.String())
 
-	if metalavaUseRbe(ctx) {
+	if metalavaUseRewrapper(ctx) {
 		rule.Remoteable(android.RemoteRuleSupports{RBE: true})
 		execStrategy := ctx.Config().GetenvWithDefault("RBE_METALAVA_EXEC_STRATEGY", remoteexec.LocalExecStrategy)
 		labels := map[string]string{"type": "tool", "name": "metalava"}
@@ -2942,12 +2958,12 @@ func (al *ApiLibrary) ClassLoaderContexts() dexpreopt.ClassLoaderContextMap {
 // Most java_api_library constitues the sdk, but there are some java_api_library that
 // does not contribute to the api surface. Such modules are allowed to set sdk_version
 // other than "none"
-func (al *ApiLibrary) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (al *ApiLibrary) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, proptools.String(al.properties.Sdk_version))
 }
 
 // java_api_library is always at "current". Return FutureApiLevel
-func (al *ApiLibrary) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
+func (al *ApiLibrary) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
 	return al.SdkVersion(ctx).ApiLevel
 }
 
@@ -3003,7 +3019,7 @@ type ImportProperties struct {
 
 	// The minimum version of the SDK that this module supports. Defaults to sdk_version if not
 	// specified.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
 
 	// The max sdk version placeholder used to replace maxSdkVersion attributes on permission
 	// and uses-permission tags in manifest_fixer.
@@ -3079,8 +3095,6 @@ type Import struct {
 
 	kSnapshotFiles map[string]android.Path
 
-	hideApexVariantFromMake bool
-
 	sdkVersion    android.SdkSpec
 	minSdkVersion android.ApiLevel
 
@@ -3093,7 +3107,7 @@ func (j *Import) PermittedPackagesForUpdatableBootJars() []string {
 	return j.properties.Permitted_packages
 }
 
-func (j *Import) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (j *Import) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(j.properties.Sdk_version))
 }
 
@@ -3101,9 +3115,10 @@ func (j *Import) SystemModules() string {
 	return "none"
 }
 
-func (j *Import) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
-	if j.properties.Min_sdk_version != nil {
-		return android.ApiLevelFrom(ctx, *j.properties.Min_sdk_version)
+func (j *Import) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
+	minSdkVersion := j.properties.Min_sdk_version.Get(j.ConfigurableEvaluator(ctx))
+	if minSdkVersion.IsPresent() {
+		return android.ApiLevelFrom(ctx, minSdkVersion.Get())
 	}
 	return j.SdkVersion(ctx).ApiLevel
 }
@@ -3161,7 +3176,7 @@ func (j *Import) commonBuildActions(ctx android.ModuleContext) {
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	if !apexInfo.IsForPlatform() {
-		j.hideApexVariantFromMake = true
+		j.HideFromMake()
 	}
 
 	if ctx.Windows() {
@@ -3618,8 +3633,6 @@ type DexImport struct {
 	dexJarFile OptionalDexJarPath
 
 	dexpreopter
-
-	hideApexVariantFromMake bool
 }
 
 func (j *DexImport) Prebuilt() *android.Prebuilt {
@@ -3649,7 +3662,7 @@ func (j *DexImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	if !apexInfo.IsForPlatform() {
-		j.hideApexVariantFromMake = true
+		j.HideFromMake()
 	}
 
 	j.dexpreopter.installPath = j.dexpreopter.getInstallPath(
