@@ -15,15 +15,16 @@ function make_mock_top {
   echo "$mock"
 }
 
+WARMED_UP_MOCK_TOP=$(mktemp -t soong_integration_tests_warmup.XXXXXX.tar.gz)
+MOCK_TOP_TO_CLEAN_UP=
 if [[ -n "$HARDWIRED_MOCK_TOP" ]]; then
   MOCK_TOP="$HARDWIRED_MOCK_TOP"
 else
   MOCK_TOP=$(make_mock_top)
-  trap cleanup_mock_top EXIT
+  MOCK_TOP_TO_CLEAN_UP="$MOCK_TOP"
 fi
 
-WARMED_UP_MOCK_TOP=$(mktemp -t soong_integration_tests_warmup.XXXXXX.tar.gz)
-trap 'rm -f "$WARMED_UP_MOCK_TOP"' EXIT
+trap cleanup_all EXIT
 
 function warmup_mock_top {
   info "Warming up mock top ..."
@@ -41,13 +42,22 @@ function warmup_mock_top {
   else
     create_mock_soong
     run_soong
+    # Precompile androidmk for the tests in androidmk_test.sh.
+    run_ninja androidmk
   fi
   tar czf "$WARMED_UP_MOCK_TOP" *
 }
 
 function cleanup_mock_top {
   cd /
-  rm -fr "$MOCK_TOP"
+  if [[ -d "$MOCK_TOP_TO_CLEAN_UP" ]]; then
+    rm -fr "$MOCK_TOP_TO_CLEAN_UP"
+  fi
+}
+
+function cleanup_all {
+  cleanup_mock_top
+  rm -f "$WARMED_UP_MOCK_TOP"
 }
 
 function info {
@@ -127,11 +137,9 @@ function create_mock_soong_for_java_lib {
 
   # Required for building java_library type modules.
   symlink_directory prebuilts/jdk
-  symlink_directory prebuilts/r8
   symlink_directory prebuilts/rust
   symlink_directory prebuilts/gcc
   symlink_directory external/turbine
-  symlink_directory external/jarjar
   symlink_directory external/rust
   symlink_directory external/gson
   symlink_directory external/ow2-asm
@@ -147,11 +155,15 @@ function create_mock_soong_for_java_lib {
   symlink_directory external/escapevelocity
   symlink_directory external/kotlinx.metadata
   symlink_directory external/kotlinc
-  symlink_directory prebuilts/misc/common/asm/
   symlink_directory system/logging/liblog
-  symlink_directory system/cros-codecs
-  symlink_directory tools/lint_checks
   symlink_directory external/abseil-cpp
+
+  mkdir -p "$MOCK_TOP"/tools/lint_checks
+  cat > "$MOCK_TOP"/tools/lint_checks/Android.bp <<EOF
+java_library_host {
+    name: "AndroidGlobalLintChecker",
+}
+EOF
 }
 
 function setup {
@@ -292,7 +304,7 @@ function move_mock_top {
   rm -rf $MOCK_TOP2
   mv $MOCK_TOP $MOCK_TOP2
   MOCK_TOP=$MOCK_TOP2
-  trap cleanup_mock_top EXIT
+  MOCK_TOP_TO_CLEAN_UP="$MOCK_TOP"
 }
 
 function assert_files_equal {
@@ -309,21 +321,21 @@ function assert_files_equal {
 }
 
 function compare_incremental_files() {
-  local dir_before=$1; shift
-  local dir_after=$1; shift
+  local dir_full=$1; shift
+  local dir_incremental=$1; shift
   count=0
-  for file_before in ${dir_before}/*.mk; do
-    file_after="${dir_after}/$(basename "$file_before")"
+  for file_before in ${dir_full}/*.mk; do
+    file_after="${dir_incremental}/$(basename "$file_before")"
     assert_files_equal $file_before $file_after
     ((count++)) || true
   done
   echo "Compared $count mk files"
 
   count=0
-  for file_before in ${dir_before}/*.ninja; do
+  for file_before in ${dir_full}/*.ninja; do
     basename=$(basename "$file_before")
-    file_after="${dir_after}/${basename}"
-    # The after file should be a superset of the before one.
+    file_after="${dir_incremental}/${basename}"
+    # The incremental file should be a superset of the full one.
     if [[ "$basename" == "build.test_arm64.ninja" ]]; then
       echo "Performing superset check for $basename..."
       extra_lines=$(comm -23 <(sort "$file_before") <(sort "$file_after"))
@@ -358,13 +370,13 @@ function compare_files_parity() {
 # the tree is modified.
 function compare_incremental_and_full_analysis() {
     run_soong SOONG_INCREMENTAL_ANALYSIS=true "$@"
-    mkdir before
-    cp -pr out/soong/*.mk out/soong/build.test_arm64*.ninja before
+    mkdir incremental
+    cp -pr out/soong/*.mk out/soong/build.test_arm64*.ninja incremental
 
     touch Android.bp
     run_soong "$@"
-    mkdir after
-    cp -pr out/soong/*.mk out/soong/build.test_arm64*.ninja after
+    mkdir full
+    cp -pr out/soong/*.mk out/soong/build.test_arm64*.ninja full
 
-    compare_incremental_files before after
+    compare_incremental_files full incremental
 }

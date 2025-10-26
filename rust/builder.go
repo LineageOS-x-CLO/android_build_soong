@@ -44,11 +44,12 @@ var (
 		}, &remoteexec.REParams{
 			// Until there's a "rust" tool, use clang. This interprets "-L" flags
 			// to help identify potential build dependencies.
-			Labels:       map[string]string{"type": "link", "tool": "clang"},
-			Inputs:       []string{"${out}.clang.rsp"},
-			RSPFiles:     []string{"$rbeRspFile"},
-			OutputFiles:  []string{"${out}.d", "${out}.d.raw", "${out}"},
-			ExecStrategy: "${config.RERustExecStrategy}",
+			Labels:               map[string]string{"type": "link", "tool": "clang"},
+			Inputs:               []string{"${out}.clang.rsp"},
+			RSPFiles:             []string{"$rbeRspFile"},
+			OutputFiles:          []string{"${out}.d", "${out}.d.raw", "${out}"},
+			ExecStrategy:         "${config.RERustExecStrategy}",
+			EnvironmentVariables: []string{"PWD"},
 			ToolchainInputs: []string{
 				"${rustcCmd}",
 				"${RustcLinkerCmd}",
@@ -359,6 +360,7 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 
 	var inputs android.Paths
 	var implicits android.Paths
+	var validations android.Paths
 	var orderOnly android.Paths
 	var output buildOutput
 	var linkerScriptFlags, rustcFlags, linkFlags []string
@@ -516,8 +518,10 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 				OrderOnly:       orderOnly,
 				Args:            args,
 			})
-			// Declare the clippy build as an implicit dependency of the original crate.
-			implicits = append(implicits, clippyFile)
+			// Declare the clippy build as a validation dependency of the original crate.  It will
+			// be run in any build that builds the crate, but not block building the crate or anything
+			// that depends on the crate.
+			validations = append(validations, clippyFile)
 		}
 	}
 
@@ -564,6 +568,7 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 		Implicits:       implicits,
 		ImplicitOutputs: implicitOutputs,
 		OrderOnly:       orderOnly,
+		Validations:     validations,
 		Args:            args,
 	})
 
