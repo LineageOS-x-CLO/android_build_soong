@@ -945,15 +945,13 @@ func (s *sanitize) flags(ctx ModuleContext, flags Flags) Flags {
 		}
 	}
 
-	// TODO(b/249094918) re-enable after clang version brought back in-line with upstream
-	/*
-		if (Bool(sanProps.Memtag_heap) || Bool(sanProps.Memtag_stack) || Bool(sanProps.Memtag_globals)) && ctx.binary() {
-			if Bool(sanProps.Diag.Memtag_heap) {
-				flags.Local.LdFlags = append(flags.Local.LdFlags, "-fsanitize-memtag-mode=sync")
-			} else {
-				flags.Local.LdFlags = append(flags.Local.LdFlags, "-fsanitize-memtag-mode=async")
+	if (Bool(sanProps.Memtag_heap) || Bool(sanProps.Memtag_stack) || Bool(sanProps.Memtag_globals)) && ctx.binary() {
+		if Bool(sanProps.Diag.Memtag_heap) {
+			flags.Local.LdFlags = append(flags.Local.LdFlags, "-fsanitize-memtag-mode=sync")
+		} else {
+			flags.Local.LdFlags = append(flags.Local.LdFlags, "-fsanitize-memtag-mode=async")
 		}
-	*/
+	}
 
 	if Bool(sanProps.Integer_overflow) {
 		flags.Local.CFlags = append(flags.Local.CFlags, intOverflowCflags...)
@@ -1567,16 +1565,13 @@ func sanitizerRuntimeMutator(mctx android.BottomUpMutatorContext) {
 			sanitizers = append(sanitizers, "shadow-call-stack")
 		}
 
-		// TODO(b/249094918) re-enable after clang version brought back in-line with upstream
-		/*
-			if Bool(sanProps.Memtag_heap && c.Binary() {
-				sanitizers = append(sanitizers, "memtag-heap")
-			}
+		if Bool(sanProps.Memtag_heap) && c.Binary() {
+			sanitizers = append(sanitizers, "memtag-heap")
+		}
 
-			if Bool(sanProps.Memtag_stack) {
-				sanitizers = append(sanitizers, "memtag-stack")
-			}
-		*/
+		if Bool(sanProps.Memtag_stack) {
+			sanitizers = append(sanitizers, "memtag-stack")
+		}
 
 		if Bool(sanProps.Memtag_globals) {
 			sanitizers = append(sanitizers, "memtag-globals")
