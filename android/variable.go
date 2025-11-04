@@ -439,9 +439,6 @@ type ProductVariables struct {
 
 	RamdiskSnapshotDirsExcluded []string `json:",omitempty"`
 	RamdiskSnapshotDirsIncluded []string `json:",omitempty"`
-
-	MultitreeUpdateMeta bool `json:",omitempty"`
-
 	BoardVendorSepolicyDirs      []string `json:",omitempty"`
 	BoardOdmSepolicyDirs         []string `json:",omitempty"`
 	SystemExtPublicSepolicyDirs  []string `json:",omitempty"`

@@ -20,6 +20,7 @@ package java
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -34,7 +35,8 @@ var (
 		blueprint.RuleParams{
 			Command: `rm -f $out && $reTemplate${config.JavaCmd} ${config.JavaVmFlags} -Djava.library.path=$$(dirname ${config.SignapkJniLibrary}) ` +
 				`-jar ${config.SignapkCmd} $flags $certificates $in $out`,
-			CommandDeps: []string{"${config.SignapkCmd}", "${config.SignapkJniLibrary}"},
+			CommandDeps:     []string{"${config.SignapkCmd}", "${config.SignapkJniLibrary}"},
+			SandboxDisabled: true,
 		},
 		&remoteexec.REParams{Labels: map[string]string{"type": "tool", "name": "signapk"},
 			ExecStrategy:    "${config.RESignApkExecStrategy}",
@@ -47,8 +49,9 @@ var (
 
 var combineApk = pctx.AndroidStaticRule("combineApk",
 	blueprint.RuleParams{
-		Command:     `${config.MergeZipsCmd} $out $in`,
-		CommandDeps: []string{"${config.MergeZipsCmd}"},
+		Command:         `${config.MergeZipsCmd} $out $in`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 func CreateAndSignAppPackage(ctx android.ModuleContext, outputFile android.WritablePath,
@@ -125,7 +128,8 @@ var buildAAR = pctx.AndroidStaticRule("buildAAR",
 			`cp ${classesJar} ${outDir}/classes.jar && ` +
 			`cp ${rTxt} ${outDir}/R.txt && ` +
 			`${config.SoongZipCmd} -jar -o $out -C ${outDir} -D ${outDir}`,
-		CommandDeps: []string{"${config.SoongZipCmd}"},
+		CommandDeps:     []string{"${config.SoongZipCmd}"},
+		SandboxDisabled: true,
 	},
 	"manifest", "classesJar", "rTxt", "outDir")
 
@@ -157,21 +161,24 @@ func BuildAAR(ctx android.ModuleContext, outputFile android.WritablePath,
 
 var buildBundleModule = pctx.AndroidStaticRule("buildBundleModule",
 	blueprint.RuleParams{
-		Command:     `${config.MergeZipsCmd} ${out} ${in}`,
-		CommandDeps: []string{"${config.MergeZipsCmd}"},
+		Command:         `${config.MergeZipsCmd} ${out} ${in}`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 var bundleMungePackage = pctx.AndroidStaticRule("bundleMungePackage",
 	blueprint.RuleParams{
-		Command:     `${config.Zip2ZipCmd} -i ${in} -o ${out} AndroidManifest.xml:manifest/AndroidManifest.xml resources.pb "res/**/*" "assets/**/*"`,
-		CommandDeps: []string{"${config.Zip2ZipCmd}"},
+		Command:         `${config.Zip2ZipCmd} -i ${in} -o ${out} AndroidManifest.xml:manifest/AndroidManifest.xml resources.pb "res/**/*" "assets/**/*"`,
+		CommandDeps:     []string{"${config.Zip2ZipCmd}"},
+		SandboxDisabled: true,
 	})
 
 var bundleMungeDexJar = pctx.AndroidStaticRule("bundleMungeDexJar",
 	blueprint.RuleParams{
 		Command: `${config.Zip2ZipCmd} -i ${in} -o ${out} "classes*.dex:dex/" && ` +
 			`${config.Zip2ZipCmd} -i ${in} -o ${resJar} -x "classes*.dex" "**/*:root/"`,
-		CommandDeps: []string{"${config.Zip2ZipCmd}"},
+		CommandDeps:     []string{"${config.Zip2ZipCmd}"},
+		SandboxDisabled: true,
 	}, "resJar")
 
 // Builds an app into a module suitable for input to bundletool
@@ -285,7 +292,7 @@ func TransformJniLibsToJar(
 
 func (a *AndroidApp) generateJavaUsedByApex(ctx android.ModuleContext) {
 	javaApiUsedByOutputFile := android.PathForModuleOut(ctx, a.installApkName+"_using.xml")
-	javaUsedByRule := android.NewRuleBuilder(pctx, ctx)
+	javaUsedByRule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	javaUsedByRule.Command().
 		Tool(android.PathForSource(ctx, "build/soong/scripts/gen_java_usedby_apex.sh")).
 		BuiltTool("dexdeps").
@@ -293,8 +300,8 @@ func (a *AndroidApp) generateJavaUsedByApex(ctx android.ModuleContext) {
 		Input(a.Library.Module.outputFile)
 	javaUsedByRule.Build("java_usedby_list", "Generate Java APIs used by Apex")
 
-	if !android.ShouldSkipAndroidMkProcessing(ctx, a) {
-		ctx.DistForGoalWithFilename(a.installApkName, javaApiUsedByOutputFile, "java_apis_used_by_apex/"+javaApiUsedByOutputFile.Base())
+	if slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) && !android.ShouldSkipAndroidMkProcessing(ctx, a) {
+		ctx.DistForGoalsWithFilename([]string{a.installApkName, "apps_only"}, javaApiUsedByOutputFile, "java_apis_used_by_apex/"+javaApiUsedByOutputFile.Base())
 	}
 }
 
