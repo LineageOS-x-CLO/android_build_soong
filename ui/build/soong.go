@@ -650,8 +650,15 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
 				}
 			case NINJA_SISO:
+				sisoLogDir := filepath.Join(config.LogsDir(), "bootstrap")
+				// create log dir, otherwise glog will use /tmp instead.
+				err := os.MkdirAll(sisoLogDir, 0777)
+				if err != nil {
+					ctx.Fatalf("Failed to create siso log dir: %v\n", err)
+				}
 				ninjaCmd = config.SisoBin()
 				ninjaArgs = []string{
+					"--log_dir", sisoLogDir, // for glog, e.g. siso.*INFO*
 					"ninja",
 					// TODO: implement these features, or remove them.
 					//"-d", "keepdepfile",
@@ -665,6 +672,7 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					//"--remote_jobs", strconv.Itoa(config.RemoteParallel()),
 					"--frontend_file", fifo,
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+					"--log_dir", sisoLogDir,
 				}
 				if value := config.SisoConfigDir(); value != "" {
 					value = createSisoConfigDir(ctx, config, value)
@@ -794,6 +802,13 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 
 	if config.JsonModuleGraph() {
 		distGzipFile(ctx, config, config.ModuleGraphFile(), "soong_ui/soong")
+	}
+
+	if config.ninjaCommand == NINJA_SISO {
+		distFile(ctx, config, config.SisoConfigFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoDepsFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoFsStateFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoFilegroupsFile(true), "soong_ui/bootstrap")
 	}
 }
 

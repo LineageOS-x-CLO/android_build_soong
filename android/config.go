@@ -2278,10 +2278,6 @@ func (c *config) ProductPrivateSepolicyDirs() []string {
 	return c.productVariables.ProductPrivateSepolicyDirs
 }
 
-func (c *config) TargetMultitreeUpdateMeta() bool {
-	return c.productVariables.MultitreeUpdateMeta
-}
-
 func (c *deviceConfig) DeviceArch() string {
 	return String(c.config.productVariables.DeviceArch)
 }
