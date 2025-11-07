@@ -1,10 +1,10 @@
-// Copyright 2017 Google Inc. All rights reserved.
+// Copyright 2025 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,21 +16,22 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-blueprint_go_binary {
-    name: "soong_ui",
+bootstrap_go_package {
+    name: "soong-testconfigs",
+    pkgPath: "android/soong/testconfigs",
     deps: [
         "blueprint",
-        "soong-shared",
-        "soong-ui-build",
-        "soong-ui-logger",
-        "soong-ui-metrics",
-        "soong-ui-execution-metrics",
-        "soong-ui-signal",
-        "soong-ui-status",
-        "soong-ui-terminal",
-        "soong-ui-tracer",
+        "blueprint-gobtools",
+        "soong-android",
     ],
     srcs: [
-        "main.go",
+        "init.go",
+        "test_config_zipper.go",
+        "test_execution_plan.go",
+        "test_scheduling_plan.go",
+        "test_trigger.go",
+        "test_workflow.go",
+        "testconfigs_enc.go",
     ],
+    pluginFor: ["soong_build"],
 }
