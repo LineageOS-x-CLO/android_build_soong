@@ -37,6 +37,7 @@ func init() {
 
 func androidMakeVarsProvider(ctx MakeVarsContext) {
 	ctx.Strict("MIN_SUPPORTED_SDK_VERSION", ctx.Config().MinSupportedSdkVersion().String())
+	ctx.Strict("BUILD_UUID_FILE", ctx.Config().BuildUUIDFile(ctx).String())
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -111,7 +112,7 @@ type MakeVarsContext interface {
 // MakeVarsModuleContext contains the set of functions available for modules
 // implementing the ModuleMakeVarsProvider interface.
 type MakeVarsModuleContext interface {
-	Config() Config
+	PathContext
 }
 
 var _ PathContext = MakeVarsContext(nil)
