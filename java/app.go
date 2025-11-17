@@ -34,6 +34,8 @@ import (
 	"android/soong/tradefed"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 func init() {
 	RegisterAppBuildComponents(android.InitRegistrationContext)
 	pctx.HostBinToolVariable("ModifyAllowlistCmd", "modify_permissions_allowlist")
@@ -47,6 +49,7 @@ var (
 		}, "packageName")
 )
 
+// @auto-generate: gob
 type FlagsPackages struct {
 	// Paths to the aconfig dump output text files that are consumed by aapt2
 	AconfigTextFiles android.Paths
@@ -63,6 +66,7 @@ func RegisterAppBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("override_android_test", OverrideAndroidTestModuleFactory)
 }
 
+// @auto-generate: gob
 type AppInfo struct {
 	// Updatable is set to the value of the updatable property
 	Updatable bool
@@ -247,7 +251,7 @@ func (a *AndroidApp) IsInstallable() bool {
 	return Bool(a.properties.Installable)
 }
 
-func (a *AndroidApp) ResourcesNodeDepSet() depset.DepSet[*resourcesNode] {
+func (a *AndroidApp) ResourcesNodeDepSet() depset.DepSet[resourcesNode] {
 	return a.aapt.resourcesNodesDepSet
 }
 
@@ -269,6 +273,7 @@ func (a *AndroidApp) PrivAppAllowlist() android.OptionalPath {
 
 var _ AndroidLibraryDependency = (*AndroidApp)(nil)
 
+// @auto-generate: gob
 type Certificate struct {
 	Pem, Key  android.Path
 	presigned bool
@@ -2372,6 +2377,7 @@ func setCommonAppInfo(appInfo *AppInfo, m androidApp) {
 	appInfo.PrivAppAllowlist = m.PrivAppAllowlist()
 }
 
+// @auto-generate: gob
 type BundleInfo struct {
 	Bundle android.Path
 }

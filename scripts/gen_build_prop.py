@@ -51,6 +51,7 @@ def parse_args():
   parser.add_argument("--build-fingerprint-file", required=True, type=argparse.FileType("r"))
   parser.add_argument("--build-hostname-file", required=True, type=argparse.FileType("r"))
   parser.add_argument("--build-number-file", required=True, type=argparse.FileType("r"))
+  parser.add_argument("--build-uuid-file", required=True, type=argparse.FileType("r"))
   parser.add_argument("--build-system-fingerprint-file", required=True, type=argparse.FileType("r"))
   parser.add_argument("--build-thumbprint-file", type=argparse.FileType("r"))
   parser.add_argument("--build-username", required=True)
@@ -84,6 +85,7 @@ def parse_args():
   config["BuildSystemFingerprint"] = args.build_system_fingerprint_file.read().strip()
   config["BuildHostname"] = args.build_hostname_file.read().strip()
   config["BuildNumber"] = args.build_number_file.read().strip()
+  config["BuildUUID"] = args.build_uuid_file.read().strip()
   config["BuildUsername"] = args.build_username
 
   build_version_tags_list = config["BuildVersionTags"]
@@ -159,11 +161,16 @@ def generate_common_build_props(args):
   # Allow optional assignments for ARC forward-declarations (b/249168657)
   # TODO: Remove any tag-related inconsistencies once the goals from
   # go/arc-android-sigprop-changes have been achieved.
-  if partition == "system":
-    print(f"ro.{partition}.build.fingerprint?={config['BuildSystemFingerprint']}")
-  else:
-    print(f"ro.{partition}.build.fingerprint?={config['BuildFingerprint']}")
+  ######
+  # Temporarily disable the system fingerprint until the allow listing pipeline
+  # is updated. (b/445722292)
+  # TODO (b/437803910): Enable the system fingerprint again.
+  # if partition == "system":
+  #   print(f"ro.{partition}.build.fingerprint?={config['BuildSystemFingerprint']}")
+  # else:
+  print(f"ro.{partition}.build.fingerprint?={config['BuildFingerprint']}")
   print(f"ro.{partition}.build.id?={config['BuildId']}")
+  print(f"ro.{partition}.build.uuid?={config['BuildUUID']}")
   print(f"ro.{partition}.build.tags?={config['BuildVersionTags']}")
   print(f"ro.{partition}.build.type={config['BuildVariant']}")
   print(f"ro.{partition}.build.version.incremental={config['BuildNumber']}")
@@ -183,6 +190,7 @@ def generate_build_info(args):
   build_flags = config["BuildFlags"]
 
   print(f"ro.build.id?={config['BuildId']}")
+  print(f"ro.build.uuid?={config['BuildUUID']}")
 
   # ro.build.display.id is shown under Settings -> About Phone
   if config["BuildVariant"] == "user":

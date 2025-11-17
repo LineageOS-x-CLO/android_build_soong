@@ -91,6 +91,10 @@ type VbmetaProperties struct {
 
 	// List of key-value pair of avb properties
 	Avb_properties []avbProperty
+
+	// Determines if the module is auto-generated from Soong or not. If the module is
+	// auto-generated, it does not use generic config.
+	Is_auto_generated *bool
 }
 
 type avbProperty struct {

@@ -389,7 +389,7 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 		if value, ok := ret.environ.Get("SISO_CONFIG_DIR"); ok {
 			ret.sisoConfigDir = value
 		} else {
-			ret.sisoConfigDir = "build/soong/siso_config"
+			ret.sisoConfigDir = DEFAULT_SISO_CONFIG_DIR
 		}
 	}
 
@@ -425,6 +425,9 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 			parsedVal, err := strconv.ParseBool(value)
 			if err == nil {
 				ret.runCIPDProxyServer = parsedVal
+				if !ret.runCIPDProxyServer {
+					ctx.Verbosef("SOONG_RUN_CIPD_PROXY_SERVER=%q, disabling proxy", value)
+				}
 			} else {
 				ctx.Verbosef("SOONG_RUN_CIPD_PROXY_SERVER (%q) is not a valid boolean", value)
 			}
@@ -1094,6 +1097,7 @@ func (c *configImpl) parseArgs(ctx Context, args []string) {
 		} else if arg == "--no-run-cipd-proxy-server" {
 			c.runCIPDProxyServer = false
 			c.runCIPDProxyServerControlledByFlags = true
+			ctx.Verbosef("Disabling CIPD proxy due to --no-run-cipd-proxy-server")
 		} else if len(arg) > 0 && arg[0] == '-' {
 			parseArgNum := func(def int) int {
 				if len(arg) > 2 {
@@ -1553,9 +1557,27 @@ func (c *configImpl) UseRewrapper() bool {
 	}
 }
 
+func (c *configImpl) UseRBEproxy() bool {
+	return c.UseRBE() && !c.UseRewrapper()
+}
+
 func (c *configImpl) StartReproxy() bool {
 	// Only start reproxy if we are using rewrapper.
 	if !c.UseRewrapper() {
+		return false
+	}
+
+	if v, ok := c.environ.Get("NOSTART_RBE"); ok {
+		v = strings.TrimSpace(v)
+		if v != "" && v != "false" {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *configImpl) StartRBEproxy() bool {
+	if !c.UseRBEproxy() {
 		return false
 	}
 
@@ -2003,6 +2025,14 @@ func (c *configImpl) BuildStartedTimeOrDefault(defaultTime time.Time) time.Time 
 		return defaultTime
 	}
 	return time.UnixMilli(c.buildStartedTime)
+}
+
+func (c *configImpl) BuildUUIDFile() string {
+	suffix := ""
+	if targetProduct, err := c.TargetProductOrErr(); err == nil {
+		suffix = "-" + targetProduct
+	}
+	return filepath.Join(c.SoongOutDir(), "build_uuid"+suffix+".txt")
 }
 
 func GetMetricsUploader(topDir string, env *Environment) string {
