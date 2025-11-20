@@ -511,6 +511,13 @@ type fillInEntriesContext interface {
 	HasMutatorFinished(mutatorName string) bool
 }
 
+func GetModuleInfoJSONInfo(ctx OtherModuleProviderContext, module ModuleOrProxy) *ModuleInfoJSONInfo {
+	if commInfo, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider); ok {
+		return commInfo.ModuleInfoJSON
+	}
+	return nil
+}
+
 func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 	a.entryContext = ctx
 	a.EntryMap = make(map[string][]string)
@@ -570,8 +577,8 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 		// install rule there.
 		a.SetBoolIfTrue("LOCAL_UNINSTALLABLE_MODULE", proptools.Bool(base.commonProperties.No_full_install))
 	}
-
-	moduleBuildTargetsInfo := OtherModuleProviderOrDefault(ctx, mod, ModuleBuildTargetsProvider)
+	commInfo := OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider)
+	moduleBuildTargetsInfo := commInfo.ModuleBuildTargets
 
 	if info.UncheckedModule {
 		a.SetBool("LOCAL_DONT_CHECK_MODULE", true)
@@ -662,11 +669,11 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 		}
 	}
 
-	if licenseMetadata, ok := OtherModuleProvider(ctx, mod, LicenseMetadataProvider); ok {
+	if licenseMetadata := commInfo.LicenseMetadata; licenseMetadata != nil {
 		a.SetPath("LOCAL_SOONG_LICENSE_METADATA", licenseMetadata.LicenseMetadataPath)
 	}
 
-	if _, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+	if commInfo.ModuleInfoJSON != nil {
 		a.SetBool("LOCAL_SOONG_MODULE_INFO_JSON", true)
 	}
 
@@ -905,7 +912,7 @@ func getSoongOnlyDataFromMods(ctx fillInEntriesContext, mods []ModuleOrProxy) ([
 		if commonInfo.SkipAndroidMkProcessing {
 			continue
 		}
-		if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+		if moduleInfoJSON := commonInfo.ModuleInfoJSON; moduleInfoJSON != nil {
 			moduleInfoJSONs = append(moduleInfoJSONs, moduleInfoJSON.Data...)
 		}
 		if contribution := getDistContributions(ctx, mod); contribution != nil {
@@ -1096,7 +1103,7 @@ func translateAndroidModule(ctx SingletonContext, w io.Writer, moduleInfoJSONs *
 	}
 
 	if !data.Entries.disabled() {
-		if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+		if moduleInfoJSON := GetModuleInfoJSONInfo(ctx, mod); moduleInfoJSON != nil {
 			*moduleInfoJSONs = append(*moduleInfoJSONs, moduleInfoJSON.Data...)
 		}
 	}
@@ -1131,14 +1138,14 @@ func translateAndroidMkEntriesModule(ctx SingletonContext, w io.Writer, moduleIn
 	entriesList := provider.AndroidMkEntries()
 	aconfigUpdateAndroidMkEntries(ctx, mod, &entriesList)
 
-	moduleInfoJSON, providesModuleInfoJSON := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider)
+	moduleInfoJSON := GetModuleInfoJSONInfo(ctx, mod)
 
 	// Any new or special cases here need review to verify correct propagation of license information.
 	for _, entries := range entriesList {
 		entries.fillInEntries(ctx, mod)
 		entries.write(w)
 
-		if providesModuleInfoJSON && !entries.disabled() {
+		if moduleInfoJSON != nil && !entries.disabled() {
 			// append only the name matching moduleInfoJSON entry
 			for _, m := range moduleInfoJSON.Data {
 				if m.RegisterNameOverride == entries.OverrideName && m.SubName == entries.SubName {
@@ -1311,7 +1318,7 @@ func translateAndroidMkEntriesInfoModule(ctx SingletonContext, w io.Writer, modu
 	}
 
 	if !info.PrimaryInfo.disabled() {
-		if moduleInfoJSON, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+		if moduleInfoJSON := commonInfo.ModuleInfoJSON; moduleInfoJSON != nil {
 			*moduleInfoJSONs = append(*moduleInfoJSONs, moduleInfoJSON.Data...)
 		}
 	}
@@ -1503,7 +1510,7 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 		helperInfo.SetBoolIfTrue("LOCAL_UNINSTALLABLE_MODULE", commonInfo.NoFullInstall)
 	}
 
-	moduleBuildTargetsInfo := OtherModuleProviderOrDefault(ctx, mod, ModuleBuildTargetsProvider)
+	moduleBuildTargetsInfo := commonInfo.ModuleBuildTargets
 
 	if info.UncheckedModule {
 		helperInfo.SetBool("LOCAL_DONT_CHECK_MODULE", true)
@@ -1582,11 +1589,11 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 		helperInfo.SetString("LOCAL_IS_HOST_MODULE", "true")
 	}
 
-	if licenseMetadata, ok := OtherModuleProvider(ctx, mod, LicenseMetadataProvider); ok {
+	if licenseMetadata := commonInfo.LicenseMetadata; licenseMetadata != nil {
 		helperInfo.SetPath("LOCAL_SOONG_LICENSE_METADATA", licenseMetadata.LicenseMetadataPath)
 	}
 
-	if _, ok := OtherModuleProvider(ctx, mod, ModuleInfoJSONProvider); ok {
+	if moduleInfoJSON := commonInfo.ModuleInfoJSON; moduleInfoJSON != nil {
 		helperInfo.SetBool("LOCAL_SOONG_MODULE_INFO_JSON", true)
 	}
 
