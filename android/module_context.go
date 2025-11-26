@@ -241,7 +241,7 @@ type ModuleContext interface {
 	ExtraModuleInfoJSON() *ModuleInfoJSON
 
 	// SetOutputFiles stores the outputFiles to outputFiles property, which is used
-	// to set the OutputFilesProvider later.
+	// to set the OutputFiles in CommonModuleInfo later.
 	SetOutputFiles(outputFiles Paths, tag string)
 
 	GetOutputFiles() OutputFilesInfo
@@ -292,6 +292,12 @@ type ModuleContext interface {
 	// This is similar to OutputFiles, but can be used for files that are not intended to be
 	// consumed by other modules. These files are built as part of checkbuild.
 	ModulePhonyFiles(srcPaths ...Path)
+
+	SetLogtagsInfo(info *LogtagsInfo)
+
+	SetTestModuleInfo(info *TestModuleInformation)
+
+	SetSymbolicOutputInfo(info *SymbolicOutputInfos)
 }
 
 type moduleContext struct {
@@ -306,7 +312,7 @@ type moduleContext struct {
 	module           Module
 	phonies          map[string]Paths
 	// outputFiles stores the output of a module by tag and is used to set
-	// the OutputFilesProvider in GenerateBuildActions
+	// the OutputFiles in CommonModuleInfo in GenerateBuildActions
 	outputFiles OutputFilesInfo
 
 	TransitiveInstallFiles depset.DepSet[InstallPath]
@@ -355,6 +361,13 @@ type moduleContext struct {
 
 	testSuiteInfo    TestSuiteInfo
 	testSuiteInfoSet bool
+
+	logTags           *LogtagsInfo
+	logTagsSet        bool
+	testModuleInfo    *TestModuleInformation
+	testModuleInfoSet bool
+	symbolicOutput    *SymbolicOutputInfos
+	symbolicOutputSet bool
 }
 
 var _ ModuleContext = &moduleContext{}
@@ -1092,4 +1105,28 @@ func (m *moduleContext) ModulePhonyFiles(srcPaths ...Path) {
 		}
 	}
 	m.modulePhonyFiles = append(m.modulePhonyFiles, srcPaths...)
+}
+
+func (c *moduleContext) SetLogtagsInfo(info *LogtagsInfo) {
+	if c.logTagsSet {
+		panic("Cannot call SetLogtagsInfo twice")
+	}
+	c.logTags = info
+	c.logTagsSet = true
+}
+
+func (c *moduleContext) SetTestModuleInfo(info *TestModuleInformation) {
+	if c.testModuleInfoSet {
+		panic("Cannot call SetTestModuleInfo twice")
+	}
+	c.testModuleInfo = info
+	c.testModuleInfoSet = true
+}
+
+func (c *moduleContext) SetSymbolicOutputInfo(info *SymbolicOutputInfos) {
+	if c.symbolicOutputSet {
+		panic("Cannot call SetSymbolicOutputInfo twice")
+	}
+	c.symbolicOutput = info
+	c.symbolicOutputSet = true
 }

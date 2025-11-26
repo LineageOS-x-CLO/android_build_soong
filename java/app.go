@@ -421,7 +421,7 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 		a.aapt.manifestValues.applicationId = *applicationId
 	}
 	a.generateAndroidBuildActions(ctx)
-	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+	ctx.SetTestModuleInfo(&android.TestModuleInformation{
 		TestOnly: true,
 	})
 	appInfo := &AppInfo{
@@ -1832,7 +1832,7 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		MkInclude:               "$(BUILD_SYSTEM)/soong_app_prebuilt.mk",
 		MkAppClass:              "APPS",
 	})
-	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+	ctx.SetTestModuleInfo(&android.TestModuleInformation{
 		TestOnly:       true,
 		TopLevelTarget: true,
 	})
@@ -2090,7 +2090,7 @@ type OverrideAndroidTest struct {
 func (i *OverrideAndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// All the overrides happen in the base module.
 	// TODO(jungjw): Check the base module type.
-	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+	ctx.SetTestModuleInfo(&android.TestModuleInformation{
 		TestOnly:       true,
 		TopLevelTarget: true,
 	})

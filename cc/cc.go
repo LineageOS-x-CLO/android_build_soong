@@ -2306,7 +2306,7 @@ func CopySymbolsAndSetSymbolsInfoProvider(ctx android.ModuleContext, symbolInfos
 		})
 	}
 
-	android.SetProvider(ctx, android.SymbolInfosProvider, symbolicOutputInfos)
+	ctx.SetSymbolicOutputInfo(&symbolicOutputInfos)
 
 	ctx.ModulePhonyFiles(symbolicOutputInfos.SortedUniqueSymbolicOutputPaths()...)
 	ctx.ModulePhonyFiles(symbolicOutputInfos.SortedUniqueElfMappingProtoPaths()...)
@@ -2362,7 +2362,7 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	ctx := moduleContextFromAndroidModuleContext(actx, c)
 
 	c.logtagsPaths = android.PathsForModuleSrc(actx, c.Properties.Logtags)
-	android.SetProvider(ctx, android.LogtagsProviderKey, &android.LogtagsInfo{
+	actx.SetLogtagsInfo(&android.LogtagsInfo{
 		Logtags: c.logtagsPaths,
 	})
 
@@ -2373,7 +2373,7 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		testOnly = Bool(c.sourceProperties.Test_only)
 	}
 	// Keep before any early returns.
-	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+	ctx.SetTestModuleInfo(&android.TestModuleInformation{
 		TestOnly:       testOnly,
 		TopLevelTarget: c.testModule,
 	})
@@ -2727,17 +2727,14 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	}
 	android.SetProvider(ctx, CcInfoProvider, &ccInfo)
 
-	android.SetProvider(ctx, android.TestSuiteSharedLibsInfoProvider, android.TestSuiteSharedLibsInfo{
-		MakeNames: c.Properties.AndroidMkSharedLibs,
-	})
-
 	// TODO: Refactor MakeLibName so we don't have to fake CommonModuleInfo like this
 	myCommonInfo := android.CommonModuleInfo{
 		BaseModuleName: c.BaseModuleName(),
 		Target:         ctx.Target(),
 	}
 	android.SetProvider(ctx, android.MakeNameInfoProvider, android.MakeNameInfo{
-		Name: MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()),
+		SharedLibsMakeNames: c.Properties.AndroidMkSharedLibs,
+		MakeName:            MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()),
 	})
 
 	c.setOutputFiles(ctx)

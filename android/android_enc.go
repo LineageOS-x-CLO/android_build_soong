@@ -6743,12 +6743,119 @@ func (r CommonModuleInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) err
 			return err
 		}
 	}
+
+	val13 := r.Phonies == nil
+	if err = gobtools.EncodeBool(buf, val13); err != nil {
+		return err
+	}
+	if !val13 {
+		if err = (*r.Phonies).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val14 := r.OutputFiles == nil
+	if err = gobtools.EncodeBool(buf, val14); err != nil {
+		return err
+	}
+	if !val14 {
+		if err = (*r.OutputFiles).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val15 := r.ModuleBuildTargets == nil
+	if err = gobtools.EncodeBool(buf, val15); err != nil {
+		return err
+	}
+	if !val15 {
+		if err = (*r.ModuleBuildTargets).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val16 := r.HostToolProvider == nil
+	if err = gobtools.EncodeBool(buf, val16); err != nil {
+		return err
+	}
+	if !val16 {
+		if err = (*r.HostToolProvider).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val17 := r.Logtags == nil
+	if err = gobtools.EncodeBool(buf, val17); err != nil {
+		return err
+	}
+	if !val17 {
+		if err = (*r.Logtags).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val18 := r.TestModuleInfo == nil
+	if err = gobtools.EncodeBool(buf, val18); err != nil {
+		return err
+	}
+	if !val18 {
+		if err = (*r.TestModuleInfo).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val19 := r.SymbolicOutput == nil
+	if err = gobtools.EncodeBool(buf, val19); err != nil {
+		return err
+	}
+	if !val19 {
+		if (*r.SymbolicOutput) == nil {
+			if err = gobtools.EncodeInt(buf, -1); err != nil {
+				return err
+			}
+		} else {
+			if err = gobtools.EncodeInt(buf, len((*r.SymbolicOutput))); err != nil {
+				return err
+			}
+			for val20 := 0; val20 < len((*r.SymbolicOutput)); val20++ {
+				val21 := (*r.SymbolicOutput)[val20] == nil
+				if err = gobtools.EncodeBool(buf, val21); err != nil {
+					return err
+				}
+				if !val21 {
+					if err = (*(*r.SymbolicOutput)[val20]).Encode(ctx, buf); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	val22 := r.IdeInfo == nil
+	if err = gobtools.EncodeBool(buf, val22); err != nil {
+		return err
+	}
+	if !val22 {
+		if err = (*r.IdeInfo).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
+
+	val23 := r.AconfigPropagatingDeclarations == nil
+	if err = gobtools.EncodeBool(buf, val23); err != nil {
+		return err
+	}
+	if !val23 {
+		if err = (*r.AconfigPropagatingDeclarations).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
 func (r CommonModuleInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":android.CommonModuleInfo")
-	hasher.WriteInt(45)
+	hasher.WriteInt(54)
 	hasher.WriteString(":.bool")
 	if r.Enabled {
 		hasher.WriteByte(1)
@@ -7030,6 +7137,158 @@ func (r CommonModuleInfo) CustomHash(hasher *proptools.Hasher) error {
 			return nil
 		}
 		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.Licenses)), val17); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*PhonyInfo")
+	val18 := r.Phonies == nil
+	if val18 {
+		hasher.WriteByte(0)
+	} else {
+		val19 := func(hasher *proptools.Hasher) error {
+			if err := (*r.Phonies).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.Phonies)), val19); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*OutputFilesInfo")
+	val20 := r.OutputFiles == nil
+	if val20 {
+		hasher.WriteByte(0)
+	} else {
+		val21 := func(hasher *proptools.Hasher) error {
+			if err := (*r.OutputFiles).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.OutputFiles)), val21); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*ModuleBuildTargetsInfo")
+	val22 := r.ModuleBuildTargets == nil
+	if val22 {
+		hasher.WriteByte(0)
+	} else {
+		val23 := func(hasher *proptools.Hasher) error {
+			if err := (*r.ModuleBuildTargets).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.ModuleBuildTargets)), val23); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*HostToolProviderInfo")
+	val24 := r.HostToolProvider == nil
+	if val24 {
+		hasher.WriteByte(0)
+	} else {
+		val25 := func(hasher *proptools.Hasher) error {
+			if err := (*r.HostToolProvider).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.HostToolProvider)), val25); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*LogtagsInfo")
+	val26 := r.Logtags == nil
+	if val26 {
+		hasher.WriteByte(0)
+	} else {
+		val27 := func(hasher *proptools.Hasher) error {
+			if err := (*r.Logtags).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.Logtags)), val27); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*TestModuleInformation")
+	val28 := r.TestModuleInfo == nil
+	if val28 {
+		hasher.WriteByte(0)
+	} else {
+		val29 := func(hasher *proptools.Hasher) error {
+			if err := (*r.TestModuleInfo).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.TestModuleInfo)), val29); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*SymbolicOutputInfos")
+	val30 := r.SymbolicOutput == nil
+	if val30 {
+		hasher.WriteByte(0)
+	} else {
+		val34 := func(hasher *proptools.Hasher) error {
+			hasher.WriteString(":android.SymbolicOutputInfos")
+			hasher.WriteString(":.[]*SymbolicOutputInfo")
+			hasher.WriteInt(len((*r.SymbolicOutput)))
+			for val31 := 0; val31 < len((*r.SymbolicOutput)); val31++ {
+				hasher.WriteString(":.*SymbolicOutputInfo")
+				val32 := (*r.SymbolicOutput)[val31] == nil
+				if val32 {
+					hasher.WriteByte(0)
+				} else {
+					val33 := func(hasher *proptools.Hasher) error {
+						if err := (*(*r.SymbolicOutput)[val31]).CustomHash(hasher); err != nil {
+							return err
+						}
+						return nil
+					}
+					if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer((*r.SymbolicOutput)[val31])), val33); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.SymbolicOutput)), val34); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*IdeInfo")
+	val35 := r.IdeInfo == nil
+	if val35 {
+		hasher.WriteByte(0)
+	} else {
+		val36 := func(hasher *proptools.Hasher) error {
+			if err := (*r.IdeInfo).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.IdeInfo)), val36); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.*aconfigPropagatingDeclarationsInfo")
+	val37 := r.AconfigPropagatingDeclarations == nil
+	if val37 {
+		hasher.WriteByte(0)
+	} else {
+		val38 := func(hasher *proptools.Hasher) error {
+			if err := (*r.AconfigPropagatingDeclarations).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.AconfigPropagatingDeclarations)), val38); err != nil {
 			return err
 		}
 	}
@@ -7362,6 +7621,132 @@ func (r *CommonModuleInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) er
 			return err
 		}
 		r.Licenses = &val74
+	}
+
+	var val78 bool
+	if err = gobtools.DecodeBool(buf, &val78); err != nil {
+		return err
+	}
+	if !val78 {
+		var val77 PhonyInfo
+		if err = val77.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.Phonies = &val77
+	}
+
+	var val81 bool
+	if err = gobtools.DecodeBool(buf, &val81); err != nil {
+		return err
+	}
+	if !val81 {
+		var val80 OutputFilesInfo
+		if err = val80.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.OutputFiles = &val80
+	}
+
+	var val84 bool
+	if err = gobtools.DecodeBool(buf, &val84); err != nil {
+		return err
+	}
+	if !val84 {
+		var val83 ModuleBuildTargetsInfo
+		if err = val83.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.ModuleBuildTargets = &val83
+	}
+
+	var val87 bool
+	if err = gobtools.DecodeBool(buf, &val87); err != nil {
+		return err
+	}
+	if !val87 {
+		var val86 HostToolProviderInfo
+		if err = val86.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.HostToolProvider = &val86
+	}
+
+	var val90 bool
+	if err = gobtools.DecodeBool(buf, &val90); err != nil {
+		return err
+	}
+	if !val90 {
+		var val89 LogtagsInfo
+		if err = val89.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.Logtags = &val89
+	}
+
+	var val93 bool
+	if err = gobtools.DecodeBool(buf, &val93); err != nil {
+		return err
+	}
+	if !val93 {
+		var val92 TestModuleInformation
+		if err = val92.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.TestModuleInfo = &val92
+	}
+
+	var val96 bool
+	if err = gobtools.DecodeBool(buf, &val96); err != nil {
+		return err
+	}
+	if !val96 {
+		var val95 SymbolicOutputInfos
+		var val99 int
+		err = gobtools.DecodeInt(buf, &val99)
+		if err != nil {
+			return err
+		}
+		if val99 != -1 {
+			val95 = make([]*SymbolicOutputInfo, val99)
+			for val100 := 0; val100 < int(val99); val100++ {
+				var val102 bool
+				if err = gobtools.DecodeBool(buf, &val102); err != nil {
+					return err
+				}
+				if !val102 {
+					var val101 SymbolicOutputInfo
+					if err = val101.Decode(ctx, buf); err != nil {
+						return err
+					}
+					val95[val100] = &val101
+				}
+			}
+		}
+		r.SymbolicOutput = &val95
+	}
+
+	var val105 bool
+	if err = gobtools.DecodeBool(buf, &val105); err != nil {
+		return err
+	}
+	if !val105 {
+		var val104 IdeInfo
+		if err = val104.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.IdeInfo = &val104
+	}
+
+	var val108 bool
+	if err = gobtools.DecodeBool(buf, &val108); err != nil {
+		return err
+	}
+	if !val108 {
+		var val107 aconfigPropagatingDeclarationsInfo
+		if err = val107.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.AconfigPropagatingDeclarations = &val107
 	}
 
 	return err
@@ -13233,7 +13618,6 @@ func (r TestModuleInformation) GetTypeId() int16 {
 // begin of test_suites.go
 func init() {
 	TestSuiteInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(TestSuiteInfo) })
-	TestSuiteSharedLibsInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(TestSuiteSharedLibsInfo) })
 	MakeNameInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(MakeNameInfo) })
 	FilePairGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(FilePair) })
 	TestSuiteInstallsInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(TestSuiteInstallsInfo) })
@@ -13356,12 +13740,22 @@ func (r TestSuiteInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error 
 	if err = gobtools.EncodeBool(buf, r.IsUnitTest); err != nil {
 		return err
 	}
+
+	val6 := r.TestSuiteInstalls == nil
+	if err = gobtools.EncodeBool(buf, val6); err != nil {
+		return err
+	}
+	if !val6 {
+		if err = (*r.TestSuiteInstalls).Encode(ctx, buf); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
 func (r TestSuiteInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":android.TestSuiteInfo")
-	hasher.WriteInt(15)
+	hasher.WriteInt(16)
 	hasher.WriteString(":.string")
 	hasher.WriteString(r.NameSuffix)
 	hasher.WriteString(":.[]string")
@@ -13519,6 +13913,21 @@ func (r TestSuiteInfo) CustomHash(hasher *proptools.Hasher) error {
 	} else {
 		hasher.WriteByte(0)
 	}
+	hasher.WriteString(":.*TestSuiteInstallsInfo")
+	val18 := r.TestSuiteInstalls == nil
+	if val18 {
+		hasher.WriteByte(0)
+	} else {
+		val19 := func(hasher *proptools.Hasher) error {
+			if err := (*r.TestSuiteInstalls).CustomHash(hasher); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.TestSuiteInstalls)), val19); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -13660,6 +14069,18 @@ func (r *TestSuiteInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error
 		return err
 	}
 
+	var val37 bool
+	if err = gobtools.DecodeBool(buf, &val37); err != nil {
+		return err
+	}
+	if !val37 {
+		var val36 TestSuiteInstallsInfo
+		if err = val36.Decode(ctx, buf); err != nil {
+			return err
+		}
+		r.TestSuiteInstalls = &val36
+	}
+
 	return err
 }
 
@@ -13669,88 +14090,65 @@ func (r TestSuiteInfo) GetTypeId() int16 {
 	return TestSuiteInfoGobRegId
 }
 
-func (r TestSuiteSharedLibsInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
+func (r MakeNameInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 	var err error
 
-	if r.MakeNames == nil {
+	if err = gobtools.EncodeString(buf, r.MakeName); err != nil {
+		return err
+	}
+
+	if r.SharedLibsMakeNames == nil {
 		if err = gobtools.EncodeInt(buf, -1); err != nil {
 			return err
 		}
 	} else {
-		if err = gobtools.EncodeInt(buf, len(r.MakeNames)); err != nil {
+		if err = gobtools.EncodeInt(buf, len(r.SharedLibsMakeNames)); err != nil {
 			return err
 		}
-		for val1 := 0; val1 < len(r.MakeNames); val1++ {
-			if err = gobtools.EncodeString(buf, r.MakeNames[val1]); err != nil {
+		for val1 := 0; val1 < len(r.SharedLibsMakeNames); val1++ {
+			if err = gobtools.EncodeString(buf, r.SharedLibsMakeNames[val1]); err != nil {
 				return err
 			}
 		}
-	}
-	return err
-}
-
-func (r TestSuiteSharedLibsInfo) CustomHash(hasher *proptools.Hasher) error {
-	hasher.WriteString(":android.TestSuiteSharedLibsInfo")
-	hasher.WriteInt(1)
-	hasher.WriteString(":.[]string")
-	hasher.WriteInt(len(r.MakeNames))
-	for val1 := 0; val1 < len(r.MakeNames); val1++ {
-		hasher.WriteString(":.string")
-		hasher.WriteString(r.MakeNames[val1])
-	}
-	return nil
-}
-
-func (r *TestSuiteSharedLibsInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
-	var err error
-
-	var val2 int
-	err = gobtools.DecodeInt(buf, &val2)
-	if err != nil {
-		return err
-	}
-	if val2 != -1 {
-		r.MakeNames = make([]string, val2)
-		for val3 := 0; val3 < int(val2); val3++ {
-			err = gobtools.DecodeString(buf, &r.MakeNames[val3])
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return err
-}
-
-var TestSuiteSharedLibsInfoGobRegId int16
-
-func (r TestSuiteSharedLibsInfo) GetTypeId() int16 {
-	return TestSuiteSharedLibsInfoGobRegId
-}
-
-func (r MakeNameInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
-	var err error
-
-	if err = gobtools.EncodeString(buf, r.Name); err != nil {
-		return err
 	}
 	return err
 }
 
 func (r MakeNameInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":android.MakeNameInfo")
-	hasher.WriteInt(1)
+	hasher.WriteInt(2)
 	hasher.WriteString(":.string")
-	hasher.WriteString(r.Name)
+	hasher.WriteString(r.MakeName)
+	hasher.WriteString(":.[]string")
+	hasher.WriteInt(len(r.SharedLibsMakeNames))
+	for val1 := 0; val1 < len(r.SharedLibsMakeNames); val1++ {
+		hasher.WriteString(":.string")
+		hasher.WriteString(r.SharedLibsMakeNames[val1])
+	}
 	return nil
 }
 
 func (r *MakeNameInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 	var err error
 
-	err = gobtools.DecodeString(buf, &r.Name)
+	err = gobtools.DecodeString(buf, &r.MakeName)
 	if err != nil {
 		return err
+	}
+
+	var val3 int
+	err = gobtools.DecodeInt(buf, &val3)
+	if err != nil {
+		return err
+	}
+	if val3 != -1 {
+		r.SharedLibsMakeNames = make([]string, val3)
+		for val4 := 0; val4 < int(val3); val4++ {
+			err = gobtools.DecodeString(buf, &r.SharedLibsMakeNames[val4])
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return err
