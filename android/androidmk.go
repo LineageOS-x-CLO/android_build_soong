@@ -577,8 +577,8 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 		// install rule there.
 		a.SetBoolIfTrue("LOCAL_UNINSTALLABLE_MODULE", proptools.Bool(base.commonProperties.No_full_install))
 	}
-	commInfo := OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider)
-	moduleBuildTargetsInfo := commInfo.ModuleBuildTargets
+
+	moduleBuildTargetsInfo := OtherModuleProviderOrDefault(ctx, mod, ModuleBuildTargetsProvider)
 
 	if info.UncheckedModule {
 		a.SetBool("LOCAL_DONT_CHECK_MODULE", true)
@@ -668,6 +668,8 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 			prefix = "2ND_" + prefix
 		}
 	}
+
+	commInfo := OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider)
 
 	if licenseMetadata := commInfo.LicenseMetadata; licenseMetadata != nil {
 		a.SetPath("LOCAL_SOONG_LICENSE_METADATA", licenseMetadata.LicenseMetadataPath)
@@ -1510,7 +1512,7 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 		helperInfo.SetBoolIfTrue("LOCAL_UNINSTALLABLE_MODULE", commonInfo.NoFullInstall)
 	}
 
-	moduleBuildTargetsInfo := commonInfo.ModuleBuildTargets
+	moduleBuildTargetsInfo := OtherModuleProviderOrDefault(ctx, mod, ModuleBuildTargetsProvider)
 
 	if info.UncheckedModule {
 		helperInfo.SetBool("LOCAL_DONT_CHECK_MODULE", true)
