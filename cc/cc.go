@@ -270,6 +270,7 @@ type LinkableInfo struct {
 	// FuzzSharedLibraries returns the shared library dependencies for this module.
 	// Expects that IsFuzzModule returns true.
 	FuzzSharedLibraries      InstallPairs
+	FuzzDependencies         depset.DepSet[FuzzLibraryInstall]
 	IsVndkPrebuiltLibrary    bool
 	HasLLNDKStubs            bool
 	IsLLNDKMovedToApex       bool
@@ -2306,7 +2307,7 @@ func CopySymbolsAndSetSymbolsInfoProvider(ctx android.ModuleContext, symbolInfos
 		})
 	}
 
-	android.SetProvider(ctx, android.SymbolInfosProvider, symbolicOutputInfos)
+	ctx.SetSymbolicOutputInfo(&symbolicOutputInfos)
 
 	ctx.ModulePhonyFiles(symbolicOutputInfos.SortedUniqueSymbolicOutputPaths()...)
 	ctx.ModulePhonyFiles(symbolicOutputInfos.SortedUniqueElfMappingProtoPaths()...)
@@ -2362,7 +2363,7 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	ctx := moduleContextFromAndroidModuleContext(actx, c)
 
 	c.logtagsPaths = android.PathsForModuleSrc(actx, c.Properties.Logtags)
-	android.SetProvider(ctx, android.LogtagsProviderKey, &android.LogtagsInfo{
+	actx.SetLogtagsInfo(&android.LogtagsInfo{
 		Logtags: c.logtagsPaths,
 	})
 
@@ -2373,7 +2374,7 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		testOnly = Bool(c.sourceProperties.Test_only)
 	}
 	// Keep before any early returns.
-	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
+	ctx.SetTestModuleInfo(&android.TestModuleInformation{
 		TestOnly:       testOnly,
 		TopLevelTarget: c.testModule,
 	})
@@ -2556,6 +2557,11 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	c.checkLinkType(ctx)
 	notDoubleLoadableReason := c.checkDoubleLoadableLibraries(ctx)
 
+	var fuzzDependencies depset.DepSet[FuzzLibraryInstall]
+	if c.library != nil && c.Shared() && c.outputFile.Valid() {
+		fuzzDependencies = PropagateSharedLibraryFuzzerDependencies(ctx, c.outputFile, c.isFuzzer())
+	}
+
 	if b, ok := c.compiler.(*baseCompiler); ok {
 		c.hasAidl = b.hasSrcExt(ctx, ".aidl")
 		c.hasLex = b.hasSrcExt(ctx, ".l") || b.hasSrcExt(ctx, ".ll")
@@ -2589,6 +2595,8 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 			linkableInfo.SAbiDumpFiles = library.objs().sAbiDumpFiles
 		}
 	}
+	linkableInfo.FuzzDependencies = fuzzDependencies
+
 	android.SetProvider(ctx, LinkableInfoProvider, linkableInfo)
 	ccInfo := CcInfo{
 		IsPrebuilt:              c.IsPrebuilt(),
@@ -2727,17 +2735,14 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	}
 	android.SetProvider(ctx, CcInfoProvider, &ccInfo)
 
-	android.SetProvider(ctx, android.TestSuiteSharedLibsInfoProvider, android.TestSuiteSharedLibsInfo{
-		MakeNames: c.Properties.AndroidMkSharedLibs,
-	})
-
 	// TODO: Refactor MakeLibName so we don't have to fake CommonModuleInfo like this
 	myCommonInfo := android.CommonModuleInfo{
 		BaseModuleName: c.BaseModuleName(),
 		Target:         ctx.Target(),
 	}
 	android.SetProvider(ctx, android.MakeNameInfoProvider, android.MakeNameInfo{
-		Name: MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()),
+		SharedLibsMakeNames: c.Properties.AndroidMkSharedLibs,
+		MakeName:            MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()),
 	})
 
 	c.setOutputFiles(ctx)

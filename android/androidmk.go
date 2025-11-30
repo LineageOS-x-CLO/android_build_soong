@@ -582,7 +582,7 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod Module) {
 
 	if info.UncheckedModule {
 		a.SetBool("LOCAL_DONT_CHECK_MODULE", true)
-	} else if moduleBuildTargetsInfo.CheckbuildTarget != nil {
+	} else if moduleBuildTargetsInfo != nil && moduleBuildTargetsInfo.CheckbuildTarget != nil {
 		a.SetPath("LOCAL_CHECKED_MODULE", moduleBuildTargetsInfo.CheckbuildTarget)
 	} else {
 		a.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
@@ -1514,13 +1514,13 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod ModuleOrProx
 
 	if info.UncheckedModule {
 		helperInfo.SetBool("LOCAL_DONT_CHECK_MODULE", true)
-	} else if moduleBuildTargetsInfo.CheckbuildTarget != nil {
+	} else if moduleBuildTargetsInfo != nil && moduleBuildTargetsInfo.CheckbuildTarget != nil {
 		helperInfo.SetPath("LOCAL_CHECKED_MODULE", moduleBuildTargetsInfo.CheckbuildTarget)
 	} else {
 		helperInfo.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
 	}
 
-	if moduleBuildTargetsInfo.ModulePhonyTarget != nil {
+	if moduleBuildTargetsInfo != nil && moduleBuildTargetsInfo.ModulePhonyTarget != nil {
 		helperInfo.SetPath("LOCAL_ADDITIONAL_CHECKED_MODULE", moduleBuildTargetsInfo.ModulePhonyTarget)
 	}
 

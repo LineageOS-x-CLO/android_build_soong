@@ -497,6 +497,9 @@ type Module struct {
 	android.ModuleBase
 	android.DefaultableModuleBase
 	android.ApexModuleBase
+	// TODO(b/461815001): remove this and replace usage of WalkDepsProxy with
+	//  VisitDirectDepsProxy and DepSets.
+	blueprint.ModuleUsesIncrementalWalkDeps
 
 	// Functionality common to Module and Import.
 	embeddableInModuleAndImport
@@ -1071,8 +1074,17 @@ func (j *Module) aidlFlags(ctx android.ModuleContext, aidlPreprocess android.Opt
 		j.ignoredAidlPermissionList = android.PathsForModuleSrcExcludes(ctx, exceptions, nil)
 	}
 
-	aidlMinSdkVersion := j.MinSdkVersion(ctx).String()
-	flags = append(flags, "--min_sdk_version="+aidlMinSdkVersion)
+	aidlMinSdkVersion := j.MinSdkVersion(ctx)
+
+	// Cap the API level for vendor modules to 34.
+	if j.InstallInVendor() {
+		vendorCap := android.ApiLevelFrom(ctx, "34")
+		if vendorCap.LessThan(aidlMinSdkVersion) {
+			aidlMinSdkVersion = vendorCap
+		}
+	}
+
+	flags = append(flags, "--min_sdk_version="+aidlMinSdkVersion.String())
 
 	return strings.Join(flags, " "), deps
 }

@@ -292,6 +292,12 @@ type ModuleContext interface {
 	// This is similar to OutputFiles, but can be used for files that are not intended to be
 	// consumed by other modules. These files are built as part of checkbuild.
 	ModulePhonyFiles(srcPaths ...Path)
+
+	SetLogtagsInfo(info *LogtagsInfo)
+
+	SetTestModuleInfo(info *TestModuleInformation)
+
+	SetSymbolicOutputInfo(info *SymbolicOutputInfos)
 }
 
 type moduleContext struct {
@@ -355,6 +361,13 @@ type moduleContext struct {
 
 	testSuiteInfo    TestSuiteInfo
 	testSuiteInfoSet bool
+
+	logTags           *LogtagsInfo
+	logTagsSet        bool
+	testModuleInfo    *TestModuleInformation
+	testModuleInfoSet bool
+	symbolicOutput    *SymbolicOutputInfos
+	symbolicOutputSet bool
 }
 
 var _ ModuleContext = &moduleContext{}
@@ -644,12 +657,12 @@ func (m *moduleContext) InstallFileWithExtraFilesZip(installPath InstallPath, na
 
 func (m *moduleContext) PackageFile(installPath InstallPath, name string, srcPath Path) PackagingSpec {
 	fullInstallPath := installPath.Join(m, name)
-	return m.packageFile(fullInstallPath, srcPath, false, false)
+	return m.packageFile(fullInstallPath, srcPath, false, false, nil)
 }
 
 func (m *moduleContext) PackageFileWithFakeFullInstall(installPath InstallPath, name string, srcPath Path) PackagingSpec {
 	fullInstallPath := installPath.Join(m, name)
-	return m.packageFile(fullInstallPath, srcPath, false, true)
+	return m.packageFile(fullInstallPath, srcPath, false, true, nil)
 }
 
 func (m *moduleContext) getAconfigPaths() Paths {
@@ -673,9 +686,14 @@ func (m *moduleContext) getOwnerAndOverrides() (string, []string) {
 	return owner, overrides
 }
 
-func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, executable bool, requiresFullInstall bool) PackagingSpec {
+func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, executable bool, requiresFullInstall bool,
+	extraZip *extraFilesZip) PackagingSpec {
 	licenseFiles := m.Module().EffectiveLicenseFiles()
 	owner, overrides := m.getOwnerAndOverrides()
+	zip := OptionalPath{}
+	if extraZip != nil {
+		zip = OptionalPathForPath(extraZip.zip)
+	}
 	spec := PackagingSpec{
 		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
 		srcPath:               srcPath,
@@ -693,6 +711,7 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 		installInSanitizerDir: m.InstallInSanitizerDir(),
 		variation:             m.ModuleSubDir(),
 		prebuilt:              IsModulePrebuilt(m, m.Module()),
+		extraZip:              zip,
 	}
 	m.packagingSpecs = append(m.packagingSpecs, spec)
 	return spec
@@ -791,7 +810,7 @@ func (m *moduleContext) installFile(installPath InstallPath, name string, srcPat
 		m.installFiles = append(m.installFiles, fullInstallPath)
 	}
 
-	m.packageFile(fullInstallPath, srcPath, executable, m.requiresFullInstall())
+	m.packageFile(fullInstallPath, srcPath, executable, m.requiresFullInstall(), extraZip)
 
 	if checkbuild {
 		if srcPath == nil {
@@ -1092,4 +1111,28 @@ func (m *moduleContext) ModulePhonyFiles(srcPaths ...Path) {
 		}
 	}
 	m.modulePhonyFiles = append(m.modulePhonyFiles, srcPaths...)
+}
+
+func (c *moduleContext) SetLogtagsInfo(info *LogtagsInfo) {
+	if c.logTagsSet {
+		panic("Cannot call SetLogtagsInfo twice")
+	}
+	c.logTags = info
+	c.logTagsSet = true
+}
+
+func (c *moduleContext) SetTestModuleInfo(info *TestModuleInformation) {
+	if c.testModuleInfoSet {
+		panic("Cannot call SetTestModuleInfo twice")
+	}
+	c.testModuleInfo = info
+	c.testModuleInfoSet = true
+}
+
+func (c *moduleContext) SetSymbolicOutputInfo(info *SymbolicOutputInfos) {
+	if c.symbolicOutputSet {
+		panic("Cannot call SetSymbolicOutputInfo twice")
+	}
+	c.symbolicOutput = info
+	c.symbolicOutputSet = true
 }
