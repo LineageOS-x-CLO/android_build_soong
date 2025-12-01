@@ -57,6 +57,7 @@ type RuleBuilder struct {
 	sbox             bool
 	highmem          bool
 	remoteable       RemoteRuleSupports
+	toolchainPaths   []string
 	rbeParams        *remoteexec.REParams
 	outDir           WritablePath
 	sboxOutSubDir    string
@@ -152,6 +153,11 @@ func (r *RuleBuilder) HighMem() *RuleBuilder {
 func (r *RuleBuilder) Remoteable(supports RemoteRuleSupports) *RuleBuilder {
 	r.remoteable = supports
 	return r
+}
+
+// ToolchianPaths adds toolchain paths.
+func (r *RuleBuilder) ToolchainPaths(paths ...string) {
+	r.toolchainPaths = append(r.toolchainPaths, paths...)
 }
 
 // Rewrapper marks the rule as running inside rewrapper using the given params in order to support
@@ -524,7 +530,6 @@ type BuilderContext interface {
 	PathContext
 	Rule(PackageContext, string, blueprint.RuleParams, ...string) blueprint.Rule
 	Build(PackageContext, BuildParams)
-	OtherModuleProviderContext
 }
 
 var _ BuilderContext = ModuleContext(nil)
@@ -865,8 +870,7 @@ func (r *RuleBuilder) build(name string, desc string) {
 		// converts it to a string to replace commandString.
 		sboxCmd := &RuleBuilderCommand{
 			rule: &RuleBuilder{
-				ctx:             r.ctx,
-				sandboxDisabled: r.sandboxDisabled,
+				ctx: r.ctx,
 			},
 		}
 		sboxCmd.builtToolWithoutDeps("sbox").
@@ -884,6 +888,10 @@ func (r *RuleBuilder) build(name string, desc string) {
 		tools = append(tools, sboxCmd.tools...)
 		inputs = append(inputs, sboxCmd.inputs...)
 
+		if len(r.toolchainPaths) > 0 {
+			// set PATH for java command etc here.
+			commandString = "PATH=" + strings.Join(r.toolchainPaths, ":") + ":$PATH " + commandString
+		}
 		if r.rbeParams != nil && r.ctx.Config().UseREWrapper() {
 			// RBE needs a list of input files to copy to the remote builder.  For inputs already
 			// listed in an rsp file, pass the rsp file directly to rewrapper.  For the rest,
@@ -1340,80 +1348,6 @@ func (c *RuleBuilderCommand) ImplicitTools(paths Paths) *RuleBuilderCommand {
 	return c
 }
 
-// Returns the [ModuleProxy] of the tool from dependencies.
-func (c *RuleBuilderCommand) getToolModule(tool string) ModuleProxy {
-	// TODO(jihoonkang): Establish sbox dependency for all modules that utilizes
-	// RuleBuilder.
-	if tool == "sbox" {
-		return ModuleProxy{}
-	}
-	ctx := c.rule.ctx
-	toolModule := ModuleProxy{}
-
-	type ctxInfoStruct struct {
-		// Whether the visiting context is exempt from throwing an error
-		allowlisted bool
-		// The error function to use
-		errorFunc func(string, ...any)
-	}
-
-	var ctxInfo ctxInfoStruct
-	switch ctxType := ctx.(type) {
-	case ModuleContext:
-		ctxInfo = ctxInfoStruct{
-			allowlisted: false,
-			errorFunc:   ctxType.ModuleErrorf,
-		}
-		toolModule = ctxType.GetDirectDepProxyWithTag(tool, HostToolDepTag)
-	case SingletonContext:
-		ctxInfo = ctxInfoStruct{
-			allowlisted: false,
-			errorFunc:   ctxType.Errorf,
-		}
-		ctxType.VisitAllModuleProxies(func(proxy ModuleProxy) {
-			if proxy.Name() == tool {
-				if commonInfo, ok := OtherModuleProvider(ctxType, proxy, CommonModuleInfoProvider); ok {
-					if commonInfo.Host && commonInfo.ExportedToMake &&
-						commonInfo.Target.String() == ctxType.Config().BuildOSTarget.String() {
-						if !toolModule.IsNil() {
-							ctxType.Errorf("Multiple variants of host tool %s found", toolModule.Name())
-						}
-						toolModule = proxy
-					}
-				}
-			}
-		})
-	case builderContextForTests:
-		ctxInfo = ctxInfoStruct{
-			allowlisted: true,
-		}
-	default:
-		ctxInfo = ctxInfoStruct{
-			allowlisted: false,
-			errorFunc: func(fmtStr string, args ...interface{}) {
-				panic(fmt.Errorf(fmtStr, args...))
-			},
-		}
-	}
-
-	if !c.rule.sandboxDisabled && !ctxInfo.allowlisted && toolModule.IsNil() {
-		ctxInfo.errorFunc("Host tool %s not found in deps", tool)
-	}
-	return toolModule
-}
-
-func (c *RuleBuilderCommand) getToolTransitiveDeps(tool string) InstallPaths {
-	toolModule := c.getToolModule(tool)
-	var transitiveInstallFiles InstallPaths
-	if !toolModule.IsNil() {
-		if installFilesInfo, ok := OtherModuleProvider(c.rule.ctx, toolModule, InstallFilesProvider); ok {
-			transitiveInstallFiles = installFilesInfo.InstallFiles
-		}
-	}
-
-	return transitiveInstallFiles
-}
-
 // BuiltTool adds the specified tool path that was built using a host Soong module to the command line.  The path will
 // be also added to the dependencies returned by RuleBuilder.Tools.
 //
@@ -1434,13 +1368,7 @@ func (c *RuleBuilderCommand) BuiltTool(tool string) *RuleBuilderCommand {
 // builtToolWithoutDeps is similar to BuiltTool, but doesn't add any dependencies.  It is used
 // internally by RuleBuilder for helper tools that are known to be compiled statically.
 func (c *RuleBuilderCommand) builtToolWithoutDeps(tool string) *RuleBuilderCommand {
-	ctx := c.rule.ctx
-	transitiveInstallFiles := c.getToolTransitiveDeps(tool).Paths()
-	cmd := c.Tool(ctx.Config().HostToolPath(c.rule.ctx, tool))
-	if len(transitiveInstallFiles) > 0 {
-		cmd.Implicits(transitiveInstallFiles)
-	}
-	return cmd
+	return c.Tool(c.rule.ctx.Config().HostToolPath(c.rule.ctx, tool))
 }
 
 // PrebuiltBuildTool adds the specified tool path from prebuils/build-tools.  The path will be also added to the
@@ -1665,12 +1593,6 @@ func (c *RuleBuilderCommand) String() string {
 	return c.buf.String()
 }
 
-// Adds dependencies to the Soong defined host tool modules. This should be called
-// to utilize the tool in [RuleBuilderCommand.BuiltTool] for non-Singleton modules.
-func AddHostToolDependencies(ctx BottomUpMutatorContext, tools ...string) {
-	ctx.AddFarVariationDependencies(ctx.Config().BuildOSTarget.Variations(), HostToolDepTag, tools...)
-}
-
 // RuleBuilderSboxProtoForTests takes the BuildParams for the manifest passed to RuleBuilder.Sbox()
 // and returns sbox testproto generated by the RuleBuilder.
 func RuleBuilderSboxProtoForTests(t *testing.T, ctx *TestContext, params TestingBuildParams) *sbox_proto.Manifest {
@@ -1725,17 +1647,12 @@ func BuilderContextForTesting(config Config) BuilderContext {
 
 type builderContextForTests struct {
 	PathContext
-	OtherModuleProviderContext
 }
 
 func (builderContextForTests) Rule(PackageContext, string, blueprint.RuleParams, ...string) blueprint.Rule {
 	return nil
 }
 func (builderContextForTests) Build(PackageContext, BuildParams) {}
-
-func (builderContextForTests) otherModuleProvider(m ModuleOrProxy, provider blueprint.AnyProviderKey) (any, bool) {
-	return nil, false
-}
 
 func writeRspFileRule(ctx BuilderContext, rspFile WritablePath, paths Paths) {
 	buf := &strings.Builder{}

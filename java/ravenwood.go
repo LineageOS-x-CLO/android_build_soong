@@ -200,7 +200,7 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		DeviceTemplate: "${RavenwoodTestConfigTemplate}",
 		HostTemplate:   "${RavenwoodTestConfigTemplate}",
 	})
-	r.data = android.PathsForModuleSrc(ctx, r.testProperties.Data)
+	r.data = android.PathsForModuleSrc(ctx, r.testProperties.Data.GetOrDefault(ctx, nil))
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_common_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_prefer32_data)...)
@@ -221,7 +221,7 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// When setting the manifest property, we only want to set it for aaptProperties.
 	// Explicitly remove it from the Module properties to prevent it from using
 	// AndroidManifest.xml as JAR manifest, creating a malformed JAR file.
-	r.Module.properties.Manifest = nil
+	r.Module.properties.Manifest = proptools.Configurable[string]{}
 
 	// Build resources before Java sources.
 	var resourceApk android.Path
@@ -242,8 +242,8 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var runtimeJniModuleNames map[string]bool
 
 	utils := ctx.GetDirectDepsProxyWithTag(ravenwoodUtilsTag)[0]
-	for _, installFile := range android.OtherModuleProviderOrDefault(
-		ctx, utils, android.InstallFilesProvider).InstallFiles {
+	for _, installFile := range android.GetInstallFiles(
+		ctx, utils).InstallFiles {
 		installDeps = append(installDeps, installFile)
 	}
 	jniDeps, ok := android.OtherModuleProvider(ctx, utils, ravenwoodLibgroupJniDepProvider)
@@ -252,8 +252,8 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	runtime := ctx.GetDirectDepsProxyWithTag(ravenwoodRuntimeTag)[0]
-	for _, installFile := range android.OtherModuleProviderOrDefault(
-		ctx, runtime, android.InstallFilesProvider).InstallFiles {
+	for _, installFile := range android.GetInstallFiles(
+		ctx, runtime).InstallFiles {
 		installDeps = append(installDeps, installFile)
 	}
 	jniDeps, ok = android.OtherModuleProvider(ctx, runtime, ravenwoodLibgroupJniDepProvider)
@@ -494,8 +494,8 @@ func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContex
 	// We need to build subruntimes too, so collect their install files.
 	var installDeps android.InstallPaths
 	for _, subruntime := range ctx.GetDirectDepsProxyWithTag(ravenwoodLibSubruntimeTag) {
-		for _, installFile := range android.OtherModuleProviderOrDefault(
-			ctx, subruntime, android.InstallFilesProvider).InstallFiles {
+		for _, installFile := range android.GetInstallFiles(
+			ctx, subruntime).InstallFiles {
 			installDeps = append(installDeps, installFile)
 		}
 	}

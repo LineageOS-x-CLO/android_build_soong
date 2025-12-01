@@ -103,18 +103,6 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	InstallExecutable(installPath InstallPath, name string, srcPath Path, deps ...InstallPath) InstallPath
 
-	// InstallExecutableWithBootstrap creates a rule to copy srcPath to name in the
-	// installPath directory, with the given additional dependencies. The file is
-	// marked executable after copying. It is functionally the same as [InstallExecutable], but
-	// the rule uses the toybox commands from source rather than the ones installed in $HOST_OUT
-	// as the command deps. This is mostly used to install the toybox commands themselves.
-	//
-	// The installed file can be accessed by InstallFilesInfo.InstallFiles, and the PackagingSpec
-	// for the installed file can be accessed by InstallFilesInfo.PackagingSpecs on this module
-	// or by InstallFilesInfo.TransitivePackagingSpecs on modules that depend on this module through
-	// dependency tags for which IsInstallDepNeeded returns true.
-	InstallExecutableWithBootstrap(installPath InstallPath, name string, srcPath Path, deps ...InstallPath) InstallPath
-
 	// InstallFile creates a rule to copy srcPath to name in the installPath directory,
 	// with the given additional dependencies.
 	//
@@ -256,8 +244,8 @@ type ModuleContext interface {
 	ComplianceMetadataInfo() *ComplianceMetadataInfo
 
 	// Get the information about the containers this module belongs to.
-	getContainersInfo() ContainersInfo
-	setContainersInfo(info ContainersInfo)
+	getContainersInfo() *ContainersInfo
+	setContainersInfo(info *ContainersInfo)
 
 	setAconfigPaths(paths Paths)
 
@@ -298,6 +286,10 @@ type ModuleContext interface {
 	SetTestModuleInfo(info *TestModuleInformation)
 
 	SetSymbolicOutputInfo(info *SymbolicOutputInfos)
+
+	SetMakeNamesInfo(info *MakeNamesInfo)
+
+	SetBaseJarJarProviderData(data *BaseJarJarProviderData)
 }
 
 type moduleContext struct {
@@ -348,7 +340,7 @@ type moduleContext struct {
 
 	// containersInfo stores the information about the containers and the information of the
 	// apexes the module belongs to.
-	containersInfo ContainersInfo
+	containersInfo *ContainersInfo
 
 	// Merged Aconfig files for all transitive deps.
 	aconfigFilePaths Paths
@@ -362,12 +354,16 @@ type moduleContext struct {
 	testSuiteInfo    TestSuiteInfo
 	testSuiteInfoSet bool
 
-	logTags           *LogtagsInfo
-	logTagsSet        bool
-	testModuleInfo    *TestModuleInformation
-	testModuleInfoSet bool
-	symbolicOutput    *SymbolicOutputInfos
-	symbolicOutputSet bool
+	logTags                   *LogtagsInfo
+	logTagsSet                bool
+	testModuleInfo            *TestModuleInformation
+	testModuleInfoSet         bool
+	symbolicOutput            *SymbolicOutputInfos
+	symbolicOutputSet         bool
+	makeNames                 *MakeNamesInfo
+	makeNamesSet              bool
+	baseJarJarProviderData    *BaseJarJarProviderData
+	baseJarJarProviderDataSet bool
 }
 
 var _ ModuleContext = &moduleContext{}
@@ -629,27 +625,22 @@ func (m *moduleContext) requiresFullInstall() bool {
 
 func (m *moduleContext) InstallFile(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, true, false, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithoutCheckbuild(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, false, false, nil)
+	return m.installFile(installPath, name, srcPath, deps, false, true, false, nil)
 }
 
 func (m *moduleContext) InstallExecutable(installPath InstallPath, name string, srcPath Path,
 	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, true, true, true, false, nil)
-}
-
-func (m *moduleContext) InstallExecutableWithBootstrap(installPath InstallPath, name string, srcPath Path,
-	deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, true, true, true, true, nil)
+	return m.installFile(installPath, name, srcPath, deps, true, true, true, nil)
 }
 
 func (m *moduleContext) InstallFileWithExtraFilesZip(installPath InstallPath, name string, srcPath Path,
 	extraZip Path, deps ...InstallPath) InstallPath {
-	return m.installFile(installPath, name, srcPath, deps, false, true, true, false, &extraFilesZip{
+	return m.installFile(installPath, name, srcPath, deps, false, true, true, &extraFilesZip{
 		zip: extraZip,
 		dir: installPath,
 	})
@@ -717,20 +708,8 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 	return spec
 }
 
-type ruleKey struct {
-	executable bool
-	bootstrap  bool
-}
-
-var ruleMap = map[ruleKey]blueprint.Rule{
-	{executable: true, bootstrap: true}:   CpExecutableWithBashBootstrap,
-	{executable: true, bootstrap: false}:  CpExecutableWithBash,
-	{executable: false, bootstrap: true}:  CpWithBashBootstrap,
-	{executable: false, bootstrap: false}: CpWithBash,
-}
-
 func (m *moduleContext) installFile(installPath InstallPath, name string, srcPath Path, deps []InstallPath,
-	executable bool, hooks bool, checkbuild bool, bootstrap bool, extraZip *extraFilesZip) InstallPath {
+	executable bool, hooks bool, checkbuild bool, extraZip *extraFilesZip) InstallPath {
 	if _, ok := srcPath.(InstallPath); ok {
 		m.ModuleErrorf("Src path cannot be another installed file. Please use a path from source or intermediates instead.")
 	}
@@ -772,7 +751,10 @@ func (m *moduleContext) installFile(installPath InstallPath, name string, srcPat
 			extraFiles:    extraZip,
 		})
 		if !m.Config().KatiEnabled() {
-			rule := ruleMap[ruleKey{executable: executable, bootstrap: bootstrap}]
+			rule := CpWithBash
+			if executable {
+				rule = CpExecutableWithBash
+			}
 
 			extraCmds := ""
 			if extraZip != nil {
@@ -942,7 +924,7 @@ func (m *moduleContext) InstallTestData(installPath InstallPath, data []DataPath
 	ret := make(InstallPaths, 0, len(data))
 	for _, d := range data {
 		relPath := d.ToRelativeInstallPath()
-		installed := m.installFile(installPath, relPath, d.SrcPath, nil, false, false, true, false, nil)
+		installed := m.installFile(installPath, relPath, d.SrcPath, nil, false, false, true, nil)
 		ret = append(ret, installed)
 	}
 
@@ -1050,11 +1032,11 @@ func (m *moduleContext) TargetRequiredModuleNames() []string {
 	return m.module.TargetRequiredModuleNames()
 }
 
-func (m *moduleContext) getContainersInfo() ContainersInfo {
+func (m *moduleContext) getContainersInfo() *ContainersInfo {
 	return m.containersInfo
 }
 
-func (m *moduleContext) setContainersInfo(info ContainersInfo) {
+func (m *moduleContext) setContainersInfo(info *ContainersInfo) {
 	m.containersInfo = info
 }
 
@@ -1135,4 +1117,20 @@ func (c *moduleContext) SetSymbolicOutputInfo(info *SymbolicOutputInfos) {
 	}
 	c.symbolicOutput = info
 	c.symbolicOutputSet = true
+}
+
+func (c *moduleContext) SetMakeNamesInfo(info *MakeNamesInfo) {
+	if c.makeNamesSet {
+		panic("Cannot call SetMakeNamesInfo twice")
+	}
+	c.makeNames = info
+	c.makeNamesSet = true
+}
+
+func (c *moduleContext) SetBaseJarJarProviderData(data *BaseJarJarProviderData) {
+	if c.baseJarJarProviderDataSet {
+		panic("Cannot call SetBaseJarJarProviderData twice")
+	}
+	c.baseJarJarProviderData = data
+	c.baseJarJarProviderDataSet = true
 }
