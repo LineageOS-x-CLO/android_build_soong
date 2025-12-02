@@ -1543,10 +1543,10 @@ func (m *ModuleBase) computeInstallDeps(ctx ModuleContext) ([]depset.DepSet[Inst
 	var packagingSpecs []depset.DepSet[PackagingSpec]
 	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
 		if isInstallDepNeeded(ctx, dep) {
+			commonInfo := OtherModulePointerProviderOrDefault(ctx, dep, CommonModuleInfoProvider)
 			// Installation is still handled by Make, so anything hidden from Make is not
 			// installable.
-			info := OtherModuleProviderOrDefault(ctx, dep, InstallFilesProvider)
-			commonInfo := OtherModulePointerProviderOrDefault(ctx, dep, CommonModuleInfoProvider)
+			info := GetInstallFilesCommon(commonInfo)
 			if !commonInfo.HideFromMake && !commonInfo.SkipInstall {
 				installDeps = append(installDeps, info.TransitiveInstallFiles)
 			}
@@ -1998,14 +1998,10 @@ type InstallFilesInfo struct {
 	DistFiles TaggedDistFiles
 }
 
-var InstallFilesProvider = blueprint.NewProvider[InstallFilesInfo]()
-
 // @auto-generate: gob
 type SourceFilesInfo struct {
 	Srcs Paths
 }
-
-var SourceFilesInfoProvider = blueprint.NewProvider[SourceFilesInfo]()
 
 // ModuleBuildTargetsInfo is used by buildTargetSingleton to create checkbuild and
 // per-directory build targets.
@@ -2017,6 +2013,34 @@ type ModuleBuildTargetsInfo struct {
 	ModulePhonyTarget       Path
 	NamespaceExportedToMake bool
 	BlueprintDir            string
+}
+
+// Mapping of class names: original --> renamed.  If the value is "", the class will be
+// renamed by the next rdep that has the jarjar_prefix attribute (or this module if it has
+// attribute). Rdeps of that module will inherit the renaming.
+// @auto-generate: gob
+type JarJarRename map[string]string
+
+func (this JarJarRename) GetDebugString() string {
+	result := ""
+	for _, k := range SortedKeys(this) {
+		v := this[k]
+		if strings.Contains(k, "android.companion.virtual.flags.FakeFeatureFlagsImpl") {
+			result += k + "--&gt;" + v + ";"
+		}
+	}
+	return result
+}
+
+// BaseJarJarProviderData contains information that will propagate across dependencies regardless of
+// whether they are java modules or not.
+// @auto-generate: gob
+type BaseJarJarProviderData struct {
+	Rename JarJarRename
+}
+
+func (this BaseJarJarProviderData) GetDebugString() string {
+	return this.Rename.GetDebugString()
 }
 
 // @auto-generate: gob
@@ -2084,12 +2108,20 @@ type CommonModuleInfo struct {
 	Phonies                        *PhonyInfo
 	OutputFiles                    *OutputFilesInfo
 	ModuleBuildTargets             *ModuleBuildTargetsInfo
-	HostToolProvider               *HostToolProviderInfo
+	HostToolInfo                   *HostToolInfo
 	Logtags                        *LogtagsInfo
 	TestModuleInfo                 *TestModuleInformation
 	SymbolicOutput                 *SymbolicOutputInfos
 	IdeInfo                        *IdeInfo
 	AconfigPropagatingDeclarations *aconfigPropagatingDeclarationsInfo
+	MakeNames                      *MakeNamesInfo
+	SourceFiles                    *SourceFilesInfo
+	GeneratedSource                *GeneratedSourceInfo
+	Containers                     *ContainersInfo
+	PackageInfo                    *PackageInfo
+	AndroidMkData                  *AndroidMkDataInfo
+	BaseJarJarProviderData         *BaseJarJarProviderData
+	InstallFiles                   *InstallFilesInfo
 }
 
 // @auto-generate: gob
@@ -2101,8 +2133,9 @@ type ApiLevelOrPlatform struct {
 var CommonModuleInfoProvider = blueprint.NewProvider[*CommonModuleInfo]()
 
 // @auto-generate: gob
-type HostToolProviderInfo struct {
-	HostToolPath OptionalPath
+type HostToolInfo struct {
+	HostToolPath             OptionalPath
+	TransitivePackagingSpecs depset.DepSet[PackagingSpec]
 }
 
 // @auto-generate: gob
@@ -2118,32 +2151,12 @@ type SourceFileGenerator interface {
 	GeneratedDeps() Paths
 }
 
-type HostToolDepTagType interface {
-	isHostToolDepTag() bool
-}
-
-type BaseHostToolDepTag struct {
-	blueprint.BaseDependencyTag
-}
-
-var _ HostToolDepTagType = (*BaseHostToolDepTag)(nil)
-
-func (BaseHostToolDepTag) isHostToolDepTag() bool { return true }
-
-var _ ExcludeFromVisibilityEnforcementTag = (*BaseHostToolDepTag)(nil)
-
-func (BaseHostToolDepTag) ExcludeFromVisibilityEnforcement() {}
-
-var HostToolDepTag = BaseHostToolDepTag{}
-
 // @auto-generate: gob
 type GeneratedSourceInfo struct {
 	GeneratedSourceFiles Paths
 	GeneratedHeaderDirs  Paths
 	GeneratedDeps        Paths
 }
-
-var GeneratedSourceInfoProvider = blueprint.NewProvider[GeneratedSourceInfo]()
 
 func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) {
 	ctx := &moduleContext{
@@ -2221,7 +2234,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	var installFiles InstallFilesInfo
 	var licenses *LicensesInfo
 	var aconfigPropagatingDeclarations *aconfigPropagatingDeclarationsInfo
-	var ideInfo IdeInfo
+	var ideInfo *IdeInfo
 
 	if m.Enabled(ctx) {
 		// ensure all direct android.Module deps are enabled
@@ -2294,7 +2307,8 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		m.module.base().hooks.runPostGenerateAndroidBuildActionsHooks(ctx)
 
 		if x, ok := m.module.(IDEInfo); ok {
-			x.IDEInfo(ctx, &ideInfo)
+			ideInfo = &IdeInfo{}
+			x.IDEInfo(ctx, ideInfo)
 			ideInfo.BaseModuleName = x.BaseModuleName()
 		}
 
@@ -2326,6 +2340,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		ctx.GetMissingDependencies()
 	}
 
+	var sourceFiles *SourceFilesInfo
 	if sourceFileProducer, ok := m.module.(SourceFileProducer); ok {
 		srcs := sourceFileProducer.Srcs()
 		for _, src := range srcs {
@@ -2334,16 +2349,12 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 				return
 			}
 		}
-		SetProvider(ctx, SourceFilesInfoProvider, SourceFilesInfo{Srcs: sourceFileProducer.Srcs()})
+		sourceFiles = &SourceFilesInfo{Srcs: sourceFileProducer.Srcs()}
 	}
 
 	ctx.TransitiveInstallFiles = depset.New[InstallPath](depset.TOPOLOGICAL, ctx.installFiles, dependencyInstallFiles)
 	installFiles.TransitiveInstallFiles = ctx.TransitiveInstallFiles
 	installFiles.TransitivePackagingSpecs = depset.New[PackagingSpec](depset.TOPOLOGICAL, ctx.packagingSpecs, dependencyPackagingSpecs)
-
-	if m.Enabled(ctx) {
-		SetProvider(ctx, InstallFilesProvider, installFiles)
-	}
 
 	var testSuiteInstalls []FilePair
 	if ctx.testSuiteInfoSet {
@@ -2487,8 +2498,12 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		Logtags:                                      ctx.logTags,
 		TestModuleInfo:                               ctx.testModuleInfo,
 		SymbolicOutput:                               ctx.symbolicOutput,
-		IdeInfo:                                      &ideInfo,
+		IdeInfo:                                      ideInfo,
 		AconfigPropagatingDeclarations:               aconfigPropagatingDeclarations,
+		MakeNames:                                    ctx.makeNames,
+		SourceFiles:                                  sourceFiles,
+		Containers:                                   ctx.containersInfo,
+		BaseJarJarProviderData:                       ctx.baseJarJarProviderData,
 	}
 	outputFiles := ctx.GetOutputFiles()
 	if outputFiles.DefaultOutputFiles != nil || outputFiles.TaggedOutputFiles != nil {
@@ -2553,9 +2568,23 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
 		commonData.BaseModuleName = mm.BaseModuleName()
 	}
-	if h, ok := m.module.(HostToolProvider); ok {
-		commonData.HostToolProvider = &HostToolProviderInfo{
-			HostToolPath: h.HostToolPath()}
+
+	commonData.HostToolInfo = computeHostToolInfo(ctx, m.module, installFiles.TransitivePackagingSpecs)
+
+	if s, ok := m.module.(SourceFileGenerator); ok {
+		commonData.GeneratedSource = &GeneratedSourceInfo{
+			GeneratedSourceFiles: s.GeneratedSourceFiles(),
+			GeneratedHeaderDirs:  s.GeneratedHeaderDirs(),
+			GeneratedDeps:        s.GeneratedDeps(),
+		}
+	}
+	if m.Enabled(ctx) {
+		if am, ok := m.module.(AndroidMkDataProvider); ok {
+			commonData.AndroidMkData = &AndroidMkDataInfo{
+				Class: am.AndroidMk().Class,
+			}
+		}
+		commonData.InstallFiles = &installFiles
 	}
 	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
 
@@ -2569,23 +2598,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		}
 	}
 
-	if s, ok := m.module.(SourceFileGenerator); ok {
-		SetProvider(ctx, GeneratedSourceInfoProvider, GeneratedSourceInfo{
-			GeneratedSourceFiles: s.GeneratedSourceFiles(),
-			GeneratedHeaderDirs:  s.GeneratedHeaderDirs(),
-			GeneratedDeps:        s.GeneratedDeps(),
-		})
-	}
-
 	if m.Enabled(ctx) {
 		if v, ok := m.module.(ModuleMakeVarsProvider); ok {
 			SetProvider(ctx, ModuleMakeVarsInfoProvider, v.MakeVars(ctx))
-		}
-
-		if am, ok := m.module.(AndroidMkDataProvider); ok {
-			SetProvider(ctx, AndroidMkDataInfoProvider, AndroidMkDataInfo{
-				Class: am.AndroidMk().Class,
-			})
 		}
 	}
 
@@ -2603,9 +2618,32 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}
 }
 
-func GetHostToolProvider(ctx OtherModuleProviderContext, module ModuleOrProxy) *HostToolProviderInfo {
+// computeHostToolInfo returns a *HostToolInfo to embed into the CommonInfo for this
+// module.  Some dependencies on host tool providers are added in FinalDepsMutators (genrule.toolDepsMutator,
+// and java.dexpreoptToolDepsMutator), too late for the Prebuilts mutator to replace the dependency with the
+// prebuilt if necessary.  If this module has been replaced by a prebuilt return the prebuilt's
+// HostToolInfo, otherwise return this Module's HostToolPath value if it exists.
+func computeHostToolInfo(ctx ModuleContext, m Module, transitivePackagingSpecs depset.DepSet[PackagingSpec]) *HostToolInfo {
+	if m.IsReplacedByPrebuilt() {
+		var info *HostToolInfo
+		ctx.VisitDirectDepsProxyWithTag(PrebuiltDepTag, func(dep ModuleProxy) {
+			if info == nil {
+				info = GetHostToolInfo(ctx, dep)
+			}
+		})
+		return info
+	} else if htp, ok := m.(HostToolProvider); ok {
+		return &HostToolInfo{
+			HostToolPath:             htp.HostToolPath(),
+			TransitivePackagingSpecs: transitivePackagingSpecs,
+		}
+	}
+	return nil
+}
+
+func GetHostToolInfo(ctx OtherModuleProviderContext, module ModuleOrProxy) *HostToolInfo {
 	if commInfo, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider); ok {
-		return commInfo.HostToolProvider
+		return commInfo.HostToolInfo
 	}
 	return nil
 }
@@ -3326,11 +3364,11 @@ func outputFilesForModule(ctx PathContext, module ModuleOrProxy, tag string) (Pa
 			if sourceFileProducer, ok := module.(SourceFileProducer); ok {
 				return sourceFileProducer.Srcs(), nil
 			}
-		} else if sourceFiles, ok := OtherModuleProvider(octx, module, SourceFilesInfoProvider); ok {
+		} else if commonInfo, ok := OtherModuleProvider(octx, module, CommonModuleInfoProvider); ok && commonInfo.SourceFiles != nil {
 			if tag != "" {
 				return nil, fmt.Errorf("module %q is a SourceFileProducer, which does not support tag %q", pathContextName(ctx, module), tag)
 			}
-			paths := sourceFiles.Srcs
+			paths := commonInfo.SourceFiles.Srcs
 			return paths, nil
 		}
 	}
@@ -3541,7 +3579,7 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 		info := OtherModuleProviderOrDefault(ctx, module, CommonModuleInfoProvider)
 		if info.Enabled {
 			key := osAndCross{os: info.Target.Os, hostCross: info.Target.HostCross}
-			osDeps[key] = append(osDeps[key], OtherModuleProviderOrDefault(ctx, module, InstallFilesProvider).CheckbuildFiles...)
+			osDeps[key] = append(osDeps[key], GetInstallFilesCommon(info).CheckbuildFiles...)
 		}
 	})
 
@@ -3627,4 +3665,15 @@ func mergeStringLists(a, b []string) []string {
 func CheckBlueprintSyntax(ctx BaseModuleContext, filename string, contents string) []error {
 	bpctx := ctx.blueprintBaseModuleContext()
 	return blueprint.CheckBlueprintSyntax(bpctx.ModuleFactories(), filename, contents)
+}
+
+func GetInstallFilesCommon(common *CommonModuleInfo) InstallFilesInfo {
+	if common != nil && common.InstallFiles != nil {
+		return *common.InstallFiles
+	}
+	return InstallFilesInfo{}
+}
+
+func GetInstallFiles(ctx OtherModuleProviderContext, module ModuleOrProxy) InstallFilesInfo {
+	return GetInstallFilesCommon(OtherModuleProviderOrDefault(ctx, module, CommonModuleInfoProvider))
 }

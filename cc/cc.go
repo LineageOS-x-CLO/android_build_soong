@@ -2740,7 +2740,7 @@ func (c *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 		BaseModuleName: c.BaseModuleName(),
 		Target:         ctx.Target(),
 	}
-	android.SetProvider(ctx, android.MakeNameInfoProvider, android.MakeNameInfo{
+	ctx.SetMakeNamesInfo(&android.MakeNamesInfo{
 		SharedLibsMakeNames: c.Properties.AndroidMkSharedLibs,
 		MakeName:            MakeLibName(&ccInfo, linkableInfo, &myCommonInfo, ctx.ModuleName()),
 	})
@@ -3727,10 +3727,10 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 
 		if !hasLinkableInfo {
 			// handling for a few module types that aren't cc Module but that are also supported
-			genRule, ok := android.OtherModuleProvider(ctx, dep, android.GeneratedSourceInfoProvider)
+			genRule := android.OtherModulePointerProviderOrDefault(ctx, dep, android.CommonModuleInfoProvider).GeneratedSource
 			switch depTag {
 			case genSourceDepTag:
-				if ok {
+				if genRule != nil {
 					depPaths.GeneratedSources = append(depPaths.GeneratedSources,
 						genRule.GeneratedSourceFiles...)
 				} else {
@@ -3739,7 +3739,7 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 				// Support exported headers from a generated_sources dependency
 				fallthrough
 			case genHeaderDepTag, genHeaderExportDepTag:
-				if ok {
+				if genRule != nil {
 					depPaths.GeneratedDeps = append(depPaths.GeneratedDeps,
 						genRule.GeneratedDeps...)
 					dirs := genRule.GeneratedHeaderDirs

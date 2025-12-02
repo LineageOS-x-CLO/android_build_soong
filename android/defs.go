@@ -16,7 +16,8 @@ package android
 
 import (
 	"fmt"
-
+        "strings"
+	"unicode"
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
@@ -34,8 +35,9 @@ var (
 	// Ninja docs for more details.
 	Phony = pctx.AndroidStaticRule("Phony",
 		blueprint.RuleParams{
-			Command:     "# phony $out",
-			Description: "phony $out",
+			Command:         "# phony $out",
+			Description:     "phony $out",
+			SandboxDisabled: true,
 		})
 
 	// GeneratedFile is a rule for indicating that a given file was generated
@@ -52,8 +54,8 @@ var (
 	// A copy rule.
 	Cp = pctx.AndroidStaticRule("Cp",
 		blueprint.RuleParams{
-			Command:     "${rm} -f $out && ${cp} $cpPreserveSymlinks $cpFlags $in $out$extraCmds",
-			CommandDeps: []string{"${rm}", "${cp}"},
+			Command:     "${Rm} -f $out && ${Cp} $cpPreserveSymlinks $cpFlags $in $out$extraCmds",
+			CommandDeps: []string{"Rm-deps", "Cp-deps"},
 			Description: "cp $out",
 		},
 		"cpFlags", "extraCmds")
@@ -61,17 +63,8 @@ var (
 	// A copy rule wrapped with bash.
 	CpWithBash = pctx.AndroidStaticRule("CpWithBash",
 		blueprint.RuleParams{
-			Command:         "/bin/bash -c \"rm -f $out && cp $cpFlags $cpPreserveSymlinks $in $out$extraCmds\"",
-			Description:     "cp $out",
-			SandboxDisabled: true,
-		},
-		"cpFlags", "extraCmds")
-
-	// A copy rule wrapped with bash with bootstrapping
-	CpWithBashBootstrap = pctx.AndroidStaticRule("CpWithBashBootstrap",
-		blueprint.RuleParams{
-			Command:     "/bin/bash -c \"${rmSrc} -f $out && ${cpSrc} $cpFlags $cpPreserveSymlinks $in $out$extraCmds\"",
-			CommandDeps: []string{"${rmSrc}", "${cpSrc}", "${toybox}"},
+			Command:     "/bin/bash -c \"${Rm} -f $out && ${Cp} $cpFlags $cpPreserveSymlinks $in $out$extraCmds\"",
+			CommandDeps: []string{"Rm-deps", "Cp-deps"},
 			Description: "cp $out",
 		},
 		"cpFlags", "extraCmds")
@@ -79,60 +72,51 @@ var (
 	// A copy rule that doesn't preserve symlinks.
 	CpNoPreserveSymlink = pctx.AndroidStaticRule("CpNoPreserveSymlink",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && cp $cpFlags $in $out$extraCmds",
-			Description:     "cp $out",
-			SandboxDisabled: true,
+			Command:     "${Rm} -f $out && ${Cp} $cpFlags $in $out$extraCmds",
+			CommandDeps: []string{"Rm-deps", "Cp-deps"},
+			Description: "cp $out",
 		},
 		"cpFlags", "extraCmds")
 
 	// A copy rule that only updates the output if it changed.
 	CpIfChanged = pctx.AndroidStaticRule("CpIfChanged",
 		blueprint.RuleParams{
-			Command:         "if ! cmp -s $in $out; then cp $in $out; fi",
-			Description:     "cp if changed $out",
-			Restat:          true,
-			SandboxDisabled: true,
+			Command:     "if ! ${Cmp} -s $in $out; then ${Cp} $in $out; fi",
+			CommandDeps: []string{"Cmp-deps", "Cp-deps"},
+			Description: "cp if changed $out",
+			Restat:      true,
 		})
 
 	CpExecutable = pctx.AndroidStaticRule("CpExecutable",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && cp $cpFlags $in $out && chmod +x $out$extraCmds",
-			Description:     "cp $out",
-			SandboxDisabled: true,
+			Command:     "${Rm} -f $out && ${Cp} $cpFlags $in $out && ${Chmod} +x $out$extraCmds",
+			CommandDeps: []string{"Rm-deps", "Cp-deps", "Chmod-deps"},
+			Description: "cp $out",
 		},
 		"cpFlags", "extraCmds")
 
 	// A copy executable rule wrapped with bash
 	CpExecutableWithBash = pctx.AndroidStaticRule("CpExecutableWithBash",
 		blueprint.RuleParams{
-			Command:         "/bin/bash -c \"(rm -f $out && cp $cpFlags $cpPreserveSymlinks $in $out ) && (chmod +x $out$extraCmds )\"",
-			Description:     "cp $out",
-			SandboxDisabled: true,
-		},
-		"cpFlags", "extraCmds")
-
-	// A copy executable rule wrapped with bash with bootstrapping
-	CpExecutableWithBashBootstrap = pctx.AndroidStaticRule("CpExecutableWithBashBootstrap",
-		blueprint.RuleParams{
-			Command:         "/bin/bash -c \"(${rmSrc} -f $out && ${cpSrc} $cpFlags $cpPreserveSymlinks $in $out ) && (${chmodSrc} +x $out$extraCmds )\"",
-			CommandDeps:     []string{"${rmSrc}", "${cpSrc}", "${chmodSrc}", "${toybox}"},
-			Description:     "cp $out",
-			SandboxDisabled: true,
+			Command:     "/bin/bash -c \"(${Rm} -f $out && ${Cp} $cpFlags $cpPreserveSymlinks $in $out ) && (${Chmod} +x $out$extraCmds )\"",
+			CommandDeps: []string{"Rm-deps", "Cp-deps", "Chmod-deps"},
+			Description: "cp $out",
 		},
 		"cpFlags", "extraCmds")
 
 	// A timestamp touch rule.
 	Touch = pctx.AndroidStaticRule("Touch",
 		blueprint.RuleParams{
-			Command:         "touch $out",
-			Description:     "touch $out",
-			SandboxDisabled: true,
+			Command:     "${Touch} $out",
+			CommandDeps: []string{"Touch-deps"},
+			Description: "touch $out",
 		})
 
 	// A symlink rule.
 	Symlink = pctx.AndroidStaticRule("Symlink",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && ln -f -s $fromPath $out",
+			Command:         "${Rm} -f $out && ${Ln} -f -s $fromPath $out",
+			CommandDeps:     []string{"Rm-deps", "Ln-deps"},
 			Description:     "symlink $out",
 			SandboxDisabled: true,
 		},
@@ -141,7 +125,8 @@ var (
 	// A symlink rule wrapped with bash
 	SymlinkWithBash = pctx.AndroidStaticRule("SymlinkWithBash",
 		blueprint.RuleParams{
-			Command:         "/bin/bash -c \"rm -f $out && ln -sfn $fromPath $out\"",
+			Command:         "/bin/bash -c \"${Rm} -f $out && ${Ln} -sfn $fromPath $out\"",
+			CommandDeps:     []string{"Rm-deps", "Ln-deps"},
 			Description:     "symlink $out",
 			SandboxDisabled: true,
 		},
@@ -152,31 +137,31 @@ var (
 	// Calling ErrorRule() will do that for you and use this rule.
 	errorRule = pctx.AndroidStaticRule("Error",
 		blueprint.RuleParams{
-			Command:         `echo $error && false`,
-			Description:     "error building $out",
-			SandboxDisabled: true,
+			Command:     `${Echo} $error && false`,
+			CommandDeps: []string{"Echo-deps"},
+			Description: "error building $out",
 		},
 		"error")
 
 	Cat = pctx.AndroidStaticRule("Cat",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && cat $in > $out",
-			Description:     "concatenate files to $out",
-			SandboxDisabled: true,
+			Command:     "${Rm} -f $out && ${Cat} $in > $out",
+			CommandDeps: []string{"Rm-deps", "Cat-deps"},
+			Description: "concatenate files to $out",
 		})
 
 	CatAndSort = pctx.AndroidStaticRule("CatAndSort",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && cat $in > $out && sort -o $out $out",
-			Description:     "concatenate sorted file contents to $out",
-			SandboxDisabled: true,
+			Command:     "${Rm} -f $out && ${Cat} $in > $out && ${Sort} -o $out $out",
+			CommandDeps: []string{"Rm-deps", "Cat-deps", "Sort-deps"},
+			Description: "concatenate sorted file contents to $out",
 		})
 
 	CatAndSortAndUnique = pctx.AndroidStaticRule("CatAndSortAndUnique",
 		blueprint.RuleParams{
-			Command:         "rm -f $out && cat $in > $out && sort -u -o $out $out",
-			Description:     "concatenate sorted file contents to $out",
-			SandboxDisabled: true,
+			Command:     "${Rm} -f $out && ${Cat} $in > $out && ${Sort} -u -o $out $out",
+			CommandDeps: []string{"Rm-deps", "Cat-deps", "Sort-deps"},
+			Description: "concatenate sorted file contents to $out",
 		})
 
 	MergeZips = pctx.AndroidStaticRule("MergeZips",
@@ -189,12 +174,19 @@ var (
 		})
 
 	AssembleVintfRule = pctx.StaticRule("AssembleVintfRule", blueprint.RuleParams{
-		Command:         `rm -f $out && VINTF_IGNORE_TARGET_FCM_VERSION=true ${AssembleVintf} -i $in -o $out`,
-		CommandDeps:     []string{"${AssembleVintf}"},
+		Command:         `${Rm} -f $out && VINTF_IGNORE_TARGET_FCM_VERSION=true ${AssembleVintf} -i $in -o $out`,
+		CommandDeps:     []string{"${AssembleVintf}", "Rm-deps"},
 		Description:     "run assemble_vintf",
 		SandboxDisabled: true,
 
 	})
+
+	depfileVerifierRule = pctx.AndroidStaticRule("DepfileVerifierRule",
+		blueprint.RuleParams{
+			Command:     "${Rm} -f $out && ${DepfileVerifier} $in && ${Touch} $out",
+			CommandDeps: []string{"Rm-deps", "Touch-deps", "${DepfileVerifier}"},
+			Description: "verify depfile",
+		})
 
 	// Used only when USE_REWRAPPER=true is set, to restrict non-RBE jobs to the local parallelism value
 	localPool = blueprint.NewBuiltinPool("local_pool")
@@ -285,27 +277,18 @@ func init() {
 
 	pctx.HostBinToolVariable("MergeZipsCmd", "merge_zips")
 	pctx.HostBinToolVariable("AssembleVintf", "assemble_vintf")
+	pctx.HostBinToolVariable("DepfileVerifier", "depfile_verifier")
 	pctx.SourcePathVariable("toybox", "prebuilts/build-tools/${HostPrebuiltTag}/bin/toybox")
 
-	hostBinToolSourcePathVariables := func(names []string) {
-		for _, name := range names {
-			pctx.SourcePathVariable(fmt.Sprintf("%sSrc", name), fmt.Sprintf("prebuilts/build-tools/path/${HostPrebuiltTag}/%s", name))
-		}
+	// Create a variable for every toybox command. toybox_phonies_singleton will also create
+	// a -deps phony, but we can't do that here because blueprint doesn't currently have a way to
+	// create phonies in the init() function.
+	for _, name := range commonToyboxSymlinks {
+		varName := string(unicode.ToUpper(rune(name[0]))) + name[1:]
+		pctx.SourcePathVariable(varName, "prebuilts/build-tools/path/${HostPrebuiltTag}/"+name)
 	}
 
-	hostBinToolVariables := func(names []string) {
-		for _, name := range names {
-			pctx.VariableFunc(name, func(ctx PackageVarContext) string {
-				if ctx.Config().UseHostMusl() {
-					return fmt.Sprintf("${%sSrc}", name)
-				}
-				return proptools.NinjaAndShellEscape(ctx.Config().HostToolPath(ctx, name).String())
-			})
-		}
-	}
-
-	hostBinToolSourcePathVariables(commonToyboxSymlinks)
-	hostBinToolVariables(commonToyboxSymlinks)
+	InitRegistrationContext.RegisterParallelSingletonType("toybox_phonies_singleton", toyboxPhoniesSingletonFactory)
 }
 
 // CopyFileRule creates a ninja rule to copy path to outPath.
@@ -335,4 +318,44 @@ func ErrorRule(ctx BuilderContext, path WritablePath, msg string) {
 // in tests.
 func IsErrorRule(rule blueprint.Rule) bool {
 	return rule == errorRule
+}
+
+// DepfileVerifierRule creates a rule that will check that all the inputs in the given depfile
+// are also listed in the given inputs. It will touch an empty outPath if successful. This can
+// be used as a validation action for
+func DepfileVerifierRule(ctx ModuleContext, outPath WritablePath, depfile Path, inputs Paths) {
+	inputsFile := outPath.AddExtension(ctx, "inputs_list")
+	var inputsFileContents strings.Builder
+	for _, input := range inputs {
+		inputsFileContents.WriteString(input.String())
+		inputsFileContents.WriteString("\n")
+	}
+	WriteFileRuleVerbatim(ctx, inputsFile, inputsFileContents.String())
+
+	ctx.Build(pctx, BuildParams{
+		Rule:   depfileVerifierRule,
+		Inputs: Paths{depfile, inputsFile},
+		Output: outPath,
+	})
+}
+
+type toyboxPhoniesSingleton struct{}
+
+func toyboxPhoniesSingletonFactory() Singleton {
+	return &toyboxPhoniesSingleton{}
+}
+
+// Generate the phonies for the deps in a singleton, as blueprint currently doesn't have
+// a way to create phonies from the init() function.
+func (t *toyboxPhoniesSingleton) GenerateBuildActions(ctx SingletonContext) {
+	for _, name := range commonToyboxSymlinks {
+		varName := string(unicode.ToUpper(rune(name[0]))) + name[1:]
+		binary := PathForSource(ctx, fmt.Sprintf("prebuilts/build-tools/%s/bin/toybox", ctx.Config().PrebuiltOS()))
+		symlink := PathForSource(ctx, fmt.Sprintf("prebuilts/build-tools/path/%s/%s", ctx.Config().PrebuiltOS(), name))
+		ctx.Build(pctx, BuildParams{
+			Rule:   blueprint.Phony,
+			Output: PathForPhony(ctx, varName+"-deps"),
+			Inputs: []Path{binary, symlink},
+		})
+	}
 }
