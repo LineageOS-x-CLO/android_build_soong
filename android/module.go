@@ -228,6 +228,7 @@ type Dist struct {
 }
 
 // NamedPath associates a path with a name. e.g. a license text path with a package name
+// @auto-generate: gob
 type NamedPath struct {
 	Path Path
 	Name string
@@ -242,6 +243,7 @@ func (p NamedPath) String() string {
 }
 
 // NamedPaths describes a list of paths each associated with a name.
+// @auto-generate: gob
 type NamedPaths []NamedPath
 
 // Strings returns a list of escaped strings representing each `NamedPath` in the list.
@@ -535,6 +537,9 @@ type commonProperties struct {
 	// Set to true if this module must be generic and does not require product-specific information.
 	// To be included in the system image, this property must be set to true.
 	Use_generic_config *bool
+
+	// If this property is set to true, this module will not be built on checkbuilds.
+	Unchecked_module *bool
 }
 
 // Properties common to all modules inheriting from ModuleBase. Unlike commonProperties, these
@@ -1795,7 +1800,9 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 		phony("-phony-files", Paths{modulePhonyTarget})
 	}
 
-	if ctx.Device() && ctx.Target().Arch.ArchType != ctx.Config().DevicePrimaryArchType() {
+	if ctx.Device() &&
+		ctx.Target().Arch.ArchType != ctx.Config().DevicePrimaryArchType() &&
+		ctx.Target().Arch.ArchType != Common {
 		// Don't check build target module defined for the 2nd arch.
 		// https://source.corp.google.com/h/googleplex-android/platform/build/+/62ad5dbbffb05d4fc8d1136f753d42f40eadccd1:core/base_rules.mk;l=641-646;drc=d535e6f290f00c86babfa006167bf5055303e4c7;bpv=1;bpt=0
 		ctx.UncheckedModule()
@@ -1993,6 +2000,7 @@ type InstallFilesInfo struct {
 
 var InstallFilesProvider = blueprint.NewProvider[InstallFilesInfo]()
 
+// @auto-generate: gob
 type SourceFilesInfo struct {
 	Srcs Paths
 }
@@ -2099,6 +2107,7 @@ type SourceFileGenerator interface {
 	GeneratedDeps() Paths
 }
 
+// @auto-generate: gob
 type GeneratedSourceInfo struct {
 	GeneratedSourceFiles Paths
 	GeneratedHeaderDirs  Paths
@@ -2257,6 +2266,10 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			x.IDEInfo(ctx, &result)
 			result.BaseModuleName = x.BaseModuleName()
 			SetProvider(ctx, IdeInfoProviderKey, result)
+		}
+
+		if proptools.Bool(m.commonProperties.Unchecked_module) {
+			ctx.UncheckedModule()
 		}
 
 		// Create the set of tagged dist files after calling GenerateAndroidBuildActions
@@ -3426,6 +3439,10 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 
 		if info.InstallTarget != nil {
 			modulesInDir[info.BlueprintDir] = append(modulesInDir[info.BlueprintDir], info.InstallTarget)
+		}
+
+		if info.ModulePhonyTarget != nil {
+			modulesInDir[info.BlueprintDir] = append(modulesInDir[info.BlueprintDir], info.ModulePhonyTarget)
 		}
 	})
 

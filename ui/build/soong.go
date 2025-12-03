@@ -328,6 +328,9 @@ func bootstrapBlueprint(ctx Context, config Config) {
 	if config.incrementalBuildActions {
 		mainSoongBuildExtraArgs = append(mainSoongBuildExtraArgs, "--incremental-build-actions")
 	}
+	if config.incrementalProviderTest {
+		mainSoongBuildExtraArgs = append(mainSoongBuildExtraArgs, "--incremental-provider-test")
+	}
 
 	pbfs := []PrimaryBuilderFactory{
 		{
@@ -658,14 +661,13 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					//"-w", "dupbuild=err",
 					//"-w", "outputdir=err",
 					//"-w", "missingoutfile=err",
-					"-v",
 					"--local_jobs", strconv.Itoa(config.Parallel()),
 					//"--remote_jobs", strconv.Itoa(config.RemoteParallel()),
 					"--frontend_file", fifo,
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
 				}
 				if value := config.SisoConfigDir(); value != "" {
-					value = maybeCreateSisoConfigDir(ctx, config, value)
+					value = createSisoConfigDir(ctx, config, value)
 					ninjaArgs = append(ninjaArgs, fmt.Sprintf("--config_repo_dir=%s", value))
 				}
 				sisoExperiments := []string{
@@ -680,7 +682,11 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 				// Output `siso version`.
 				vcmd := Command(ctx, config, nil, "siso version",
 					config.SisoBin(), "version")
-				vcmd.RunAndStreamOrFatal()
+				versionOutput, err := vcmd.CombinedOutput()
+				if err != nil {
+					ctx.Fatalf("Failed to run siso version: %s\n", err)
+				}
+				ctx.Verbosef("%s", versionOutput)
 			default:
 				// NINJA_NINJA is the default.
 				ninjaCmd = config.NinjaBin()

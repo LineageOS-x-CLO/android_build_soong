@@ -16,7 +16,6 @@ package java
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -26,6 +25,8 @@ import (
 	"android/soong/android"
 	"android/soong/java/config"
 )
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 func init() {
 	RegisterDocsBuildComponents(android.InitRegistrationContext)
@@ -166,9 +167,6 @@ type DroiddocProperties struct {
 
 	// Compat config XML. Generates compat change documentation if set.
 	Compat_config *string `android:"path"`
-
-	// The directory name to publish the generated documentation under out/target/common/docs.
-	Publish_dir *string
 }
 
 // Common flags passed down to build rule
@@ -866,12 +864,6 @@ func (d *Droiddoc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		FlagWithArg("-C ", outDir.String()).
 		FlagWithArg("-D ", outDir.String())
 
-	if String(d.properties.Publish_dir) != "" {
-		publishDir := path.Join("out/target/common/docs", String(d.properties.Publish_dir))
-		rule.Command().Text("mkdir -p").Text(publishDir)
-		rule.Command().Text("unzip -qo").Input(d.docZip).Text("-d").Text(publishDir)
-	}
-
 	rule.Restat()
 
 	zipSyncCleanupCmd(rule, srcJarDir)
@@ -890,6 +882,7 @@ type ExportedDroiddocDirProperties struct {
 	Path *string
 }
 
+// @auto-generate: gob
 type ExportedDroiddocDirInfo struct {
 	Deps android.Paths
 	Dir  android.Path

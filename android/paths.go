@@ -574,6 +574,7 @@ func PathsRelativeToModuleSourceDir(input SourceInput) Paths {
 	return ret
 }
 
+// @auto-generate: gob
 type directoryPath struct {
 	basePath
 }
@@ -594,6 +595,7 @@ type DirectoryPath interface {
 
 var _ DirectoryPath = (*directoryPath)(nil)
 
+// @auto-generate: gob
 type DirectoryPaths []DirectoryPath
 
 func (paths DirectoryPaths) Strings() []string {

@@ -18,12 +18,15 @@ package com.android.kotlin.compiler.client
 
 import com.android.kotlin.compiler.cli.CacheMarker
 import com.android.kotlin.compiler.cli.CacheMarkerError
+import com.android.kotlin.compiler.cli.FileDeltaOptions
 import com.android.kotlin.compiler.cli.HelpArgument
 import com.android.kotlin.compiler.cli.parseArgs
 import com.android.kotlin.compiler.snapshotter.fileToSnapshotFile
 import java.io.File
 import java.net.URLClassLoader
 import java.util.UUID
+import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.deleteRecursively
 import kotlin.system.exitProcess
 import org.jetbrains.kotlin.buildtools.api.CompilationResult
 import org.jetbrains.kotlin.buildtools.api.CompilationService
@@ -46,6 +49,7 @@ private val ARGUMENT_PARSERS =
         PluginArgument(),
         RunFilesArgument(),
         RootDirArgument(),
+        SrcJarsDirArgument(),
         SourceDeltaArgument(),
         Verbose(),
         WorkingDirArgument(),
@@ -125,6 +129,7 @@ fun writeCacheMarker(marker: CacheMarker) {
     }
 }
 
+@OptIn(ExperimentalPathApi::class)
 fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationResult {
     val kotlincArgs = mutableListOf<String>()
     if (opts.buildFile != null) {
@@ -143,8 +148,8 @@ fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationRe
 
     if (!cacheMarker.isValid()) {
         println("Invalid or missing cache. Triggering full compile.")
-        opts.workingDir.delete()
-        opts.outputDir.delete()
+        opts.workingDir.toPath().deleteRecursively()
+        opts.outputDir.toPath().deleteRecursively()
     } else {
         if (!cacheMarker.remove()) {
             throw CacheMarkerError("Failed to remove cache marker. Aborting the build.")
@@ -155,7 +160,7 @@ fun btaCompilation(opts: ClientOptions, cacheMarker: CacheMarker): CompilationRe
         opts.classPath + opts.buildFileClassPaths,
         opts.workingDir,
         opts.outputDir,
-        opts.sourceDeltaFile,
+        opts,
         kotlincArgs,
         opts.jvmArgs,
         Logger(opts.verbose, opts.debug),
@@ -168,7 +173,7 @@ fun doBtaCompilation(
     classPath: List<String>,
     workingDirectory: File,
     outputDirectory: File,
-    sourceDeltaFile: File?,
+    fileDeltaOptions: FileDeltaOptions,
     args: List<String>,
     jvmArgs: List<String>,
     logger: Logger,
@@ -205,8 +210,25 @@ fun doBtaCompilation(
     val incJvmCompilationConfig =
         compilationConfig.makeClasspathSnapshotBasedIncrementalCompilationConfiguration()
     var sourceChanges: SourcesChanges = SourcesChanges.Unknown
-    if (sourceDeltaFile != null) {
-        sourceChanges = parseSourceChanges(sourceDeltaFile)
+    if (!outputDirectory.exists()) {
+        incJvmCompilationConfig.forceNonIncrementalMode(true)
+    } else {
+        val modifiedFiles = fileDeltaOptions.modifiedFiles
+        val removedFiles = fileDeltaOptions.removedFiles
+        if (modifiedFiles != null && removedFiles != null) {
+            sourceChanges = SourcesChanges.Known(modifiedFiles, removedFiles)
+
+            // If we've changed 95% or more of the files, don't bother with incremental.
+            // This may happen when a "version" change occurs in the tooling, meaning all input
+            // files
+            // are marked as changed and need to be recompiled.
+            // Better to leave some wiggle room here, rather than comparing the sizes exactly,
+            // in case of unforeseen edge cases.
+            // Setting this value to true _does_ generate incremental cache data for the next run.
+            if ((sourceChanges.modifiedFiles.size.toFloat() / sources.size.toFloat()) > 0.95) {
+                incJvmCompilationConfig.forceNonIncrementalMode(true)
+            }
+        }
     }
     compilationConfig.useIncrementalCompilation(
         workingDirectory,
@@ -255,41 +277,4 @@ fun getClasspathSnapshotParameters(
         newClasspathSnapshotFiles = cpsFiles,
         shrunkClasspathSnapshot = cps,
     )
-}
-
-fun parseSourceChanges(sourceDeltaFile: File): SourcesChanges.Known {
-    val modifiedList = mutableListOf<File>()
-    val removedList = mutableListOf<File>()
-    for (entry in sourceDeltaFile.readText().split(" ")) {
-        if (entry.length < 1) {
-            continue
-        }
-        val f = File(entry.substring(1))
-        when {
-            entry.startsWith("+") -> {
-                if (!f.exists()) {
-                    throw RuntimeException(
-                        "Supplied file diff contains modified file that does not exist: $entry"
-                    )
-                }
-                modifiedList.add(f.absoluteFile)
-            }
-
-            entry.startsWith("-") -> {
-                if (f.exists()) {
-                    throw RuntimeException(
-                        "Supplied file diff contains removed file that exist: $entry"
-                    )
-                }
-                removedList.add(f.absoluteFile)
-            }
-
-            else -> {
-                throw RuntimeException(
-                    "Supplied file diff contains entry that can not be parsed: $entry"
-                )
-            }
-        }
-    }
-    return SourcesChanges.Known(modifiedFiles = modifiedList, removedFiles = removedList)
 }

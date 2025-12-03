@@ -21,17 +21,6 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-var (
-	copyStagingDirRule = pctx.AndroidStaticRule("copy_staging_dir", blueprint.RuleParams{
-		Command: "rsync -a --checksum $dir/ $dest && touch $out",
-	}, "dir", "dest")
-)
-
-func (a *androidDevice) copyToProductOut(ctx android.ModuleContext, builder *android.RuleBuilder, src android.Path, dest string) {
-	destPath := android.PathForModuleInPartitionInstall(ctx, "").Join(ctx, dest)
-	builder.Command().Text("rsync").Flag("-a").Flag("--checksum").Input(src).Text(destPath.String())
-}
-
 func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleContext) android.Path {
 	filesystemInfos := a.getFsInfos(ctx)
 
@@ -186,6 +175,21 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 	copyBootImg(a.partitionProps.Vendor_boot_partition_name, "vendor_boot")
 	copyBootImg(a.partitionProps.Vendor_kernel_boot_partition_name, "vendor_kernel_boot")
 
+	// vendor bootconfig
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=1672;drc=a951ebf0198006f7fd38073a05c442d0eb92f97b
+	if a.partitionProps.Vendor_boot_partition_name != nil {
+		partition := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Vendor_boot_partition_name, filesystemDepTag)
+		if info, ok := android.OtherModuleProvider(ctx, partition, BootimgInfoProvider); ok && info.Bootconfig != nil {
+			installPath := android.PathForModuleInPartitionInstall(ctx, "", "vendor-bootconfig.img")
+			ctx.Build(pctx, android.BuildParams{
+				Rule:   android.Cp,
+				Input:  info.Bootconfig,
+				Output: installPath,
+			})
+			deps = append(deps, installPath)
+		}
+	}
+
 	// pvmfw
 	if a.deviceProps.Pvmfw.Image != nil {
 		pvmfwImg := android.PathForModuleSrc(ctx, proptools.String(a.deviceProps.Pvmfw.Image))
@@ -288,6 +292,16 @@ func (a *androidDevice) copyFilesToProductOutForSoongOnly(ctx android.ModuleCont
 			Input:       a.androidInfoTxt,
 			Output:      installPath,
 			Validations: validations,
+		})
+		deps = append(deps, installPath)
+	}
+
+	for _, pair := range a.stageDeviceFiles {
+		installPath := android.PathForModuleInPartitionInstall(ctx, "", pair.dst)
+		ctx.Build(pctx, android.BuildParams{
+			Rule:   android.Cp,
+			Input:  pair.src,
+			Output: installPath,
 		})
 		deps = append(deps, installPath)
 	}

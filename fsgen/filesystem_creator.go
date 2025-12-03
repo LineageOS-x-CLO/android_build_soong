@@ -24,6 +24,7 @@ import (
 
 	"android/soong/android"
 	"android/soong/filesystem"
+	"android/soong/genrule"
 	"android/soong/kernel"
 
 	"github.com/google/blueprint"
@@ -159,6 +160,7 @@ func filesystemCreatorFactory() android.Module {
 		createFsGenState(ctx, generatedPrebuiltEtcModuleNames, avbpubkeyGenerated)
 		module.createAvbKeyFilegroups(ctx)
 		module.createMiscFilegroups(ctx)
+		module.createProductConfigDistGenrules(ctx)
 		module.createInternalModules(ctx)
 		module.createBackgroundPicturesForRecovery(ctx)
 	})
@@ -614,19 +616,24 @@ func (f *filesystemCreator) createDeviceModule(
 	partitionProps.Vbmeta_partitions = vbmetaPartitions
 
 	deviceProps := &filesystem.DeviceProperties{
-		Main_device:                         proptools.BoolPtr(true),
-		Ab_ota_updater:                      proptools.BoolPtr(partitionVars.AbOtaUpdater),
-		Ab_ota_partitions:                   partitionVars.AbOtaPartitions,
-		Ab_ota_postinstall_config:           partitionVars.AbOtaPostInstallConfig,
-		Android_info:                        proptools.StringPtr(generatedModuleName(ctx.Config(), "android_info.prop")),
-		Kernel_version:                      ctx.Config().ProductVariables().BoardKernelVersion,
-		Partial_ota_update_partitions:       partitionVars.BoardPartialOtaUpdatePartitionsList,
-		Flash_block_size:                    proptools.StringPtr(partitionVars.BoardFlashBlockSize),
-		Bootloader_in_update_package:        proptools.BoolPtr(partitionVars.BootloaderInUpdatePackage),
-		Precompiled_sepolicy_without_vendor: proptools.StringPtr(":precompiled_sepolicy_without_vendor"),
-		Vendor_blobs_license:                vendorBlobsLicenseProp,
-		InfoPartitionProps:                  *infoPartitionProps,
-		Minimal_font_footprint:              proptools.BoolPtr(partitionVars.MinimalFontFootprint),
+		Main_device:                          proptools.BoolPtr(true),
+		Ab_ota_updater:                       proptools.BoolPtr(partitionVars.AbOtaUpdater),
+		Ab_ota_partitions:                    partitionVars.AbOtaPartitions,
+		Ab_ota_postinstall_config:            partitionVars.AbOtaPostInstallConfig,
+		Android_info:                         proptools.StringPtr(generatedModuleName(ctx.Config(), "android_info.prop")),
+		Kernel_version:                       ctx.Config().ProductVariables().BoardKernelVersion,
+		Partial_ota_update_partitions:        partitionVars.BoardPartialOtaUpdatePartitionsList,
+		Flash_block_size:                     proptools.StringPtr(partitionVars.BoardFlashBlockSize),
+		Bootloader_in_update_package:         proptools.BoolPtr(partitionVars.BootloaderInUpdatePackage),
+		Precompiled_sepolicy_without_vendor:  proptools.StringPtr(":precompiled_sepolicy_without_vendor"),
+		Vendor_blobs_license:                 vendorBlobsLicenseProp,
+		InfoPartitionProps:                   *infoPartitionProps,
+		Minimal_font_footprint:               proptools.BoolPtr(partitionVars.MinimalFontFootprint),
+		Stage_device_files:                   getstageDeviceFileProps(ctx),
+		Product_restrict_vendor_files:        proptools.StringPtr(partitionVars.ProductRestrictVendorFiles),
+		Vendor_product_restrict_vendor_files: proptools.StringPtr(partitionVars.VendorProductRestrictVendorFiles),
+		Vendor_exception_paths:               partitionVars.VendorExceptionPaths,
+		Vendor_exception_modules:             partitionVars.VendorExceptionModules,
 	}
 
 	if buildingInitBootImage(partitionVars) {
@@ -1163,6 +1170,58 @@ func (f *filesystemCreator) createMiscFilegroups(ctx android.LoadHookContext) {
 	}
 }
 
+// Creates genrules for dist rules defined in product config
+// One genrule will be created per goal.
+func (f *filesystemCreator) createProductConfigDistGenrules(ctx android.LoadHookContext) {
+	if ctx.Config().KatiEnabled() {
+		// Skip in soong+make builds to prevent duplicate dist rules.
+		return
+	}
+	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
+
+	dstToSrcs := map[string]string{}
+	for _, entry := range partitionVars.AllDistSrcDstPairs {
+		split := strings.Split(entry, ":")
+		src, dst := split[0], split[1]
+		dstToSrcs[dst] = src
+	}
+	goalToDst := map[string][]string{}
+	goalToSrcs := map[string][]string{}
+	for _, entry := range partitionVars.AllDistGoalOutputPairs {
+		split := strings.Split(entry, ":")
+		goal, dst := split[0], split[1]
+		src := dstToSrcs[dst]
+		if !strings.HasPrefix(src, ctx.Config().OutDir()) {
+			// check src file is not under out/.
+			// Disting generated files is not supported at the moment (it will cause missing dependency errors).
+			goalToDst[goal] = append(goalToDst[goal], dst)
+			goalToSrcs[goal] = append(goalToSrcs[goal], dstToSrcs[dst])
+		}
+	}
+
+	for goal, srcs := range goalToSrcs {
+		ctx.CreateModuleInDirectory(
+			genrule.GenRuleFactory,
+			".",
+			&struct {
+				Name       *string
+				Srcs       []string
+				Out        []string
+				Cmd        *string
+				Dist       android.Dist
+				Visibility []string
+			}{
+				Name:       proptools.StringPtr("soong_generated_dist_genrule_for_goal_" + goal),
+				Srcs:       srcs,
+				Out:        goalToDst[goal],
+				Cmd:        proptools.StringPtr("in_files=($(in)); out_files=($(out)); for i in $${!in_files[@]}; do cp $${in_files[i]} $${out_files[i]}; done"),
+				Dist:       android.Dist{Targets: []string{goal}},
+				Visibility: []string{"//visibility:public"},
+			},
+		)
+	}
+}
+
 // createPrebuiltKernelModules creates `prebuilt_kernel_modules`. These modules will be added to deps of the
 // autogenerated *_dlkm filsystem modules. Each _dlkm partition should have a single prebuilt_kernel_modules dependency.
 // This ensures that the depmod artifacts (modules.* installed in /lib/modules/) are generated with a complete view.
@@ -1175,7 +1234,7 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		Srcs                  []string
 		Src_filenames_to_load []string
 		Srcs_16k              []string
-		System_deps           []string
+		System_dep            *string
 		System_dlkm_specific  *bool
 		Vendor_dlkm_specific  *bool
 		Odm_dlkm_specific     *bool
@@ -1206,7 +1265,7 @@ func (f *filesystemCreator) createPrebuiltKernelModules(ctx android.LoadHookCont
 		props.Src_filenames_to_load = partitionVars.VendorKernelModulesLoad
 		props.Srcs_16k = android.ExistentPathsForSources(ctx, partitionVars.VendorKernelModules2ndStage16kbMode).Strings()
 		if len(partitionVars.SystemKernelModules) > 0 {
-			props.System_deps = []string{":" + generatedModuleName(ctx.Config(), "system_dlkm-kernel-modules") + "{.modules}"}
+			props.System_dep = proptools.StringPtr(":" + generatedModuleName(ctx.Config(), "system_dlkm-kernel-modules") + "{.modules.zip}")
 		}
 		props.Vendor_dlkm_specific = proptools.BoolPtr(true)
 		if blocklistFile := partitionVars.VendorKernelBlocklistFile; blocklistFile != "" {
@@ -1405,6 +1464,7 @@ type filesystemBaseProperty struct {
 	Compile_multilib        *string
 	Native_bridge_supported *bool
 	Visibility              []string
+	Unchecked_module        *bool
 }
 
 func generateBaseProps(namePtr *string, config android.Config) *filesystemBaseProperty {
@@ -1414,6 +1474,9 @@ func generateBaseProps(namePtr *string, config android.Config) *filesystemBasePr
 		Native_bridge_supported: proptools.BoolPtr(config.ProductVariables().NativeBridgeArch != nil),
 		// The vbmeta modules are currently in the root directory and depend on the partitions
 		Visibility: []string{"//.", "//build/soong:__subpackages__"},
+		// Don't build this module on checkbuilds, the soong-built partitions are still in-progress
+		// and sometimes don't build.
+		Unchecked_module: proptools.BoolPtr(true),
 	}
 }
 
@@ -1488,10 +1551,6 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 		}
 	}
 
-	// Don't build this module on checkbuilds, the soong-built partitions are still in-progress
-	// and sometimes don't build.
-	fsProps.Unchecked_module = proptools.BoolPtr(true)
-
 	// BOARD_AVB_ENABLE
 	fsProps.Use_avb = avbInfo.avbEnable
 	// BOARD_AVB_KEY_PATH
@@ -1503,6 +1562,10 @@ func generateFsProps(ctx android.EarlyModuleContext, partitions allGeneratedPart
 	// BOARD_AVB_SYSTEM_ROLLBACK_INDEX_LOCATION
 	fsProps.Rollback_index_location = avbInfo.avbRollbackIndexLocation
 	fsProps.Avb_hash_algorithm = avbInfo.avbHashAlgorithm
+
+	// Do not use a fixed timestamp.
+	// This prevents a full push on the first adb sync.
+	fsProps.No_use_fixed_timestamp = proptools.BoolPtr(true)
 
 	fsProps.Partition_name = proptools.StringPtr(partitionType)
 
@@ -1563,14 +1626,16 @@ func getAvbInfo(config android.Config, partitionType string) avbInfo {
 				}
 				result.avbRollbackIndex = &parsed
 			}
+			// The global BoardAvbAlgorithm should only apply to vbmeta.
+			if partitionVars.BoardAvbAlgorithm != "" {
+				result.avbAlgorithm = proptools.StringPtr(partitionVars.BoardAvbAlgorithm)
+			}
 		}
 		if specificPartitionVars.BoardAvbKeyPath != "" {
 			result.avbKeyPath = proptools.StringPtr(specificPartitionVars.BoardAvbKeyPath)
 		}
 		if specificPartitionVars.BoardAvbAlgorithm != "" {
 			result.avbAlgorithm = proptools.StringPtr(specificPartitionVars.BoardAvbAlgorithm)
-		} else if partitionVars.BoardAvbAlgorithm != "" {
-			result.avbAlgorithm = proptools.StringPtr(partitionVars.BoardAvbAlgorithm)
 		}
 		if specificPartitionVars.BoardAvbRollbackIndex != "" {
 			parsed, err := strconv.ParseInt(specificPartitionVars.BoardAvbRollbackIndex, 10, 64)
@@ -1719,6 +1784,7 @@ func (f *filesystemCreator) GenerateAndroidBuildActions(ctx android.ModuleContex
 	for _, partitionType := range partitions.types() {
 		if android.InList(partitionType, []string{
 			"debug_ramdisk",
+			"test_harness_ramdisk",
 			"vendor_ramdisk-debug",
 			"vendor_ramdisk-test-harness",
 			"vendor_kernel_ramdisk",

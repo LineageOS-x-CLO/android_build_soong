@@ -15,6 +15,7 @@
 package build
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"android/soong/remoteexec"
 	"android/soong/ui/metrics"
@@ -122,12 +124,12 @@ func ensureSymlink(ctx Context, dir, name, target string) {
 		ctx.Fatalf("Could not ensure that directory %q exists: %w", dir, err)
 	}
 
-	relTarget := target
+	absTarget := target
 	if !filepath.IsAbs(target) {
 		var err error
-		relTarget, err = filepath.Rel(dir, target)
+		absTarget, err = filepath.Abs(target)
 		if err != nil {
-			ctx.Fatalf("Could not create relative path for %s in %s: %w", dir, target, err)
+			ctx.Fatalf("Could not create absolute path for %s in %s: %w", dir, target, err)
 		}
 	}
 
@@ -135,7 +137,7 @@ func ensureSymlink(ctx Context, dir, name, target string) {
 	linkPath := filepath.Join(dir, name)
 	currentTarget, err := os.Readlink(linkPath)
 	if err == nil {
-		if relTarget == currentTarget {
+		if absTarget == currentTarget {
 			return
 		}
 		if err := os.Remove(linkPath); err != nil {
@@ -148,12 +150,12 @@ func ensureSymlink(ctx Context, dir, name, target string) {
 	}
 
 	// Create the new one.
-	if err := os.Symlink(relTarget, linkPath); err != nil {
-		ctx.Fatalf("Failed to create symlink %q => %q: %w", linkPath, relTarget, err)
+	if err := os.Symlink(absTarget, linkPath); err != nil {
+		ctx.Fatalf("Failed to create symlink %q => %q: %w", linkPath, absTarget, err)
 	}
 }
 
-const combinedSisoConfigText = `
+var sisoConfigTemplate = template.Must(template.New("siso-config").Parse(`
 load("@builtin//struct.star", "module")
 load("main/main.star", "main")
 load("extension/main.star", "extension")
@@ -161,15 +163,20 @@ load("extension/main.star", "extension")
 imports = [main, extension]
 
 def init(ctx):
-    return main.generate(ctx, imports)
-`
+    vars = module(
+        "config",
+        {{- range $key, $value := .SisoStringVars }}
+        {{ $key }} = "{{ $value }}",{{ end }}
+        {{- range $key, $value := .SisoBoolVars }}
+        {{ $key }} = {{ if $value }}True{{ else }}False{{ end }},{{ end }}
+    )
 
-func maybeCreateSisoConfigDir(ctx Context, config Config, value string) string {
+    return main.generate(ctx, vars, imports)
+`))
+
+func createSisoConfigDir(ctx Context, config Config, value string) string {
 	// We need to fabricate a working directory.
 	confDir := filepath.Join(config.OutDir(), "siso_config")
-	if value == DEFAULT_SISO_CONFIG_DIR {
-		return value
-	}
 	if value == confDir {
 		_, err := os.Stat(filepath.Join(confDir, "main.star"))
 		if err != nil {
@@ -180,12 +187,54 @@ func maybeCreateSisoConfigDir(ctx Context, config Config, value string) string {
 	ensureSymlink(ctx, confDir, "main", DEFAULT_SISO_CONFIG_DIR)
 	ensureSymlink(ctx, confDir, "extension", value)
 
+	var sb bytes.Buffer
+	if err := sisoConfigTemplate.Execute(&sb, config); err != nil {
+		ctx.Fatalf("Failed to generate siso config:", err)
+	}
 	confFile := filepath.Join(confDir, "main.star")
-	err := os.WriteFile(confFile, []byte(combinedSisoConfigText), 0666)
-	if err != nil {
-		ctx.Fatalf("Failed to create %q: %w", confFile, err)
+	if err := os.WriteFile(confFile, sb.Bytes(), 0666); err != nil {
+		ctx.Fatalf("Failed to write siso config to %q: %w", confFile, err)
 	}
 	return confDir
+}
+
+// Create a script for siso to get credentials.
+// Siso will invoke ${SISO_CREDENTIAL_HELPER} with "get", so put the actual credhelper command
+// invocation in `soong-convert-command`.
+func createSisoCredsHelper(ctx Context, config Config) (string, error) {
+	var helperPath string
+	var helperArgs string
+
+	// RBE_credentials_helper_args contains space-separated arguments for the helper
+	if envArgs, ok := config.environ.Get("RBE_credentials_helper_args"); ok && envArgs != "" {
+		helperArgs = envArgs
+	}
+	var ok bool
+	if helperPath, ok = config.Environment().Get("RBE_credentials_helper"); !ok {
+		helperPath = "execrel://"
+	}
+	if strings.HasPrefix(helperPath, "execrel://") {
+		relpath, _ := strings.CutPrefix(helperPath, "execrel://")
+		dir, ok := config.Environment().Get("RBE_DIR")
+		if !ok {
+			dir = "prebuilts/remoteexecution-client/live"
+		}
+		// Use the one from RBE_DIR.
+		helperPath = filepath.Join(dir, relpath, "credshelper")
+	}
+	if helperArgs == "" {
+		helperArgs = "--auth_source=automaticAuth --gcert_refresh_timeout=20"
+	}
+	if helperPath == "" {
+		return "", fmt.Errorf("missing RBE_credentials_helper")
+	}
+	ctx.Verbosef("Using '%s %s' for RBE credentials helper\n", helperPath, helperArgs)
+	cacheDir := config.rbeCacheDir()
+	helperArgs = strings.TrimSpace(helperArgs)
+	args := []string{helperPath, helperArgs, "--cache_dir", cacheDir, "-bazel_compat"}
+	cmdFile := filepath.Join(cacheDir, "soong-convert-command")
+	err := os.WriteFile(cmdFile, []byte(strings.Join(args, " ")), 0666)
+	return "build/soong/scripts/siso-creds-helper.py", err
 }
 
 func startRBEproxy(ctx Context, config Config) {
@@ -198,12 +247,37 @@ func startRBEproxy(ctx Context, config Config) {
 		"proxy",
 		"--addr", getRBEproxySocket(ctx, config),
 	}
+	authType, _ := config.rbeAuth()
+	switch authType {
+	case "RBE_credentials_helper":
+		helper, err := createSisoCredsHelper(ctx, config)
+		if err != nil {
+			ctx.Fatalf("Failed to create credential helper script: %v\n", err)
+		}
+		config.environ.Set("SISO_CREDENTIAL_HELPER", helper)
+	case "RBE_use_google_prod_creds":
+		ctx.Printf("Using google prod credentials\n")
+	default:
+		config.environ.Set("SISO_CREDENTIAL_HELPER", "google-application-default")
+		ctx.Printf("Using google application default credentials\n")
+	}
+	if instance, ok := config.environ.Get("RBE_instance"); ok {
+		args = append(args, "--reapi_instance", instance)
+	}
+	if service, ok := config.environ.Get("RBE_service"); ok {
+		// Pass the actual service to siso proxy.
+		args = append(args, "--reapi_address", service)
+	}
 	if project := getRBEProject(ctx, config); project != "" {
 		args = append(args, "--project", project)
 	}
 
 	cmd := Command(ctx, config, e, "startRbeproxy bootstrap", executable, args...)
-	ctx.Printf("Starting RBE proxy: %s\n", cmd)
+	ctx.Printf("Starting RBE proxy\n")
+	ctx.Verbosef("RBE proxy command: %s\n", cmd)
+	cmd.Stdin = strings.NewReader("")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
 		ctx.Fatalf("Unable to start siso proxy\nFAILED: siso proxy failed with: %v\n%s\n", err)
@@ -263,8 +337,8 @@ func stopRBE(ctx Context, config Config) {
 	}
 
 	if !config.Environment().IsEnvTrue("ANDROID_QUIET_BUILD") && len(output) > 0 {
-		fmt.Fprintln(ctx.Writer, "")
-		fmt.Fprintln(ctx.Writer, fmt.Sprintf("%s", output))
+		ctx.PrintFinal("\n")
+		ctx.PrintFinal(string(output))
 	}
 }
 

@@ -81,6 +81,7 @@ var (
 				`cat $srcJarList >> $out.rsp && ` +
 				`if [ -s $genAnnoSrcJarList ] ; then ` +
 				`echo >> $out.rsp && cat $genAnnoSrcJarList >> $out.rsp; fi && ` +
+				`. ${config.UsePartialCompileFile} && ` +
 				`${config.IncrementalJavacInputCmd} ` +
 				`--srcs $out.rsp --classDir $outDir --deps $javacDeps --javacTarget $out --srcDepsProto $out.proto --localHeaderJars $localHeaderJars --crossModuleJarList $crossModuleJars && ` +
 				`mkdir -p "$outDir" && ` +
@@ -450,7 +451,8 @@ func init() {
 }
 
 type javaBuilderFlags struct {
-	javacFlags string
+	javacFlags     string
+	javacFlagsDeps android.Paths
 
 	// bootClasspath is the list of jars that form the boot classpath (generally the java.* and
 	// android.* classes) for tools that still use it.  javac targeting 1.9 or higher uses
@@ -557,6 +559,7 @@ func emitXrefRule(ctx android.ModuleContext, xrefFile android.WritablePath, idx 
 
 	deps = append(deps, classpath...)
 	deps = append(deps, flags.processorPath...)
+	deps = append(deps, flags.javacFlagsDeps...)
 
 	processor := "-proc:none"
 	if len(flags.processors) > 0 {
@@ -643,6 +646,8 @@ func turbineFlags(ctx android.ModuleContext, flags javaBuilderFlags, dir string,
 	} else {
 		rbeInputs = append(rbeInputs, classpath...)
 	}
+
+	implicits = append(implicits, flags.javacFlagsDeps...)
 
 	turbineFlags := "--source_jars " + srcJarArgs + " " + bootClasspathFlags + " --classpath " + classpathFlags
 
@@ -835,6 +840,8 @@ func transformJavaToClassesInc(ctx android.ModuleContext, outputFile android.Wri
 		},
 	})
 
+	deps = append(deps, flags.javacFlagsDeps...)
+
 	rule := javacInc
 	ctx.Build(pctx, android.BuildParams{
 		Rule:           rule,
@@ -842,7 +849,7 @@ func transformJavaToClassesInc(ctx android.ModuleContext, outputFile android.Wri
 		Output:         outputFile,
 		ImplicitOutput: annoSrcJar,
 		Inputs:         srcFiles,
-		Implicits:      deps,
+		Implicits:      append(deps, ctx.Config().UsePartialCompileFile(ctx)),
 		Args: map[string]string{
 			"javacFlags":        flags.javacFlags,
 			"bootClasspath":     bootClasspath,
@@ -935,6 +942,7 @@ func transformJavaToClasses(ctx android.ModuleContext, outputFile android.Writab
 	deps = append(deps, javacClasspath...)
 	deps = append(deps, flags.processorPath...)
 	deps = append(deps, genAnnoSrcJars...)
+	deps = append(deps, flags.javacFlagsDeps...)
 
 	processor := "-proc:none"
 	if len(flags.processors) > 0 {

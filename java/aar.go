@@ -100,8 +100,7 @@ type aaptProperties struct {
 	// library that provided them, as opposed to aapt2 which produces R.java files for every package containing
 	// every resource.  Using the resource processor can provide significant build time speedups, but requires
 	// fixing the module to use the correct package to reference each resource, and to avoid having any other
-	// libraries in the tree that use the same package name.  Defaults to false, but will default to true in the
-	// future.
+	// libraries in the tree that use the same package name.  Defaults to true.
 	Use_resource_processor *bool
 
 	// true if RRO is enforced for any of the dependent modules
@@ -311,6 +310,17 @@ func (a *aapt) aapt2Flags(ctx android.ModuleContext, sdkContext android.SdkConte
 		overlayDirs = append(overlayDirs, resOverlayDirs...)
 		rroDirs = append(rroDirs, resRRODirs...)
 	}
+
+	var allOverlays android.Paths
+	for _, overlayDir := range overlayDirs {
+		allOverlays = append(allOverlays, overlayDir.dir)
+	}
+	for _, rro := range rroDirs {
+		allOverlays = append(allOverlays, rro.path)
+	}
+	android.SetProvider(ctx, android.RROInfoProvider, android.RROInfo{
+		Paths: allOverlays,
+	})
 
 	assetDirsHasher := sha256.New()
 	var assetDeps android.Paths
@@ -788,7 +798,8 @@ func (a *aapt) compileResInDir(ctx android.ModuleContext, dirs android.Paths, co
 
 var resourceProcessorBusyBox = pctx.AndroidStaticRule("resourceProcessorBusyBox",
 	blueprint.RuleParams{
-		Command: "${config.JavaCmd} -cp ${config.ResourceProcessorBusyBox} " +
+		Command: "${config.JavaCmd} ${config.ResourceProcessorBusyBoxSuppressJDKWarnings} " +
+			"-cp ${config.ResourceProcessorBusyBox} " +
 			"com.google.devtools.build.android.ResourceProcessorBusyBox --tool=GENERATE_BINARY_R -- @${out}.args && " +
 			"if cmp -s ${out}.tmp ${out} ; then rm ${out}.tmp ; else mv ${out}.tmp ${out}; fi",
 		CommandDeps:    []string{"${config.ResourceProcessorBusyBox}"},
@@ -989,6 +1000,7 @@ type AndroidLibraryInfo struct {
 
 var AndroidLibraryInfoProvider = blueprint.NewProvider[AndroidLibraryInfo]()
 
+// @auto-generate: gob
 type AARImportInfo struct {
 	// Empty for now
 }
@@ -1213,7 +1225,7 @@ type AARImportProperties struct {
 	// List of java static libraries that the included ARR (android library prebuilts) has dependencies to.
 	Static_libs proptools.Configurable[[]string]
 	// List of java libraries that the included ARR (android library prebuilts) has dependencies to.
-	Libs []string
+	Libs proptools.Configurable[[]string]
 	// If set to true, run Jetifier against .aar file. Defaults to false.
 	Jetifier *bool
 	// If true, extract JNI libs from AAR archive. These libs will be accessible to android_app modules and
@@ -1336,7 +1348,7 @@ func (a *AARImport) DepsMutator(ctx android.BottomUpMutatorContext) {
 		}
 	}
 
-	ctx.AddVariationDependencies(nil, libTag, a.properties.Libs...)
+	ctx.AddVariationDependencies(nil, libTag, a.properties.Libs.GetOrDefault(ctx, nil)...)
 	ctx.AddVariationDependencies(nil, staticLibTag, a.properties.Static_libs.GetOrDefault(ctx, nil)...)
 
 	a.usesLibrary.deps(ctx, false)

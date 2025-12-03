@@ -27,7 +27,7 @@ import (
 var (
 	pctx = android.NewPackageContext("android/soong/rust/config")
 
-	RustDefaultVersion = "1.88.0"
+	RustDefaultVersion = "1.89.0"
 	RustDefaultBase    = "prebuilts/rust/"
 	DefaultEdition     = "2021"
 	Stdlibs            = []string{
@@ -39,8 +39,8 @@ var (
 		"liballoc.rust_sysroot",
 	}
 
-	// Rust versions usually look like "1.88.0", but might also get a
-	// letter or non-numeric suffix when testing (i.e. "1.88.0.test")
+	// Rust versions usually look like "1.89.0", but might also get a
+	// letter or non-numeric suffix when testing (i.e. "1.89.0.test")
 	RustVersionRe = regexp.MustCompile(`^(\d+\.\d+\.\d+).*$`)
 
 	// Mapping between Soong internal arch types and std::env constants.
@@ -71,6 +71,7 @@ var (
 
 		// cfg flag to indicate that we are building in AOSP with Soong
 		"--cfg soong",
+		"-Aunpredictable-function-pointer-comparisons",
 	}
 	LinuxHostGlobalRustFlags = []string{
 		"-C relocation-model=pic",
@@ -90,6 +91,7 @@ var (
 		"-Z debug-info-for-profiling",
 		// Android has ELF TLS on platform
 		"-Z tls-model=global-dynamic",
+		"-Z has-thread-local=yes",
 		"-C relocation-model=pic",
 	}
 

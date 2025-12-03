@@ -34,13 +34,17 @@ import (
 	"android/soong/rust/config"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 var pctx = android.NewPackageContext("android/soong/rust")
 
+// @auto-generate: gob
 type LibraryInfo struct {
 	Rlib  bool
 	Dylib bool
 }
 
+// @auto-generate: gob
 type CompilerInfo struct {
 	StdLinkageForDevice    StdLinkage
 	StdLinkageForNonDevice StdLinkage
@@ -55,17 +59,21 @@ type CompilerInfo struct {
 	CheckTarget            android.OptionalPath
 }
 
+// @auto-generate: gob
 type ProtobufDecoratorInfo struct{}
 
+// @auto-generate: gob
 type SourceProviderInfo struct {
 	Srcs                  android.Paths
 	ProtobufDecoratorInfo *ProtobufDecoratorInfo
 }
 
+// @auto-generate: gob
 type ProcMacroInfo struct {
 	Dylib android.Path
 }
 
+// @auto-generate: gob
 type RustInfo struct {
 	AndroidMkSuffix               string
 	RustSubName                   string
@@ -260,6 +268,10 @@ type Module struct {
 
 	// Shared flags among stubs build rules of this module
 	sharedFlags cc.SharedFlags
+}
+
+func (c *Module) IncrementalSupported() bool {
+	return true
 }
 
 func (mod *Module) Header() bool {
@@ -490,6 +502,7 @@ type Deps struct {
 	Dylibs          []string
 	Rlibs           []string
 	Rustlibs        []string
+	NoStdRlibs      []string
 	Stdlibs         []string
 	ProcMacros      []string
 	SharedLibs      []string
@@ -623,6 +636,7 @@ func NewFlagExporter() *flagExporter {
 	return &flagExporter{}
 }
 
+// @auto-generate: gob
 type RustFlagExporterInfo struct {
 	Flags                 []string
 	LinkDirs              []string
@@ -1442,6 +1456,7 @@ func (mod *Module) deps(ctx DepsContext) Deps {
 	deps.Rlibs = android.LastUniqueStrings(deps.Rlibs)
 	deps.Dylibs = android.LastUniqueStrings(deps.Dylibs)
 	deps.Rustlibs = android.LastUniqueStrings(deps.Rustlibs)
+	deps.NoStdRlibs = android.LastUniqueStrings(deps.NoStdRlibs)
 	deps.ProcMacros = android.LastUniqueStrings(deps.ProcMacros)
 	deps.SharedLibs = android.LastUniqueStrings(deps.SharedLibs)
 	deps.StaticLibs = android.LastUniqueStrings(deps.StaticLibs)
@@ -2104,6 +2119,26 @@ func (mod *Module) stdLinkageOptions(ctx DepsContext) [][]blueprint.Variation {
 	}
 }
 
+func (mod *Module) addNoStdDep(ctx DepsContext, lib string) {
+	variations := []blueprint.Variation{RlibCore.variation(), rlibDepTag.libraryVariation()}
+
+	if ctx.OtherModuleDependencyVariantExists(variations, lib) {
+		ctx.AddVariationDependencies(variations, rlibDepTag, lib)
+		return
+	}
+	// To allow migration of custom nostd modules to no_std variants, temporarily support
+	// stripping _nostd suffixes if the library is not present.
+	// This is made safe by the enforcement that no_std libraries can no longer depend on
+	// stdful libraries, which works transitively.
+	if strings.HasSuffix(lib, "_nostd") {
+		mod.addNoStdDep(ctx, strings.TrimSuffix(lib, "_nostd"))
+		return
+	}
+	if !ctx.Config().AllowMissingDependencies() {
+		ctx.ModuleErrorf("unable to find no_std variation for lib %#v", lib)
+	}
+}
+
 func (mod *Module) addVariantDep(ctx DepsContext, depTags []dependencyTag, lib string) {
 	// Preference order is to get the preferred depTag, then to get preferred stdLinkage.
 	for _, depTag := range depTags {
@@ -2115,6 +2150,14 @@ func (mod *Module) addVariantDep(ctx DepsContext, depTags []dependencyTag, lib s
 				return
 			}
 		}
+	}
+	// To allow migration of custom nostd modules to no_std variants, temporarily support
+	// stripping _nostd suffixes if the library is not present.
+	// This is made safe by the enforcement that no_std libraries can no longer depend on
+	// stdful libraries, which works transitively.
+	if strings.HasSuffix(lib, "_nostd") {
+		mod.addVariantDep(ctx, depTags, strings.TrimSuffix(lib, "_nostd"))
+		return
 	}
 	if !ctx.Config().AllowMissingDependencies() {
 		ctx.ModuleErrorf("unable to find allowed variation for lib %#v - stdLinkage %v depTags %v", lib, mod.stdLinkageOptions(ctx), depTags)
@@ -2173,6 +2216,12 @@ func (mod *Module) DepsMutator(actx android.BottomUpMutatorContext) {
 					actx.AddVariationDependencies(srcProviderVariations, sourceDepTag, lib)
 				}
 			}
+		}
+	}
+
+	if deps.NoStdRlibs != nil {
+		for _, lib := range deps.NoStdRlibs {
+			mod.addNoStdDep(ctx, lib)
 		}
 	}
 
@@ -2443,6 +2492,7 @@ func (c *Module) Partition() string {
 	return ""
 }
 
+// @auto-generate: gob
 type RustImplementationDepInfo struct {
 	NonApexImplementationDeps depset.DepSet[android.Path]
 }

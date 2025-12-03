@@ -34,6 +34,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 var pctx = android.NewPackageContext("android/soong/filesystem")
 
 func init() {
@@ -213,6 +215,11 @@ type FilesystemProperties struct {
 
 	// Seconds since unix epoch to override timestamps of file entries
 	Fake_timestamp *string
+
+	// To produce hermetic filesystems, the timestamp of the file entries is pinned to a known
+	// timestamp by default.
+	// Setting `No_use_fixed_timestamp` to true will create unpinned timestamps.
+	No_use_fixed_timestamp *bool
 
 	// When set, passed to mkuserimg_mke2fs --mke2fs_uuid & --mke2fs_hash_seed.
 	// Otherwise, they'll be set as random which might cause indeterministic build output.
@@ -478,17 +485,20 @@ func (t fsType) String() string {
 	panic(fmt.Errorf("unsupported fs type %d", t))
 }
 
+// @auto-generate: gob
 type InstalledFilesStruct struct {
 	Txt  android.Path
 	Json android.Path
 }
 
+// @auto-generate: gob
 type InstalledModuleInfo struct {
 	Name      string
 	Variation string
 	Prebuilt  bool
 }
 
+// @auto-generate: gob
 type FilesystemInfo struct {
 	// The built filesystem image
 	Output android.Path
@@ -562,6 +572,7 @@ type FilesystemInfo struct {
 // out/target/product/<device>/<partition>. This is essentially legacy behavior, maintained for
 // tools like adb sync and adevice, but we should update them to query the build system for the
 // installed files no matter where they are.
+// @auto-generate: gob
 type FullInstallPathInfo struct {
 	// RequiresFullInstall tells us if the origional module did the install to FullInstallPath
 	// already. If it's false, the android_device module needs to emit the install rule.
@@ -585,6 +596,7 @@ type FullInstallPathInfo struct {
 
 var FilesystemProvider = blueprint.NewProvider[FilesystemInfo]()
 
+// @auto-generate: gob
 type FilesystemDefaultsInfo struct{}
 
 var FilesystemDefaultsInfoProvider = blueprint.NewProvider[FilesystemDefaultsInfo]()
@@ -931,10 +943,6 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	f.fileListFile = fileListFile
-
-	if proptools.Bool(f.properties.Unchecked_module) {
-		ctx.UncheckedModule()
-	}
 
 	f.setVbmetaPartitionProvider(ctx)
 
@@ -1398,6 +1406,8 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 	if timestamp := proptools.String(f.properties.Fake_timestamp); timestamp != "" {
 		addStr("timestamp", timestamp)
 	} else if ctx.Config().Getenv("USE_FIXED_TIMESTAMP_IMG_FILES") == "true" {
+		addStr("use_fixed_timestamp", "true")
+	} else if !proptools.Bool(f.properties.No_use_fixed_timestamp) {
 		addStr("use_fixed_timestamp", "true")
 	}
 

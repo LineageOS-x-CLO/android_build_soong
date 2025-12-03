@@ -506,7 +506,7 @@ var allPartialCompileFlags = func() (flags partialCompileFlags) {
 }()
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=default`.
-var defaultPartialCompileFlags = falsePartialCompileFlags
+var defaultPartialCompileFlags = truePartialCompileFlags
 
 type deviceConfig struct {
 	config *config
@@ -1381,6 +1381,11 @@ func (c *config) DefaultAppTargetSdk(ctx EarlyModuleContext) ApiLevel {
 	return ApiLevelOrPanic(ctx, codename)
 }
 
+// This file is written by soong_ui, and sourced by rules that need a value for `SOONG_USE_PARTIAL_COMPILE`.
+func (c *config) UsePartialCompileFile(ctx PathContext) Path {
+	return PathForOutput(ctx, "use_partial_compile-"+*c.deviceNameToInstall+".sh")
+}
+
 func (c *config) PartialCompileFlags() partialCompileFlags {
 	return c.partialCompileFlags
 }
@@ -1606,6 +1611,10 @@ func (c *config) UseREWrapper() bool {
 
 func (c *config) UseRBEJAVAC() bool {
 	return Bool(c.productVariables.UseRBEJAVAC) && c.UseREWrapper()
+}
+
+func (c *config) RBEContainerImage() string {
+	return String(c.productVariables.RBEContainerImage)
 }
 
 func (c *config) UseRBER8() bool {

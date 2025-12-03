@@ -35,6 +35,7 @@ func SetupOutDir(ctx Context, config Config) {
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "Android.mk"))
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "CleanSpec.mk"))
 	ensureDirectoriesExist(ctx, config.SoongOutDir())
+	ensureDirectoriesExist(ctx, filepath.Join(config.SoongOutDir(), "action_sandboxing_workdir"))
 
 	// The ninja_build file is used by our buildbots to understand that the output
 	// can be parsed as ninja output.
@@ -90,8 +91,8 @@ func SetupOutDir(ctx Context, config Config) {
 	writeValueIfChanged(ctx, filepath.Join(config.SoongOutDir(), "build_hostname.txt"), hostname)
 
 	buildTargetName, ok := config.environ.Get("BUILD_TARGET_NAME")
-	if !ok {
-		buildTargetName = config.TargetProduct()
+	if targetProduct, err := config.TargetProductOrErr(); !ok && err == nil {
+		buildTargetName = targetProduct
 	}
 
 	buildUUID := buildUUID(buildTargetName, buildNumber)
@@ -322,7 +323,7 @@ func Build(ctx Context, config Config) {
 	checkCaseSensitivity(ctx, config)
 
 	SetupPath(ctx, config)
-	mapsCh := QueryProductReleaseConfigMaps(ctx, config)
+	mapsCh := QueryEarlyReleaseConfig(ctx, config)
 
 	what := evaluateWhatToRun(config, ctx.Verboseln)
 
@@ -359,7 +360,7 @@ func Build(ctx Context, config Config) {
 		defer cipdProxy.Stop(ctx)
 	}
 
-	SetProductReleaseConfigMaps(ctx, config, mapsCh)
+	CollectEarlyReleaseConfig(ctx, config, mapsCh)
 	if what&RunProductConfig != 0 {
 		runMakeProductConfig(ctx, config)
 
@@ -369,6 +370,12 @@ func Build(ctx Context, config Config) {
 	}
 
 	// Everything below here depends on product config.
+
+	// Write SOONG_USE_PARTIAL_COMPILE so it can be sourced by rules that use it.
+	shFile := config.DeviceUsePartialCompile()
+	ensureDirectoriesExist(ctx, filepath.Dir(shFile))
+	value, _ := config.environ.Get("SOONG_USE_PARTIAL_COMPILE")
+	writeValueIfChanged(ctx, shFile, fmt.Sprintf("\nexport SOONG_USE_PARTIAL_COMPILE=%s\n", value))
 
 	if inList("installclean", config.Arguments()) ||
 		inList("install-clean", config.Arguments()) {
@@ -436,12 +443,24 @@ func Build(ctx Context, config Config) {
 
 		runUpdateApi(ctx, config)
 		runUpdateAidlApi(ctx, config)
+		createCompDbSymlink(ctx, config)
 	}
 
 	if what&RunDistActions != 0 {
 		runDistActions(ctx, config)
 	}
 	done = true
+}
+
+func createCompDbSymlink(ctx Context, config Config) {
+	if finalLinkDir, ok := config.environ.Get("SOONG_LINK_COMPDB_TO"); ok && finalLinkDir != "" {
+		finalLinkPath := filepath.Join(finalLinkDir, "compile_commands.json")
+		os.Remove(finalLinkPath)
+		compDBFilePath := filepath.Join(config.SoongOutDir(), "development/ide/compdb/compile_commands.json")
+		if err := os.Symlink(compDBFilePath, finalLinkPath); err != nil {
+			ctx.Printf("Unable to symlink %s to %s: %s", compDBFilePath, finalLinkPath, err)
+		}
+	}
 }
 
 func updateBuildIdDir(ctx Context, config Config) {

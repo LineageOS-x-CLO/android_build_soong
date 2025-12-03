@@ -28,6 +28,8 @@ import (
 	"github.com/google/blueprint"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 func init() {
 	registerBootclasspathFragmentBuildComponents(android.InitRegistrationContext)
 
@@ -40,6 +42,7 @@ func registerBootclasspathFragmentBuildComponents(ctx android.RegistrationContex
 	ctx.RegisterModuleType("prebuilt_bootclasspath_fragment", prebuiltBootclasspathFragmentFactory)
 }
 
+// @auto-generate: gob
 type BootclasspathFragmentInfo struct {
 	ImageName               *string
 	Contents                []string
@@ -383,6 +386,7 @@ var BootclasspathFragmentApexContentInfoProvider = blueprint.NewProvider[Bootcla
 
 // BootclasspathFragmentApexContentInfo contains the bootclasspath_fragments contributions to the
 // apex contents.
+// @auto-generate: gob
 type BootclasspathFragmentApexContentInfo struct {
 	// Map from the base module name (without prebuilt_ prefix) of a fragment's contents module to the
 	// hidden API encoded dex jar path.
@@ -500,7 +504,7 @@ func (b *BootclasspathFragmentModule) DepsMutator(ctx android.BottomUpMutatorCon
 	for _, additionalStubModule := range b.properties.Additional_stubs {
 		for _, apiScope := range hiddenAPISdkLibrarySupportedScopes {
 			// Add a dependency onto a possibly scope specific stub library.
-			scopeSpecificDependency := apiScope.scopeSpecificStubModule(ctx, additionalStubModule)
+			scopeSpecificDependency := apiScope.Value().scopeSpecificStubModule(ctx, additionalStubModule)
 			tag := hiddenAPIStubsDependencyTag{apiScope: apiScope, fromAdditionalDependency: true}
 			ctx.AddVariationDependencies(nil, tag, scopeSpecificDependency)
 		}
@@ -554,6 +558,23 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 
 	// Perform hidden API processing.
 	hiddenAPIOutput := b.generateHiddenAPIBuildActions(ctx, contents, fragments)
+
+	// Zip all encoded jars and set an output tag for other modules to use.
+	encodedJars := hiddenAPIOutput.EncodedBootDexFilesByModule.bootDexJars()
+	outputZipPath := android.PathForModuleOut(ctx, "encoded-jars.zip")
+	rule := android.NewRuleBuilder(pctx, ctx)
+	cmd := rule.Command().
+		Tool(ctx.Config().HostToolPath(ctx, "soong_zip")).
+		Flag("-o").Output(outputZipPath).
+		Flag("-j")
+
+	for _, jar := range encodedJars {
+		cmd.Flag("-f").Input(jar)
+	}
+
+	rule.Build("zip_encoded_jars", "zip encoded jars")
+
+	ctx.SetOutputFiles(android.Paths{outputZipPath}, ".encoded_jars_zip")
 
 	if android.IsModulePrebuilt(ctx, ctx.Module()) {
 		b.profilePath = ctx.Module().(*PrebuiltBootclasspathFragmentModule).produceBootImageProfile(ctx)
@@ -681,6 +702,7 @@ func (b *BootclasspathFragmentModule) configuredJars(ctx android.ModuleContext) 
 
 var ClasspathFragmentValidationInfoProvider = blueprint.NewProvider[ClasspathFragmentValidationInfo]()
 
+// @auto-generate: gob
 type ClasspathFragmentValidationInfo struct {
 	ClasspathFragmentModuleName string
 	UnknownJars                 []string
