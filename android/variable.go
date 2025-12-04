@@ -715,7 +715,6 @@ type PartitionVariables struct {
 	ProductBuildVendorBootImage       string   `json:",omitempty"`
 	ProductBuildInitBootImage         bool     `json:",omitempty"`
 	BoardUsesRecoveryAsBoot           bool     `json:",omitempty"`
-	BoardPrebuiltBootimage            string   `json:",omitempty"`
 	BoardPrebuiltInitBootimage        string   `json:",omitempty"`
 	BoardBootimagePartitionSize       string   `json:",omitempty"`
 	BoardVendorBootimagePartitionSize string   `json:",omitempty"`
