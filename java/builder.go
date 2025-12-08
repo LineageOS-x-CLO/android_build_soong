@@ -434,6 +434,7 @@ var (
 				` cat $$f; ` +
 				`done > $out`,
 			SandboxDisabled: true,
+			CommandDeps: []string{"Rm-deps", "Echo-deps", "Cat-deps"},
 		})
 
 	gatherReleasedFlaggedApisRule = pctx.AndroidStaticRule("gatherReleasedFlaggedApisRule",
