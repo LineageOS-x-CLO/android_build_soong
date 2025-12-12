@@ -319,7 +319,7 @@ func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPa
 	// Create one rule per file to avoid MAX_ARG_STRLEN hardlimit.
 	for _, entry := range fuzzPackagedModule.Corpus {
 		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.Cp,
+			Rule:   android.CpRule,
 			Output: intermediateDir.Join(ctx, entry.Base()),
 			Input:  entry,
 		})
@@ -334,7 +334,7 @@ func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPa
 	// Create one rule per file to avoid MAX_ARG_STRLEN hardlimit.
 	for _, entry := range fuzzPackagedModule.Data {
 		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.Cp,
+			Rule:   android.CpRule,
 			Output: intermediateDir.Join(ctx, entry.Rel()),
 			Input:  entry,
 		})
