@@ -2726,7 +2726,6 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []Fi
 	name += info.NameSuffix
 
 	type testSuiteInfo struct {
-		name                string
 		dir                 WritablePath
 		includeModuleFolder bool
 	}
@@ -2745,7 +2744,6 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []Fi
 				rel = filepath.Join(rel, name)
 			}
 			suites = append(suites, testSuiteInfo{
-				name:                suite,
 				dir:                 PathForArbitraryOutput(ctx, rel),
 				includeModuleFolder: suiteInfo.IncludeModuleFolder || info.PerTestcaseDirectory,
 			})
