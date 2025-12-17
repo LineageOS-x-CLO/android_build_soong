@@ -633,6 +633,7 @@ type PartitionQualifiedVariablesType struct {
 	BoardErofsCompressHints     string `json:",omitempty"`
 	BoardErofsPclusterSize      string `json:",omitempty"`
 	BoardErofsBlockSize         string `json:",omitempty"`
+	BoardErofsEnableDedupe      string `json:",omitempty"`
 	BoardExtfsInodeCount        string `json:",omitempty"`
 	BoardExtfsRsvPct            string `json:",omitempty"`
 	BoardF2fsSloadCompressFlags string `json:",omitempty"`
@@ -699,6 +700,7 @@ type PartitionVariables struct {
 	BoardErofsBlockSize            string `json:",omitempty"`
 	BoardErofsShareDupBlocks       string `json:",omitempty"`
 	BoardErofsUseLegacyCompression string `json:",omitempty"`
+	BoardErofsEnableDedupe         string `json:",omitempty"`
 	BoardExt4ShareDupBlocks        string `json:",omitempty"`
 	BoardFlashLogicalBlockSize     string `json:",omitempty"`
 	BoardFlashEraseBlockSize       string `json:",omitempty"`
