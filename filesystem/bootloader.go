@@ -21,7 +21,7 @@ import (
 	"android/soong/android"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 // @auto-generate: gob
 type bootloaderInfo struct {
@@ -82,7 +82,7 @@ func (p *prebuiltBootloader) partitionFilesBootloader(ctx android.ModuleContext)
 	}
 	var files android.Paths
 	unpackedDir := android.PathForModuleOut(ctx, "unpack_bootloader")
-	builder := android.NewRuleBuilder(pctx, ctx).Sbox(
+	builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled().Sbox(
 		unpackedDir,
 		android.PathForModuleOut(ctx, "unpack_bootloader.textproto"),
 	)

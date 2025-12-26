@@ -23,16 +23,17 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 var (
 	_ = pctx.HostBinToolVariable("licenseMetadataCmd", "build_license_metadata")
 
 	licenseMetadataRule = pctx.AndroidStaticRule("licenseMetadataRule", blueprint.RuleParams{
-		Command:        "${licenseMetadataCmd} -o $out @${out}.rsp",
-		CommandDeps:    []string{"${licenseMetadataCmd}"},
-		Rspfile:        "${out}.rsp",
-		RspfileContent: "${args}",
+		Command:         "${licenseMetadataCmd} -o $out @${out}.rsp",
+		CommandDeps:     []string{"${licenseMetadataCmd}"},
+		Rspfile:         "${out}.rsp",
+		RspfileContent:  "${args}",
+		SandboxDisabled: true,
 	}, "args")
 )
 

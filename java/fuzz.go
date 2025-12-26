@@ -27,7 +27,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 const (
 	hostString   = "host"
@@ -220,7 +220,7 @@ func (s *javaFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) {
 		archOs := fuzz.ArchOs{HostOrTarget: hostOrTargetString, Arch: archString, Dir: archDir.String()}
 
 		var files []fuzz.FileToZip
-		builder := android.NewRuleBuilder(pctx, ctx)
+		builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 
 		// Package the artifacts (data, corpus, config and dictionary) into a zipfile.
 		files = s.PackageArtifacts(ctx, module, &fuzzInfo, archDir, builder)

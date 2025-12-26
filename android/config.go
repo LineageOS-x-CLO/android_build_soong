@@ -177,6 +177,14 @@ func (c Config) CoverageSuffix() string {
 	return ""
 }
 
+func (c Config) IsActionSandboxedBuild() bool {
+	return c.Getenv("SOONG_ACTION_SANDBOXING") == "nsjail"
+}
+
+func (c Config) ActionSandboxMetrics() *blueprint.SandboxMetrics {
+	return c.sandboxMetrics
+}
+
 // MaxPageSizeSupported returns the max page size supported by the device. This
 // value will define the ELF segment alignment for binaries (executables and
 // shared libraries).
@@ -428,6 +436,8 @@ type config struct {
 	// If buildFromSourceStub is true then the Java API stubs are
 	// built from the source Java files, not the signature text files.
 	buildFromSourceStub bool
+
+	sandboxMetrics *blueprint.SandboxMetrics
 
 	// If ensureAllowlistIntegrity is true, then the presence of any allowlisted
 	// modules that aren't mixed-built for at least one variant will cause a build
@@ -782,9 +792,6 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 		katiEnabled: cmdArgs.KatiEnabled,
 	}
 
-	variant, ok := os.LookupEnv("TARGET_BUILD_VARIANT")
-	isEngBuild := !ok || variant == "eng"
-
 	newConfig.deviceConfig = &deviceConfig{
 		config: newConfig,
 	}
@@ -820,7 +827,7 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 		return &config{}, err
 	}
 
-	newConfig.partialCompileFlags, err = newConfig.parsePartialCompileFlags(isEngBuild)
+	newConfig.partialCompileFlags, err = newConfig.parsePartialCompileFlags(newConfig.Eng())
 	if err != nil {
 		return &config{}, err
 	}
@@ -885,6 +892,8 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 		buildUUIDFileSuffix = "-" + targetProduct
 	}
 	newConfig.buildUUIDFile = "build_uuid" + buildUUIDFileSuffix + ".txt"
+
+	newConfig.sandboxMetrics = &blueprint.SandboxMetrics{}
 
 	return newConfig, err
 }
@@ -1263,6 +1272,10 @@ func (c *config) PlatformSdkVersionFull() string {
 	return proptools.StringDefault(c.productVariables.Platform_sdk_version_full, "")
 }
 
+func (c *config) PlatformProspectiveSdkVersionFull() string {
+	return proptools.StringDefault(c.productVariables.Platform_prospective_sdk_version_full, "")
+}
+
 func (c *config) RawPlatformSdkVersion() *int {
 	return c.productVariables.Platform_sdk_version
 }
@@ -1276,7 +1289,11 @@ func (c *config) PlatformSdkCodename() string {
 }
 
 func (c *config) PlatformSdkExtensionVersion() int {
-	return *c.productVariables.Platform_sdk_extension_version
+	version := 1
+	if c.productVariables.Platform_sdk_extension_version != nil {
+		version = *c.productVariables.Platform_sdk_extension_version
+	}
+	return version
 }
 
 func (c *config) PlatformBaseSdkExtensionVersion() int {
@@ -1585,6 +1602,18 @@ func (c *config) EnableCFI() bool {
 
 func (c *config) DisableScudo() bool {
 	return Bool(c.productVariables.DisableScudo)
+}
+
+func (c *config) EnableXOM() bool {
+	// Use the Build Flag value if ENABLE_XOM is not set,
+	// otherwise use the value in product variables.
+	if c.productVariables.EnableXOM == nil {
+		return c.GetBuildFlagBool("RELEASE_BUILD_EXECUTE_ONLY_MEMORY")
+	} else if Bool(c.productVariables.EnableXOM) {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (c *config) Android64() bool {
@@ -2188,6 +2217,13 @@ func (c *config) HWASanEnabledForPath(path string) bool {
 	return HasAnyPrefix(path, c.productVariables.HWASanIncludePaths) && !c.HWASanDisabledForPath(path)
 }
 
+func (c *config) XOMDisabledForPath(path string) bool {
+	if c.productVariables.XOMExcludePaths == nil {
+		return false
+	}
+	return PrefixInList(c.productVariables.XOMExcludePaths, path)
+}
+
 func (c *config) VendorConfig(name string) VendorConfig {
 	return soongconfig.Config(c.productVariables.VendorVars[name])
 }
@@ -2257,10 +2293,6 @@ func (c *config) ProductPublicSepolicyDirs() []string {
 
 func (c *config) ProductPrivateSepolicyDirs() []string {
 	return c.productVariables.ProductPrivateSepolicyDirs
-}
-
-func (c *config) TargetMultitreeUpdateMeta() bool {
-	return c.productVariables.MultitreeUpdateMeta
 }
 
 func (c *deviceConfig) DeviceArch() string {

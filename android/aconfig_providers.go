@@ -23,13 +23,14 @@ import (
 	"github.com/google/blueprint"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 var (
 	mergeAconfigFilesRule = pctx.AndroidStaticRule("mergeAconfigFilesRule",
 		blueprint.RuleParams{
-			Command:     `${aconfig} dump --dedup --format protobuf --out $out $flags`,
-			CommandDeps: []string{"${aconfig}"},
+			Command:         `${aconfig} dump --dedup --format protobuf --out $out $flags`,
+			CommandDeps:     []string{"${aconfig}"},
+			SandboxDisabled: true,
 		}, "flags")
 	_ = pctx.HostBinToolVariable("aconfig", "aconfig")
 )

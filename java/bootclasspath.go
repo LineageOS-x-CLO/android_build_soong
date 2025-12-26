@@ -23,7 +23,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 // Contains code that is common to both platform_bootclasspath and bootclasspath_fragment.
 
@@ -309,8 +309,8 @@ type BootclasspathAPIProperties struct {
 
 // apiScopeToStubLibs calculates the stub library modules for each relevant *HiddenAPIScope from the
 // Stub_libs properties.
-func (p BootclasspathAPIProperties) apiScopeToStubLibs(ctx android.BaseModuleContext) map[HiddenAPIScopeHandle][]string {
-	m := map[HiddenAPIScopeHandle][]string{}
+func (p BootclasspathAPIProperties) apiScopeToStubLibs(ctx android.BaseModuleContext) map[*HiddenAPIScope][]string {
+	m := map[*HiddenAPIScope][]string{}
 	for _, apiScope := range hiddenAPISdkLibrarySupportedScopes {
 		m[apiScope] = p.Api.Stub_libs.GetOrDefault(ctx, nil)
 	}

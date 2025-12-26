@@ -25,14 +25,15 @@ import (
 	"android/soong/android"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 var (
 	toRawBinary = pctx.AndroidStaticRule("toRawBinary",
 		blueprint.RuleParams{
 			Command: "${objcopy} --output-target=binary ${in} ${out} &&" +
 				"chmod -x ${out}",
-			CommandDeps: []string{"$objcopy"},
+			CommandDeps:     []string{"$objcopy"},
+			SandboxDisabled: true,
 		},
 		"objcopy")
 )

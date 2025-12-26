@@ -34,7 +34,7 @@ import (
 	"android/soong/tradefed"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	RegisterAppBuildComponents(android.InitRegistrationContext)
@@ -44,8 +44,9 @@ func init() {
 var (
 	modifyAllowlist = pctx.AndroidStaticRule("modifyAllowlist",
 		blueprint.RuleParams{
-			Command:     "${ModifyAllowlistCmd} $in $packageName $out",
-			CommandDeps: []string{"${ModifyAllowlistCmd}"},
+			Command:         "${ModifyAllowlistCmd} $in $packageName $out",
+			CommandDeps:     []string{"${ModifyAllowlistCmd}"},
+			SandboxDisabled: true,
 		}, "packageName")
 )
 
@@ -108,6 +109,11 @@ type appProperties struct {
 	// If set, create package-export.apk, which other packages can
 	// use to get PRODUCT-agnostic resource data like IDs and type definitions.
 	Export_package_resources *bool
+
+	// If set, aapt2 will emit a file containing a list of resource type names and their ID
+	// mappings, which can be used by `--stable-ids` flag in `aapt2 link` command to assign
+	// fixed IDs for resources. The output file will be named res-ids.txt.
+	Emit_res_ids *bool
 
 	// Specifies that this app should be installed to the priv-app directory,
 	// where the system will grant it additional privileges not available to
@@ -754,6 +760,7 @@ func (a *AndroidApp) aaptBuildActions(ctx android.ModuleContext) {
 			excludedLibs:                   a.usesLibraryProperties.Exclude_uses_libs,
 			enforceDefaultTargetSdkVersion: a.enforceDefaultTargetSdkVersion(),
 			forceNonFinalResourceIDs:       nonFinalIds,
+			emitResIds:                     Bool(a.appProperties.Emit_res_ids),
 			extraLinkFlags:                 aaptLinkFlags,
 			aconfigTextFiles:               aconfigTextFilePaths,
 			usesLibrary:                    &a.usesLibrary,
@@ -1102,7 +1109,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 			},
 			ctx.ModuleProxy(),
 		)
-		builder := android.NewRuleBuilder(pctx, ctx)
+		builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 		builder.Command().Text("cp").
 			Input(noticeFile).
 			Output(noticeAssetPath)
@@ -1276,6 +1283,9 @@ func (a *AndroidApp) setOutputFiles(ctx android.ModuleContext) {
 	}
 	if a.rJar != nil {
 		ctx.SetOutputFiles([]android.Path{a.rJar}, ".aapt.jar")
+	}
+	if a.aapt.resIdsFile.Valid() {
+		ctx.SetOutputFiles([]android.Path{a.aapt.resIdsFile.Path()}, ".res-ids.txt")
 	}
 	ctx.SetOutputFiles([]android.Path{a.outputFile}, ".apk")
 	ctx.SetOutputFiles([]android.Path{a.exportPackage}, ".export-package.apk")
@@ -1863,7 +1873,7 @@ func (a *AndroidTest) FixTestConfig(ctx android.ModuleContext, testConfig androi
 	}
 
 	fixedConfig := android.PathForModuleOut(ctx, "test_config_fixer", "AndroidTest.xml")
-	rule := android.NewRuleBuilder(pctx, ctx)
+	rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	command := rule.Command().BuiltTool("test_config_fixer").Input(testConfig).Output(fixedConfig)
 	fixNeeded := false
 
@@ -2177,11 +2187,11 @@ func (u *usesLibrary) deps(ctx android.BottomUpMutatorContext, addCompatDeps boo
 	}
 }
 
-func (u *usesLibrary) depsFromLibs(ctx android.BottomUpMutatorContext, libDeps []android.Module) {
+func (u *usesLibrary) depsFromLibs(ctx android.BottomUpMutatorContext, libDeps []android.ModuleProxy) {
 	// For library dependencies that are component libraries (like stubs), add the implementation
 	// as a dependency (dexpreopt needs to be against the implementation library, not stubs).
 	for _, dep := range libDeps {
-		if dep != nil {
+		if !dep.IsNil() {
 			if component, ok := android.OtherModuleProvider(ctx, dep, SdkLibraryComponentDependencyInfoProvider); ok {
 				if lib := component.OptionalSdkLibraryImplementation; lib != nil {
 					// Add library as optional if it's one of the optional compatibility libs or it's
@@ -2296,7 +2306,7 @@ func (u *usesLibrary) verifyUsesLibraries(ctx android.ModuleContext, inputFile a
 		return inputFile
 	}
 
-	rule := android.NewRuleBuilder(pctx, ctx)
+	rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	cmd := rule.Command().BuiltTool("manifest_check").
 		Flag("--enforce-uses-libraries").
 		Input(inputFile).

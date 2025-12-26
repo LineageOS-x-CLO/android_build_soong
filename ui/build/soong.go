@@ -107,6 +107,7 @@ type BlueprintConfig struct {
 	debugCompilation          bool
 	subninjas                 []string
 	primaryBuilderInvocations []bootstrap.PrimaryBuilderInvocation
+	isActionSandboxedBuild    bool
 }
 
 func (c BlueprintConfig) HostToolDir() string {
@@ -139,6 +140,14 @@ func (c BlueprintConfig) PrimaryBuilderInvocations() []bootstrap.PrimaryBuilderI
 
 func (c BlueprintConfig) IsBootstrap() bool {
 	return true
+}
+
+func (c BlueprintConfig) IsActionSandboxedBuild() bool {
+	return c.isActionSandboxedBuild
+}
+
+func (c BlueprintConfig) ActionSandboxMetrics() *blueprint.SandboxMetrics {
+	return nil
 }
 
 func environmentArgs(config Config, tag string) []string {
@@ -416,6 +425,7 @@ func bootstrapBlueprint(ctx Context, config Config) {
 		// If we want to debug soong_build, we need to compile it for debugging
 		debugCompilation:          delvePort != "",
 		primaryBuilderInvocations: invocations,
+		isActionSandboxedBuild:    config.IsActionSandboxedBuild(),
 	}
 
 	// since `bootstrap.ninja` is regenerated unconditionally, we ignore the deps, i.e. little
@@ -650,8 +660,15 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
 				}
 			case NINJA_SISO:
+				sisoLogDir := filepath.Join(config.LogsDir(), "bootstrap")
+				// create log dir, otherwise glog will use /tmp instead.
+				err := os.MkdirAll(sisoLogDir, 0777)
+				if err != nil {
+					ctx.Fatalf("Failed to create siso log dir: %v\n", err)
+				}
 				ninjaCmd = config.SisoBin()
 				ninjaArgs = []string{
+					"--log_dir", sisoLogDir, // for glog, e.g. siso.*INFO*
 					"ninja",
 					// TODO: implement these features, or remove them.
 					//"-d", "keepdepfile",
@@ -665,6 +682,7 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					//"--remote_jobs", strconv.Itoa(config.RemoteParallel()),
 					"--frontend_file", fifo,
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+					"--log_dir", sisoLogDir,
 				}
 				if value := config.SisoConfigDir(); value != "" {
 					value = createSisoConfigDir(ctx, config, value)
@@ -785,10 +803,22 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 	if !config.SkipKati() {
 		distGzipFile(ctx, config, config.SoongAndroidMk(), "soong_ui/soong")
 		distGzipFile(ctx, config, config.SoongMakeVarsMk(), "soong_ui/soong")
+	} else {
+		distGzipFile(ctx, config, config.SoongPhonyTargets(), "soong_ui/soong")
+		soongDistMk := filepath.Join(config.KatiPackageMkDir(), "dist.mk")
+		distGzipFile(ctx, config, soongDistMk, "soong_ui/soong/kati_packaging")
+		distGzipFile(ctx, config, config.KatiSoongOnlyPackageNinjaFile(), "soong_ui")
 	}
 
 	if config.JsonModuleGraph() {
 		distGzipFile(ctx, config, config.ModuleGraphFile(), "soong_ui/soong")
+	}
+
+	if config.ninjaCommand == NINJA_SISO {
+		distFile(ctx, config, config.SisoConfigFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoDepsFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoFsStateFile(true), "soong_ui/bootstrap")
+		distFile(ctx, config, config.SisoFilegroupsFile(true), "soong_ui/bootstrap")
 	}
 }
 

@@ -19,17 +19,19 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 var (
 	removeComments = pctx.AndroidStaticRule("remove_comments",
 		blueprint.RuleParams{
-			Command: "grep -v '#' $in > $out",
+			Command:         "grep -v '#' $in > $out",
+			SandboxDisabled: true,
 		},
 	)
 	androidInfoTxtToProp = pctx.AndroidStaticRule("android_info_txt_to_prop",
 		blueprint.RuleParams{
-			Command: "grep 'require version-' $in | sed -e 's/require version-/ro.build.expect./g' > $out",
+			Command:         "grep 'require version-' $in | sed -e 's/require version-/ro.build.expect./g' > $out",
+			SandboxDisabled: true,
 		},
 	)
 )

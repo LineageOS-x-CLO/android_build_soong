@@ -29,7 +29,7 @@ import (
 	"android/soong/java/config"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	android.InitRegistrationContext.RegisterParallelSingletonType("device_tests_jacoco_zip", deviceTestsJacocoZipSingletonFactory)
@@ -48,6 +48,7 @@ var (
 			"${config.JacocoCLIJar}",
 			"${config.MergeZipsCmd}",
 		},
+		SandboxDisabled: true,
 	},
 		"strippedJar", "stripSpec", "tmpDir", "tmpJar")
 )
@@ -193,7 +194,7 @@ type BuildJacocoZipContext interface {
 }
 
 func BuildJacocoZip(ctx BuildJacocoZipContext, modules []android.ModuleProxy, outputFile android.WritablePath) {
-	jacocoZipBuilder := android.NewRuleBuilder(pctx, ctx)
+	jacocoZipBuilder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	jacocoZipCmd := jacocoZipBuilder.Command().BuiltTool("soong_zip").
 		FlagWithOutput("-o ", outputFile).
 		Flag("-L 0")

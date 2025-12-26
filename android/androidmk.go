@@ -38,7 +38,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	RegisterAndroidMkBuildComponents(InitRegistrationContext)
@@ -802,7 +802,7 @@ func (so *soongOnlyAndroidMkSingleton) soongOnlyBuildActions(ctx SingletonContex
 		if err := writeModuleInfoJSON(ctx, moduleInfoJSONs, preMergePath); err != nil {
 			ctx.Errorf("%s", err)
 		}
-		builder := NewRuleBuilder(pctx, ctx)
+		builder := NewRuleBuilder(pctx, ctx).SandboxDisabled()
 		builder.Command().
 			BuiltTool("merge_module_info_json").
 			FlagWithOutput("-o ", moduleInfoJSONPath).

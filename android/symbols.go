@@ -18,24 +18,26 @@ import (
 	"github.com/google/blueprint"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	pctx.HostBinToolVariable("symbols_map", "symbols_map")
 }
 
 var zipFiles = pctx.AndroidStaticRule("SnapshotZipFiles", blueprint.RuleParams{
-	Command:        `${SoongZipCmd}  -r $out.rsp -o $out`,
-	CommandDeps:    []string{"${SoongZipCmd}"},
-	Rspfile:        "$out.rsp",
-	RspfileContent: "$in",
+	Command:         `${SoongZipCmd}  -r $out.rsp -o $out`,
+	CommandDeps:     []string{"${SoongZipCmd}"},
+	Rspfile:         "$out.rsp",
+	RspfileContent:  "$in",
+	SandboxDisabled: true,
 })
 
 var mergeSymbolsMapProtos = pctx.AndroidStaticRule("merge_symbol_map_protos", blueprint.RuleParams{
-	Command:        `${symbols_map} -merge $out @$out.rsp`,
-	CommandDeps:    []string{"${symbols_map}"},
-	Rspfile:        "$out.rsp",
-	RspfileContent: "$in",
+	Command:         `${symbols_map} -merge $out @$out.rsp`,
+	CommandDeps:     []string{"${symbols_map}"},
+	Rspfile:         "$out.rsp",
+	RspfileContent:  "$in",
+	SandboxDisabled: true,
 })
 
 // Provider for generating symbols.zip

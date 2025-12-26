@@ -27,7 +27,7 @@ import (
 // file will produce the rules necessary to convert each unique set of bootclasspath jars into
 // system modules in a runtime image using the jmod and jlink tools.
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	RegisterSystemModulesBuildComponents(android.InitRegistrationContext)
@@ -76,6 +76,7 @@ var (
 			"${config.JlinkCmd}",
 			"${config.JrtFsJar}",
 		},
+		SandboxDisabled: true,
 	},
 		"classpath", "outDir", "workDir")
 

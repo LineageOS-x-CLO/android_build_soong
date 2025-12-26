@@ -41,6 +41,7 @@ func registerTestPackageZipBuildComponents(ctx android.RegistrationContext) {
 type testPackageZip struct {
 	android.ModuleBase
 	android.DefaultableModuleBase
+	blueprint.ModuleUsesIncrementalWalkDeps
 
 	properties CITestPackageProperties
 
@@ -205,7 +206,7 @@ func createOutput(ctx android.ModuleContext, pctx android.PackageContext) androi
 	arch := proptools.String(productVariables.DeviceArch)
 	secondArch := proptools.String(productVariables.DeviceSecondaryArch)
 
-	builder := android.NewRuleBuilder(pctx, ctx)
+	builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	builder.Command().Text("rm").Flag("-rf").Text(stagingDir.String())
 	builder.Command().Text("mkdir").Flag("-p").Output(stagingDir)
 	builder.Temporary(stagingDir)

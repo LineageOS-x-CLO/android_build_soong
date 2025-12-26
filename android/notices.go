@@ -22,7 +22,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func modulesOutputDirs(ctx BuilderContext, modules ...ModuleProxy) []string {
 	dirs := make([]string, 0, len(modules))
@@ -126,7 +126,7 @@ func buildNoticeOutputFromLicenseMetadata(
 	if libraryName == "" {
 		libraryName = modules[0].Name
 	}
-	rule := NewRuleBuilder(pctx, ctx)
+	rule := NewRuleBuilder(pctx, ctx).SandboxDisabled()
 
 	// Arguments that will go into the response file.
 	var rspArgs []string

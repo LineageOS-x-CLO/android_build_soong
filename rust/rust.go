@@ -16,6 +16,7 @@ package rust
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -34,7 +35,7 @@ import (
 	"android/soong/rust/config"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 var pctx = android.NewPackageContext("android/soong/rust")
 
@@ -270,10 +271,6 @@ type Module struct {
 	sharedFlags cc.SharedFlags
 }
 
-func (c *Module) IncrementalSupported() bool {
-	return true
-}
-
 func (mod *Module) Header() bool {
 	//TODO: If Rust libraries provide header variants, this needs to be updated.
 	return false
@@ -384,6 +381,13 @@ func (mod *Module) StaticExecutable() bool {
 		return false
 	}
 	return mod.StaticallyLinked()
+}
+
+func (mod *Module) Xom() *bool {
+	if mod.compiler == nil {
+		return nil
+	}
+	return mod.compiler.Xom()
 }
 
 func (mod *Module) ApexExclude() bool {
@@ -1228,6 +1232,7 @@ func (mod *Module) GenerateAndroidBuildActions(actx android.ModuleContext) {
 	linkableInfo := cc.CreateCommonLinkableInfo(ctx, mod)
 	linkableInfo.Static = mod.Static()
 	linkableInfo.Shared = mod.Shared()
+	linkableInfo.Rlib = mod.Rlib()
 	linkableInfo.CrateName = mod.CrateName()
 	linkableInfo.ExportedCrateLinkDirs = mod.ExportedCrateLinkDirs()
 	if lib, ok := mod.compiler.(cc.VersionedInterface); ok {
@@ -2014,7 +2019,15 @@ func (mod *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 	}
 	for _, dep := range directSrcDeps {
 		srcs := dep.Srcs
-		srcProviderDepFiles = append(srcProviderDepFiles, srcs...)
+		outDir := android.PathForOutput(ctx).String() + string(os.PathSeparator)
+		for _, srcFile := range srcs {
+			if strings.HasPrefix(srcFile.String(), outDir) {
+				// Only append generated files from genrules and other source file
+				// producers. This is to ensure filegroups aren't included in this
+				// list and later copied
+				srcProviderDepFiles = append(srcProviderDepFiles, srcFile)
+			}
+		}
 	}
 
 	depPaths.RLibs = append(depPaths.RLibs, rlibDepFiles...)
@@ -2160,7 +2173,11 @@ func (mod *Module) addVariantDep(ctx DepsContext, depTags []dependencyTag, lib s
 		return
 	}
 	if !ctx.Config().AllowMissingDependencies() {
-		ctx.ModuleErrorf("unable to find allowed variation for lib %#v - stdLinkage %v depTags %v", lib, mod.stdLinkageOptions(ctx), depTags)
+		// Intentionally add a missing dependency to trigger a more user-friendly error
+		depTag := depTags[0]
+		stdLinkage := mod.stdLinkageOptions(ctx)[0]
+		variations := append(stdLinkage, depTag.libraryVariation())
+		ctx.AddVariationDependencies(variations, depTag, lib)
 	}
 }
 

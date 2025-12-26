@@ -28,7 +28,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	registerBpfBuildComponents(android.InitRegistrationContext)
@@ -41,17 +41,19 @@ var (
 
 	ccRule = pctx.AndroidRemoteStaticRule("ccRule", android.RemoteRuleSupports{},
 		blueprint.RuleParams{
-			Depfile:     "${out}.d",
-			Deps:        blueprint.DepsGCC,
-			Command:     "$relPwd $ccCmd --target=bpf -mcpu=v1 -c $cFlags -MD -MF ${out}.d -o $out $in",
-			CommandDeps: []string{"$ccCmd"},
+			Depfile:         "${out}.d",
+			Deps:            blueprint.DepsGCC,
+			Command:         "$relPwd $ccCmd --target=bpf -mcpu=v1 -c $cFlags -MD -MF ${out}.d -o $out $in",
+			CommandDeps:     []string{"$ccCmd"},
+			SandboxDisabled: true,
 		},
 		"ccCmd", "cFlags")
 
 	stripRule = pctx.AndroidStaticRule("stripRule",
 		blueprint.RuleParams{
-			Command:     `$stripCmd -g $in -o $out`,
-			CommandDeps: []string{"$stripCmd"},
+			Command:         `$stripCmd -g $in -o $out`,
+			CommandDeps:     []string{"$stripCmd"},
+			SandboxDisabled: true,
 		},
 		"stripCmd")
 )

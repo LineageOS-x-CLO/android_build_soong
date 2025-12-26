@@ -25,7 +25,7 @@ import (
 	"android/soong/dexpreopt"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 type DexpreopterInterface interface {
 	// True if the java module is to be dexed and installed on devices.
@@ -472,7 +472,7 @@ func (d *dexpreopter) dexpreopt(ctx android.ModuleContext, libName string, dexJa
 	appProductPackagesStaging := appProductPackages.ReplaceExtension(ctx, "txt.tmp")
 	clcNames, _ := dexpreopt.ComputeClassLoaderContextDependencies(dexpreoptConfig.ClassLoaderContexts)
 	sort.Strings(clcNames) // The order needs to be deterministic.
-	productPackagesRule := android.NewRuleBuilder(pctx, ctx)
+	productPackagesRule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	if len(clcNames) > 0 {
 		productPackagesRule.Command().
 			Text("grep -F -x").

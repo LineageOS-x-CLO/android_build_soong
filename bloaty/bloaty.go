@@ -22,7 +22,7 @@ import (
 	"github.com/google/blueprint"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 const bloatyDescriptorExt = ".bloaty.csv"
 const protoFilename = "binary_sizes.pb.gz"
@@ -34,18 +34,20 @@ var (
 	// bloaty is used to measure a binary section sizes.
 	bloaty = pctx.AndroidStaticRule("bloaty",
 		blueprint.RuleParams{
-			Command:     "${bloaty} -n 0 --csv ${in} > ${out}",
-			CommandDeps: []string{"${bloaty}"},
+			Command:         "${bloaty} -n 0 --csv ${in} > ${out}",
+			CommandDeps:     []string{"${bloaty}"},
+			SandboxDisabled: true,
 		})
 
 	// The bloaty merger script is used to combine the outputs from bloaty
 	// into a single protobuf.
 	bloatyMerger = pctx.AndroidStaticRule("bloatyMerger",
 		blueprint.RuleParams{
-			Command:        "${bloatyMerger} ${out}.lst ${out}",
-			CommandDeps:    []string{"${bloatyMerger}"},
-			Rspfile:        "${out}.lst",
-			RspfileContent: "${in}",
+			Command:         "${bloatyMerger} ${out}.lst ${out}",
+			CommandDeps:     []string{"${bloatyMerger}"},
+			Rspfile:         "${out}.lst",
+			RspfileContent:  "${in}",
+			SandboxDisabled: true,
 		})
 )
 

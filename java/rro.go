@@ -24,7 +24,7 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	RegisterRuntimeResourceOverlayBuildComponents(android.InitRegistrationContext)
@@ -324,7 +324,8 @@ var (
 				"--package-info $in " +
 				"--partition ${partition} " +
 				"--priority ${priority} -o $out",
-			CommandDeps: []string{"build/make/tools/generate-enforce-rro-android-manifest.py"},
+			CommandDeps:     []string{"build/make/tools/generate-enforce-rro-android-manifest.py"},
+			SandboxDisabled: true,
 		}, "partition", "priority",
 	)
 )

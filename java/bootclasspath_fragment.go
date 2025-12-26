@@ -28,7 +28,7 @@ import (
 	"github.com/google/blueprint"
 )
 
-//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+//go:generate go run ../../blueprint/gobtools/codegen
 
 func init() {
 	registerBootclasspathFragmentBuildComponents(android.InitRegistrationContext)
@@ -252,6 +252,7 @@ type BootclasspathFragmentModule struct {
 	android.DefaultableModuleBase
 	android.ApexModuleBase
 	ClasspathFragmentBase
+	blueprint.ModuleUsesIncrementalWalkDeps
 
 	// True if this fragment is for testing purposes.
 	testFragment bool
@@ -504,7 +505,7 @@ func (b *BootclasspathFragmentModule) DepsMutator(ctx android.BottomUpMutatorCon
 	for _, additionalStubModule := range b.properties.Additional_stubs {
 		for _, apiScope := range hiddenAPISdkLibrarySupportedScopes {
 			// Add a dependency onto a possibly scope specific stub library.
-			scopeSpecificDependency := apiScope.Value().scopeSpecificStubModule(ctx, additionalStubModule)
+			scopeSpecificDependency := apiScope.scopeSpecificStubModule(ctx, additionalStubModule)
 			tag := hiddenAPIStubsDependencyTag{apiScope: apiScope, fromAdditionalDependency: true}
 			ctx.AddVariationDependencies(nil, tag, scopeSpecificDependency)
 		}
@@ -562,7 +563,7 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 	// Zip all encoded jars and set an output tag for other modules to use.
 	encodedJars := hiddenAPIOutput.EncodedBootDexFilesByModule.bootDexJars()
 	outputZipPath := android.PathForModuleOut(ctx, "encoded-jars.zip")
-	rule := android.NewRuleBuilder(pctx, ctx)
+	rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	cmd := rule.Command().
 		Tool(ctx.Config().HostToolPath(ctx, "soong_zip")).
 		Flag("-o").Output(outputZipPath).

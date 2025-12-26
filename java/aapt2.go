@@ -81,8 +81,9 @@ const AAPT2_SHARD_SIZE = 100
 
 var aapt2CompileRule = pctx.AndroidStaticRule("aapt2Compile",
 	blueprint.RuleParams{
-		Command:     `${config.Aapt2Cmd} compile -o $outDir $cFlags $in`,
-		CommandDeps: []string{"${config.Aapt2Cmd}"},
+		Command:         `${config.Aapt2Cmd} compile -o $outDir $cFlags $in`,
+		CommandDeps:     []string{"${config.Aapt2Cmd}"},
+		SandboxDisabled: true,
 	},
 	"outDir", "cFlags")
 
@@ -165,6 +166,7 @@ var aapt2CompileZipRule = pctx.AndroidStaticRule("aapt2CompileZip",
 			"${config.Aapt2Cmd}",
 			"${config.ZipSyncCmd}",
 		},
+		SandboxDisabled: true,
 	}, "cFlags", "resZipDir", "zipSyncFlags")
 
 // Unzips the given compressed file and compiles the resource source files in it. The zipPrefix
@@ -199,32 +201,36 @@ var aapt2LinkRule = pctx.AndroidStaticRule("aapt2Link",
 			"${config.Aapt2Cmd}",
 			"${config.SoongZipCmd}",
 		},
-		Restat: true,
+		Restat:          true,
+		SandboxDisabled: true,
 	},
 	"flags", "inFlags", "proguardOptions", "rTxt", "extraPackages", "preamble", "postamble")
 
 var aapt2ExtractExtraPackagesRule = pctx.AndroidStaticRule("aapt2ExtractExtraPackages",
 	blueprint.RuleParams{
-		Command:     `${config.ExtractJarPackagesCmd} -i $in -o $out --prefix '--extra-packages '`,
-		CommandDeps: []string{"${config.ExtractJarPackagesCmd}"},
-		Restat:      true,
+		Command:         `${config.ExtractJarPackagesCmd} -i $in -o $out --prefix '--extra-packages '`,
+		CommandDeps:     []string{"${config.ExtractJarPackagesCmd}"},
+		Restat:          true,
+		SandboxDisabled: true,
 	})
 
 var fileListToFileRule = pctx.AndroidStaticRule("fileListToFile",
 	blueprint.RuleParams{
-		Command:        `cp $out.rsp $out`,
-		Rspfile:        "$out.rsp",
-		RspfileContent: "$in",
+		Command:         `cp $out.rsp $out`,
+		Rspfile:         "$out.rsp",
+		RspfileContent:  "$in",
+		SandboxDisabled: true,
 	})
 
 var mergeAssetsRule = pctx.AndroidStaticRule("mergeAssets",
 	blueprint.RuleParams{
-		Command:     `${config.MergeZipsCmd} ${out} ${in}`,
-		CommandDeps: []string{"${config.MergeZipsCmd}"},
+		Command:         `${config.MergeZipsCmd} ${out} ${in}`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 func aapt2Link(ctx android.ModuleContext,
-	packageRes, genJar, proguardOptions, rTxt android.WritablePath,
+	packageRes, genJar, proguardOptions, rTxt, resIds android.WritablePath,
 	flags []string, deps android.Paths,
 	compiledRes, compiledOverlay, assetPackages android.Paths, splitPackages android.WritablePaths,
 	featureFlagsPaths android.Paths) {
@@ -309,6 +315,11 @@ func aapt2Link(ctx android.ModuleContext,
 		args["flags"] += " --java $aapt2GenDir"
 	}
 
+	if resIds != nil {
+		args["flags"] += " --emit-ids " + resIds.String()
+		implicitOutputs = append(implicitOutputs, resIds)
+	}
+
 	ctx.Build(pctx, android.BuildParams{
 		Rule:            aapt2LinkRule,
 		Description:     "aapt2 link",
@@ -335,7 +346,8 @@ var aapt2ConvertRule = pctx.AndroidStaticRule("aapt2Convert",
 	blueprint.RuleParams{
 		Command: `${config.Aapt2Cmd} convert $flags ` +
 			`--output-format $format $in -o $out`,
-		CommandDeps: []string{"${config.Aapt2Cmd}"},
+		CommandDeps:     []string{"${config.Aapt2Cmd}"},
+		SandboxDisabled: true,
 	}, "format", "flags",
 )
 

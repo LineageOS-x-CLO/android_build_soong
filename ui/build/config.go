@@ -36,6 +36,7 @@ import (
 	"android/soong/shared"
 	"android/soong/ui/metrics"
 
+	"github.com/google/blueprint"
 	"google.golang.org/protobuf/proto"
 
 	smpb "android/soong/ui/metrics/metrics_proto"
@@ -1900,6 +1901,10 @@ func (c *configImpl) SoongMakeVarsMk() string {
 	return filepath.Join(c.SoongOutDir(), "make_vars-"+c.TargetProduct()+c.CoverageSuffix()+".mk")
 }
 
+func (c *configImpl) SoongPhonyTargets() string {
+	return filepath.Join(c.SoongOutDir(), "soong_phony_targets"+c.katiSuffix+".mk")
+}
+
 func (c *configImpl) SoongBuildMetrics() string {
 	return filepath.Join(c.LogsDir(), "soong_build_metrics.pb")
 }
@@ -2091,6 +2096,35 @@ func (c *configImpl) RunCIPDProxyServer() bool {
 	return c.runCIPDProxyServer
 }
 
+// Siso logs and metrics files.
+func (c *configImpl) SisoConfigFile(isBootstrap bool) string {
+	if isBootstrap {
+		return filepath.Join(c.SoongOutDir(), ".siso_config")
+	}
+	return filepath.Join(c.OutDir(), ".siso_config")
+}
+
+func (c *configImpl) SisoDepsFile(isBootstrap bool) string {
+	if isBootstrap {
+		return filepath.Join(c.SoongOutDir(), ".siso_deps")
+	}
+	return filepath.Join(c.OutDir(), ".siso_deps")
+}
+
+func (c *configImpl) SisoFsStateFile(isBootstrap bool) string {
+	if isBootstrap {
+		return filepath.Join(c.SoongOutDir(), ".siso_fs_state")
+	}
+	return filepath.Join(c.OutDir(), ".siso_fs_state")
+}
+
+func (c *configImpl) SisoFilegroupsFile(isBootstrap bool) string {
+	if isBootstrap {
+		return filepath.Join(c.SoongOutDir(), ".siso_filegroups")
+	}
+	return filepath.Join(c.OutDir(), ".siso_filegroups")
+}
+
 // Returns a Time object if one was passed via a command-line flag.
 // Otherwise returns the passed default.
 func (c *configImpl) BuildStartedTimeOrDefault(defaultTime time.Time) time.Time {
@@ -2106,6 +2140,15 @@ func (c *configImpl) BuildUUIDFile() string {
 		suffix = "-" + targetProduct
 	}
 	return filepath.Join(c.SoongOutDir(), "build_uuid"+suffix+".txt")
+}
+
+func (c *configImpl) IsActionSandboxedBuild() bool {
+	sandboxing, ok := c.Environment().Get("SOONG_ACTION_SANDBOXING")
+	return ok && sandboxing == "nsjail"
+}
+
+func (c *configImpl) ActionSandboxMetrics() *blueprint.SandboxMetrics {
+	return nil
 }
 
 func GetMetricsUploader(topDir string, env *Environment) string {
