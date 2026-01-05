@@ -154,7 +154,8 @@ func TestApexDepsContainers(t *testing.T) {
 
 	for _, c := range testcases {
 		m := result.ModuleForTests(t, c.moduleName, c.variant)
-		containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), m.Module(), android.ContainersInfoProvider)
+		containers := android.OtherModulePointerProviderOrDefault(result.TestContext.OtherModuleProviderAdaptor(),
+			m.Module(), android.CommonModuleInfoProvider).Containers
 		belongingContainers := containers.BelongingContainers()
 		checkContainerMatch(t, c.moduleName, "system", c.isSystemContainer, android.InList(android.SystemContainer, belongingContainers))
 		checkContainerMatch(t, c.moduleName, "apex", c.isApexContainer, android.InList(android.ApexContainer, belongingContainers))
@@ -266,7 +267,8 @@ func TestNonUpdatableApexDepsContainers(t *testing.T) {
 
 	for _, c := range testcases {
 		m := result.ModuleForTests(t, c.moduleName, c.variant)
-		containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), m.Module(), android.ContainersInfoProvider)
+		containers := android.OtherModuleProviderOrDefault(result.TestContext.OtherModuleProviderAdaptor(),
+			m.Module(), android.CommonModuleInfoProvider).Containers
 		belongingContainers := containers.BelongingContainers()
 		checkContainerMatch(t, c.moduleName, "system", c.isSystemContainer, android.InList(android.SystemContainer, belongingContainers))
 		checkContainerMatch(t, c.moduleName, "apex", c.isApexContainer, android.InList(android.ApexContainer, belongingContainers))
@@ -330,7 +332,8 @@ func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
 	`)
 
 	fooApexVariant := result.ModuleForTests(t, "foo", "android_common_apex30")
-	containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), fooApexVariant.Module(), android.ContainersInfoProvider)
+	containers := android.OtherModulePointerProviderOrDefault(result.TestContext.OtherModuleProviderAdaptor(),
+		fooApexVariant.Module(), android.CommonModuleInfoProvider).Containers
 	belongingContainers := containers.BelongingContainers()
 	checkContainerMatch(t, "foo", "system", true, android.InList(android.SystemContainer, belongingContainers))
 	checkContainerMatch(t, "foo", "apex", true, android.InList(android.ApexContainer, belongingContainers))

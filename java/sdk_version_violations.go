@@ -101,8 +101,7 @@ var SdkVersionDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"EventLib": {
-		"NeneInternal", // system -> test
-		"Queryable",    // system -> test
+		"EventLibInternal",    	// system -> test
 	},
 
 	"HarrierCommonAndroid": {
@@ -162,19 +161,6 @@ var SdkVersionDependencyViolationAllowlist = map[string][]string{
 
 	"SettingsLib-search": {
 		"SettingsLib-search-interface", // system -> private
-	},
-
-	"SettingsLibCategory": {
-		"SettingsLibMetadata",   // system -> private
-		"SettingsLibPreference", // system -> private
-	},
-
-	"SettingsLibMainSwitchPreference": {
-		"SettingsLibPreference", // system -> private
-	},
-
-	"SettingsLibSliderPreference": {
-		"SettingsLibPreference", // system -> private
 	},
 
 	"SettingsLibUtils": {

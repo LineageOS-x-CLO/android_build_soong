@@ -201,6 +201,8 @@ type androidDevice struct {
 	customPartitionFilesystemInfos []FilesystemInfo
 
 	stageDeviceFiles []stageDeviceFilePair
+
+	superImageInfo SuperImageInfo
 }
 
 func AndroidDeviceFactory() android.Module {
@@ -329,6 +331,7 @@ func (a *androidDevice) DepsMutator(ctx android.BottomUpMutatorContext) {
 	// For collecting install module information for products not building system.img or system_ext.img.
 	addDependencyIfDefined(a.deviceProps.InfoPartitionProps.System_partition_name)
 	addDependencyIfDefined(a.deviceProps.InfoPartitionProps.System_ext_partition_name)
+	addDependencyIfDefined(a.deviceProps.InfoPartitionProps.Product_partition_name)
 
 	for _, customPartition := range a.partitionProps.Custom_partitions {
 		ctx.AddDependency(ctx.Module(), customPartitionDepTag, customPartition)
@@ -437,6 +440,7 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	if proptools.String(a.partitionProps.Super_partition_name) != "" {
 		superImage := ctx.GetDirectDepProxyWithTag(*a.partitionProps.Super_partition_name, superPartitionDepTag)
 		if info, ok := android.OtherModuleProvider(ctx, superImage, SuperImageProvider); ok {
+			a.superImageInfo = info
 			assertUnset := func(prop *string, propName string) {
 				if prop != nil && *prop != "" {
 					ctx.PropertyErrorf(propName, "Cannot be set because it's already part of the super image")
@@ -473,8 +477,8 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		}
 	}
 	ctx.VisitDirectDepsProxyWithTag(filesystemDepTag, func(m android.ModuleProxy) {
-		imageOutput, ok := android.OtherModuleProvider(ctx, m, android.OutputFilesProvider)
-		if !ok {
+		imageOutput := android.GetOutputFiles(ctx, m)
+		if imageOutput == nil {
 			ctx.ModuleErrorf("Partition module %s doesn't set OutputfilesProvider", m.Name())
 		}
 		if len(imageOutput.DefaultOutputFiles) != 1 {
@@ -513,6 +517,8 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			validations = append(validations, trebleLabelingTestTimestamp)
 		}
 	}
+
+	validations = append(validations, a.checkVintf(ctx)...)
 
 	ctx.Build(pctx, android.BuildParams{
 		Rule:        android.Touch,
@@ -555,7 +561,6 @@ func (a *androidDevice) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		ctx.Phony("droid_targets", android.PathForPhony(ctx, "blueprint_tools"))
 	}
 
-	a.checkVintf(ctx)
 	a.runApexSepolicyTests(ctx, allInstalledModules)
 	a.hostInitVerifierCheck(ctx)
 	a.findSharedUIDViolation(ctx)
@@ -571,7 +576,7 @@ func buildComplianceMetadata(ctx android.ModuleContext, tags ...blueprint.Depend
 	platformGeneratedFiles := make([]string, 0)
 	for _, tag := range tags {
 		ctx.VisitDirectDepsProxyWithTag(tag, func(m android.ModuleProxy) {
-			if complianceMetadataInfo, ok := android.OtherModuleProvider(ctx, m, android.ComplianceMetadataProvider); ok {
+			if complianceMetadataInfo := android.GetComplianceMetadata(ctx, m); complianceMetadataInfo != nil {
 				filesContained = append(filesContained, complianceMetadataInfo.GetFilesContained()...)
 				prebuiltFilesCopied = append(prebuiltFilesCopied, complianceMetadataInfo.GetPrebuiltFilesCopied()...)
 				platformGeneratedFiles = append(platformGeneratedFiles, complianceMetadataInfo.GetPlatformGeneratedFiles()...)
@@ -711,6 +716,13 @@ func (a *androidDevice) distInstalledFiles(ctx android.ModuleContext) {
 
 func (a *androidDevice) distFiles(ctx android.ModuleContext) {
 	if !ctx.Config().KatiEnabled() && proptools.Bool(a.deviceProps.Main_device) {
+		if a.superImageInfo.SuperImage != nil && !a.superImageInfo.SuperImageInUpdatePackage {
+			ctx.DistForGoal("dist_files", a.superImageInfo.SuperImage)
+		}
+		if a.superImageInfo.SuperEmptyImage != nil {
+			ctx.DistForGoal("dist_files", a.superImageInfo.SuperEmptyImage)
+		}
+
 		a.distInstalledFiles(ctx)
 
 		namePrefix := ""
@@ -1202,8 +1214,11 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 	builder.Command().Textf("mkdir -p %s/META", targetFilesDir.String())
 	if proptools.Bool(a.deviceProps.Ab_ota_updater) {
 		ctx.VisitDirectDepsProxyWithTag(targetFilesMetadataDepTag, func(child android.ModuleProxy) {
-			info, _ := android.OtherModuleProvider(ctx, child, android.OutputFilesProvider)
-			builder.Command().Textf("cp").Inputs(info.DefaultOutputFiles).Textf(" %s/META/", targetFilesDir.String())
+			var defFiles android.Paths
+			if info := android.GetOutputFiles(ctx, child); info != nil {
+				defFiles = info.DefaultOutputFiles
+			}
+			builder.Command().Textf("cp").Inputs(defFiles).Textf(" %s/META/", targetFilesDir.String())
 		})
 		builder.Command().Textf("cp").Input(android.PathForSource(ctx, "external/zucchini/version_info.h")).Textf(" %s/META/zucchini_config.txt", targetFilesDir.String())
 		builder.Command().Textf("cp").Input(android.PathForSource(ctx, "system/update_engine/update_engine.conf")).Textf(" %s/META/update_engine_config.txt", targetFilesDir.String())
@@ -1239,8 +1254,8 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 		builder.Command().Textf("cp").Input(abOtaPostInstallConfigFilePath).Textf(" %s/META/", targetFilesDir)
 		// selinuxfc
 		fileContextsModule := ctx.GetDirectDepProxyWithTag("file_contexts_bin_gen", fileContextsDepTag)
-		outputFiles, ok := android.OtherModuleProvider(ctx, fileContextsModule, android.OutputFilesProvider)
-		if !ok || len(outputFiles.DefaultOutputFiles) != 1 {
+		outputFiles := android.GetOutputFiles(ctx, fileContextsModule)
+		if outputFiles == nil || len(outputFiles.DefaultOutputFiles) != 1 {
 			ctx.ModuleErrorf("Expected exactly 1 output file from file_contexts_bin_gen")
 		} else {
 			selinuxFc := outputFiles.DefaultOutputFiles[0]
@@ -2081,16 +2096,27 @@ func (a *androidDevice) buildTrebleLabelingTest(ctx android.ModuleContext) andro
 	return testTimestamp
 }
 
-func (a *androidDevice) checkVintf(ctx android.ModuleContext) {
+func (a *androidDevice) checkVintf(ctx android.ModuleContext) android.Paths {
 	if !proptools.Bool(a.deviceProps.Main_device) {
-		return
+		return nil
 	}
 	if ctx.Config().KatiEnabled() {
 		// Make will generate the vintf checks.
-		return
+		return nil
 	}
 	var checkVintfLogs android.Paths
 	fsInfoMap := a.getFsInfos(ctx)
+	// https://source.corp.google.com/h/googleplex-android/platform/superproject/main/+/main:build/make/core/Makefile;l=5561-5566?q=PRODUCT_ENFORCE_VINTF_MANIFEST%20f:build%2Fmake&ct=os&sq=repo:googleplex-android%2Fplatform%2Fsuperproject%2Fmain%20b:main
+	if !proptools.Bool(ctx.Config().ProductVariables().Enforce_vintf_manifest) {
+		return nil
+	}
+	if _, systemExists := fsInfoMap["system"]; !systemExists {
+		return nil
+	}
+	if _, vendorExists := fsInfoMap["vendor"]; !vendorExists {
+		return nil
+	}
+
 	for _, partition := range android.SortedKeys(fsInfoMap) {
 		checkVintfLog := fsInfoMap[partition].checkVintfLog
 		if checkVintfLog != nil {
@@ -2107,6 +2133,7 @@ func (a *androidDevice) checkVintf(ctx android.ModuleContext) {
 	}
 	cmd.ImplicitOutput(android.PathForPhony(ctx, "check-vintf-all"))
 	rule.Build("check-vintf-all", "check-vintf-all")
+	return checkVintfLogs
 }
 
 // Runs checkvintf --check-compat on the staging directories of the partitions per (odm_sku, vendor_sku)
@@ -2126,6 +2153,12 @@ func (a *androidDevice) createMonolithicVintfCompatibleLog(ctx android.ModuleCon
 			if _, exists := fsInfos[partition]; exists {
 				cmd.FlagWithArg("--dirmap ", fmt.Sprintf("/%s:%s", partition, fsInfos[partition].RebasedDir.String())).
 					Implicit(fsInfos[partition].Output)
+			} else if vendor, vendorExists := fsInfos["vendor"]; vendorExists && partition == "odm" {
+				cmd.FlagWithArg("--dirmap ", fmt.Sprintf("/odm:%s/odm", vendor.RebasedDir.String())).
+					Implicit(vendor.Output)
+			} else if system, systemExists := fsInfos["system"]; systemExists && android.InList(partition, []string{"vendor", "product", "system_ext"}) {
+				cmd.FlagWithArg("--dirmap ", fmt.Sprintf("/%s:%s/%s", partition, system.RebasedDir.String(), partition)).
+					Implicit(system.Output)
 			}
 		}
 	}

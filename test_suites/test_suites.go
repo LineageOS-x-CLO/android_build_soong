@@ -94,14 +94,18 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
-		testSuiteSharedLibsInfo := android.OtherModuleProviderOrDefault(ctx, m, android.TestSuiteSharedLibsInfoProvider)
-		makeName := android.OtherModuleProviderOrDefault(ctx, m, android.MakeNameInfoProvider).Name
+		var makeName string
+		var sharedLibsMakeNames []string
+		if makeNameInfo := commonInfo.MakeNames; makeNameInfo != nil {
+			makeName = makeNameInfo.MakeName
+			sharedLibsMakeNames = makeNameInfo.SharedLibsMakeNames
+		}
 		if makeName != "" && commonInfo.Target.Os == ctx.Config().BuildOS {
-			sharedLibGraph[makeName] = append(sharedLibGraph[makeName], testSuiteSharedLibsInfo.MakeNames...)
+			sharedLibGraph[makeName] = append(sharedLibGraph[makeName], sharedLibsMakeNames...)
 		}
 
 		if tsm, ok := android.OtherModuleProvider(ctx, m, android.TestSuiteInfoProvider); ok {
-			installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
+			installFilesProvider := android.GetInstallFilesCommon(commonInfo)
 
 			for _, testSuite := range tsm.TestSuites {
 				regularInstalledFiles[testSuite] = append(regularInstalledFiles[testSuite], installFilesProvider.InstallFiles...)
@@ -112,7 +116,8 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 				}
 			}
 
-			if testSuiteInstalls, ok := android.OtherModuleProvider(ctx, m, android.TestSuiteInstallsInfoProvider); ok {
+			if tsm.TestSuiteInstalls != nil {
+				testSuiteInstalls := tsm.TestSuiteInstalls
 				for _, testSuite := range tsm.TestSuites {
 					for _, f := range testSuiteInstalls.Files {
 						allTestSuiteInstalls[testSuite] = append(allTestSuiteInstalls[testSuite], f.Dst)
@@ -123,7 +128,7 @@ func (t *testSuiteFiles) GenerateBuildActions(ctx android.SingletonContext) {
 						allTestSuiteSrcs[testSuite] = append(allTestSuiteSrcs[testSuite], f.Src)
 					}
 				}
-				installs := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider).InstallFiles
+				installs := installFilesProvider.InstallFiles
 				oneVariantInstalls = append(oneVariantInstalls, testSuiteInstalls.OneVariantInstalls...)
 				for _, f := range testSuiteInstalls.Files {
 					alreadyInstalled := false
@@ -438,14 +443,14 @@ func gatherHostSharedLibs(ctx android.SingletonContext, sharedLibRoots, sharedLi
 	hostSharedLibs := make(map[string]android.Paths)
 
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
-		if makeName, ok := android.OtherModuleProvider(ctx, m, android.MakeNameInfoProvider); ok {
-			commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
-			if commonInfo.SkipInstall {
-				return
-			}
-			installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
+		commonInfo := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		if commonInfo.SkipInstall {
+			return
+		}
+		if makeName := commonInfo.MakeNames; makeName != nil {
+			installFilesProvider := android.GetInstallFilesCommon(commonInfo)
 			for suite, sharedLibModulesInSuite := range suiteToSharedLibModules {
-				if sharedLibModulesInSuite[makeName.Name] {
+				if sharedLibModulesInSuite[makeName.MakeName] {
 					for _, f := range installFilesProvider.InstallFiles {
 						if strings.HasSuffix(f.String(), ".so") && strings.HasPrefix(f.String(), hostOut) {
 							hostSharedLibs[suite] = append(hostSharedLibs[suite], f)
@@ -473,7 +478,7 @@ func gatherCommonHostSharedLibsForSymlinks(ctx android.SingletonContext, suite s
 		if commonInfo.SkipInstall || !commonInfo.Host || !android.InList(suite, testInfo.TestSuites) {
 			return
 		}
-		installFilesProvider := android.OtherModuleProviderOrDefault(ctx, m, android.InstallFilesProvider)
+		installFilesProvider := android.GetInstallFilesCommon(commonInfo)
 		for _, transitive := range installFilesProvider.TransitiveInstallFiles.ToList() {
 			transitivePathString := transitive.String()
 			if strings.HasPrefix(transitivePathString, hostOut32And64) &&
@@ -973,8 +978,9 @@ func buildSharedReport(
 	var componentMetadataFiles android.Paths
 	meta_builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	for _, mod := range testSuiteModules {
-		if provider, ok := android.OtherModuleProvider(ctx, mod, android.LicenseMetadataProvider); ok && provider.LicenseMetadataPath != nil {
-			if testSuiteInstalls, ok := android.OtherModuleProvider(ctx, mod, android.TestSuiteInstallsInfoProvider); ok {
+		if provider := android.OtherModulePointerProviderOrDefault(ctx, mod, android.CommonModuleInfoProvider).LicenseMetadata; provider != nil && provider.LicenseMetadataPath != nil {
+			if testSuite, ok := android.OtherModuleProvider(ctx, mod, android.TestSuiteInfoProvider); ok && testSuite.TestSuiteInstalls != nil {
+				testSuiteInstalls := testSuite.TestSuiteInstalls
 				for _, f := range testSuiteInstalls.Files {
 					if strings.Contains(f.Dst.String(), mod.Name()) && strings.HasPrefix(f.Dst.String(), hostOutSubDir) {
 						if f.Dst.Ext() == ".jar" || f.Dst.Ext() == ".apk" {
@@ -1181,7 +1187,7 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 	tradefedName := proptools.String(m.properties.Tradefed)
 	tradefed := ctx.GetDirectDepProxyWithTag(tradefedName, ctspTradefedDeptag)
 
-	tradefedFiles := android.OtherModuleProviderOrDefault(ctx, tradefed, android.InstallFilesProvider).InstallFiles
+	tradefedFiles := android.GetInstallFiles(ctx, tradefed).InstallFiles
 
 	if len(tradefedFiles) != 2 || tradefedFiles[0].Base() != tradefedName || tradefedFiles[1].Base() != tradefedName+".jar" {
 		ctx.PropertyErrorf("tradefed", "Dependency %q did not provide expected files, produced: %s", tradefedName, tradefedFiles.Strings())
@@ -1203,7 +1209,7 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 	})
 
 	ctx.VisitDirectDepsProxyWithTag(ctspHostToolDeptag, func(dep android.ModuleProxy) {
-		files := android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider).InstallFiles
+		files := android.GetInstallFiles(ctx, dep).InstallFiles
 		if len(files) != 1 {
 			ctx.ModuleErrorf("Dependency %q did not provide expected single file", ctx.OtherModuleName(dep))
 		}
@@ -1215,7 +1221,7 @@ func (m *compatibilityTestSuitePackage) GenerateAndroidBuildActions(ctx android.
 
 	var hostSharedLibs android.Paths
 	ctx.VisitDirectDepsProxyWithTag(ctspHostSharedLibDeptag, func(dep android.ModuleProxy) {
-		libs := android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider).InstallFiles
+		libs := android.GetInstallFiles(ctx, dep).InstallFiles
 		for _, lib := range libs {
 			hostSharedLibs = append(hostSharedLibs, lib)
 		}

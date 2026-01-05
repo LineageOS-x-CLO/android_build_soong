@@ -1854,10 +1854,6 @@ func (c *config) VendorApiLevelFrozen() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_BOARD_API_LEVEL_FROZEN")
 }
 
-func (c *config) katiPackageMkDir() string {
-	return filepath.Join(c.soongOutDir, "kati_packaging"+c.katiSuffix)
-}
-
 func (c *config) DisableNoticeXmlGeneration() bool {
 	return c.IsEnvTrue("DISABLE_NOTICE_XML_GENERATION")
 }
@@ -2583,6 +2579,10 @@ func (c *config) UseR8MinimizedSyntheticNames() bool {
 
 func (c *config) UseDexV41() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_USE_DEX_V41")
+}
+
+func (c *config) OmitR8GlobalEnumKeeps() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_R8_OMIT_GLOBAL_ENUM_KEEPS")
 }
 
 var (

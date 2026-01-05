@@ -715,7 +715,6 @@ type PartitionVariables struct {
 	ProductBuildVendorBootImage       string   `json:",omitempty"`
 	ProductBuildInitBootImage         bool     `json:",omitempty"`
 	BoardUsesRecoveryAsBoot           bool     `json:",omitempty"`
-	BoardPrebuiltBootimage            string   `json:",omitempty"`
 	BoardPrebuiltInitBootimage        string   `json:",omitempty"`
 	BoardBootimagePartitionSize       string   `json:",omitempty"`
 	BoardVendorBootimagePartitionSize string   `json:",omitempty"`
@@ -962,7 +961,7 @@ func VariableMutator(mctx BottomUpMutatorContext) {
 
 	variableValues := reflect.ValueOf(a.variableProperties).Elem().FieldByName("Product_variables")
 
-	productVariables := reflect.ValueOf(mctx.Config().productVariables)
+	productVariables := reflect.ValueOf(&mctx.Config().productVariables).Elem()
 
 	for i := 0; i < variableValues.NumField(); i++ {
 		variableValue := variableValues.Field(i)

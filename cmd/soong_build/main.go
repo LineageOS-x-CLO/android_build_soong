@@ -209,7 +209,7 @@ func incrementalValid(config android.Config, configCacheFile string) (*ConfigCac
 		}
 	}
 
-	newConfigCache.EnvDepsHash, err = proptools.CalculateHash(data)
+	newConfigCache.EnvDepsHash, err = proptools.CalculateHashReflection(data)
 	newConfigCache.ProductVariableFileTimestamp = getFileTimestamp(filepath.Join(topDir, cmdlineArgs.SoongVariables))
 	newConfigCache.SoongBuildFileTimestamp = getFileTimestamp(filepath.Join(topDir, config.HostToolDir(), "soong_build"))
 	//TODO(b/344917959): out/soong/dexpreopt.config might need to be checked as well.
@@ -368,7 +368,7 @@ func main() {
 	if ctx.GetIncrementalEnabled() {
 		data, err := shared.EnvFileContents(configuration.EnvDeps())
 		maybeQuit(err, "")
-		configCache.EnvDepsHash, err = proptools.CalculateHash(data)
+		configCache.EnvDepsHash, err = proptools.CalculateHashReflection(data)
 		maybeQuit(err, "")
 		writeConfigCache(configCache, configFile)
 	}
@@ -377,7 +377,9 @@ func main() {
 
 	writeUsedEnvironmentFile(configuration)
 
-	err = writeGlobFile(ctx.EventHandler, finalOutputFile, ctx.Globs(), soongStartTime)
+	ctx.EventHandler.Begin("writeGlobFile")
+	err = ctx.WriteGlobFile(shared.JoinPath(topDir, finalOutputFile), soongStartTime)
+	ctx.EventHandler.End("writeGlobFile")
 	maybeQuit(err, "")
 
 	// Touch the output file so that it's the newest file created by soong_build.
@@ -398,29 +400,6 @@ func writeUsedEnvironmentFile(configuration android.Config) {
 
 	err = pathtools.WriteFileIfChanged(path, data, 0666)
 	maybeQuit(err, "error writing used environment file '%s'", usedEnvFile)
-}
-
-func writeGlobFile(eventHandler *metrics.EventHandler, finalOutFile string, globs pathtools.MultipleGlobResults, soongStartTime time.Time) error {
-	eventHandler.Begin("writeGlobFile")
-	defer eventHandler.End("writeGlobFile")
-
-	globsFile, err := os.Create(shared.JoinPath(topDir, finalOutFile+".globs"))
-	if err != nil {
-		return err
-	}
-	defer globsFile.Close()
-	globsFileEncoder := json.NewEncoder(globsFile)
-	for _, glob := range globs {
-		if err := globsFileEncoder.Encode(glob); err != nil {
-			return err
-		}
-	}
-
-	return os.WriteFile(
-		shared.JoinPath(topDir, finalOutFile+".globs_time"),
-		[]byte(fmt.Sprintf("%d\n", soongStartTime.UnixMicro())),
-		0666,
-	)
 }
 
 func touch(path string) {

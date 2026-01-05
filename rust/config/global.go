@@ -27,8 +27,8 @@ import (
 var (
 	pctx = android.NewPackageContext("android/soong/rust/config")
 
-	RustDefaultVersion = "1.90.0"
-	RustDefaultBase    = "prebuilts/rust/"
+	RustDefaultVersion = "1.91.1"
+	RustDefaultBase    = "prebuilts/rust-toolchain/"
 	DefaultEdition     = "2021"
 	Stdlibs            = []string{
 		"libstd",
@@ -39,7 +39,7 @@ var (
 		"liballoc.rust_sysroot",
 	}
 
-	// Rust versions usually look like "1.90.0", but might also get a
+	// Rust versions usually look like "1.91.1", but might also get a
 	// letter or non-numeric suffix when testing (i.e. "1.90.0.test")
 	RustVersionRe = regexp.MustCompile(`^(\d+\.\d+\.\d+).*$`)
 
@@ -178,6 +178,8 @@ func init() {
 func HostPrebuiltTag(config android.Config) string {
 	if config.UseHostMusl() {
 		return "linux-musl-x86"
+	} else if config.PrebuiltOS() == "darwin-x86" {
+		return "darwin"
 	} else {
 		return config.PrebuiltOS()
 	}

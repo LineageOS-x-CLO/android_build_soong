@@ -1133,11 +1133,12 @@ func (m TestingModule) VariablesForTestsRelativeToTop() map[string]string {
 // otherwise returns the result of calling Paths.RelativeToTop
 // on the returned Paths.
 func (m TestingModule) OutputFiles(ctx *TestContext, t *testing.T, tag string) Paths {
-	outputFiles := OtherModuleProviderOrDefault(ctx.OtherModuleProviderAdaptor(), m.Module(), OutputFilesProvider)
-	if tag == "" && outputFiles.DefaultOutputFiles != nil {
-		return outputFiles.DefaultOutputFiles.RelativeToTop()
-	} else if taggedOutputFiles, hasTag := outputFiles.TaggedOutputFiles[tag]; hasTag {
-		return taggedOutputFiles.RelativeToTop()
+	if outputFiles := GetOutputFiles(ctx.OtherModuleProviderAdaptor(), m.Module()); outputFiles != nil {
+		if tag == "" && outputFiles.DefaultOutputFiles != nil {
+			return outputFiles.DefaultOutputFiles.RelativeToTop()
+		} else if taggedOutputFiles, hasTag := outputFiles.TaggedOutputFiles[tag]; hasTag {
+			return taggedOutputFiles.RelativeToTop()
+		}
 	}
 
 	t.Fatal(fmt.Errorf("No test output file has been set for tag %q", tag))
@@ -1570,4 +1571,41 @@ func AssertHasDirectDep(t *testing.T, ctx visitDirectDepsInterface, m Module, wa
 	if !found {
 		t.Errorf("Could not find a dependency from %v to %v\n", m, wantDep)
 	}
+}
+
+func newHostMockModule() Module {
+	m := &hostMockModule{}
+	InitAndroidArchModule(m, HostSupported, MultilibFirst)
+	return m
+}
+
+type hostMockModule struct {
+	ModuleBase
+}
+
+func (m *hostMockModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+}
+
+var PrepareForTestWithHostMockModule = FixtureRegisterWithContext(func(ctx RegistrationContext) {
+	ctx.RegisterModuleType("host_mock_module", newHostMockModule)
+})
+
+// PrepareForTestWithHostTools adds Android.bp files with placeholder host modules with
+// the given names. The modules don't do anything. This is intended to resolve issues with
+// module types that depend on host tools for their ninja rule generation.
+func PrepareForTestWithHostTools(hostTools ...string) FixturePreparer {
+	fs := make(MockFS)
+
+	for _, hostTool := range hostTools {
+		fs[fmt.Sprintf("host_tools/%s/Android.bp", hostTool)] = fmt.Appendf(nil, `
+		host_mock_module {
+			name: "%s"
+		}
+		`, hostTool)
+	}
+
+	return GroupFixturePreparers(
+		PrepareForTestWithHostMockModule,
+		fs.AddToFixture(),
+	)
 }

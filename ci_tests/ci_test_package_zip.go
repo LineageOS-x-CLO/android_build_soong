@@ -248,8 +248,8 @@ func createJacocoJar(ctx android.ModuleContext, allModules []android.ModuleProxy
 }
 
 func extendBuilderCommand(ctx android.ModuleContext, m android.ModuleProxy, builder *android.RuleBuilder, stagingDir android.ModuleOutPath, productOut, arch, secondArch string) {
-	info, ok := android.OtherModuleProvider(ctx, m, android.ModuleInfoJSONProvider)
-	if !ok {
+	info := android.GetModuleInfoJSONInfo(ctx, m)
+	if info == nil {
 		ctx.OtherModuleErrorf(m, "doesn't set ModuleInfoJSON provider")
 	} else if len(info.Data) != 1 {
 		ctx.OtherModuleErrorf(m, "doesn't provide exactly one ModuleInfoJSON")
@@ -266,11 +266,11 @@ func extendBuilderCommand(ctx android.ModuleContext, m android.ModuleProxy, buil
 		class = "framework"
 	}
 
-	installedFilesInfo, ok := android.OtherModuleProvider(ctx, m, android.InstallFilesProvider)
-	if !ok {
+	commonInfo, ok := android.OtherModuleProvider(ctx, m, android.CommonModuleInfoProvider)
+	if !ok || commonInfo.InstallFiles == nil {
 		ctx.ModuleErrorf("Module %s doesn't set InstallFilesProvider", m.Name())
 	}
-
+	installedFilesInfo := commonInfo.InstallFiles
 	for _, spec := range installedFilesInfo.PackagingSpecs {
 		if spec.SrcPath() == nil {
 			// Probably a symlink

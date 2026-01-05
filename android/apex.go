@@ -106,6 +106,7 @@ func (a ApexInfo) Minimize() ApexInfo {
 	return info
 }
 
+// @auto-generate: gob
 type ApexAvailableInfo struct {
 	// Returns the apex names that this module is available for
 	ApexAvailableFor []string
@@ -136,6 +137,7 @@ func (i ApexInfo) IsForPlatform() bool {
 }
 
 // ApexBundleInfo contains information about the dependencies of an apex
+// @auto-generate: gob
 type ApexBundleInfo struct {
 }
 
@@ -143,6 +145,7 @@ var ApexBundleInfoProvider = blueprint.NewMutatorProvider[ApexBundleInfo]("apex_
 
 var PlatformAvailabilityInfoProvider = blueprint.NewMutatorProvider[PlatformAvailabilityInfo]("mark_platform_availability")
 
+// @auto-generate: gob
 type PlatformAvailabilityInfo struct {
 	NotAvailableToPlatform bool
 }
@@ -174,6 +177,7 @@ type DepInSameApexChecker interface {
 // DepInSameApexInfo is a provider that wraps around a DepInSameApexChecker that can be
 // used to check if a dependency belongs to the same apex as the module when walking
 // through the dependencies of a module.
+// @auto-generate: gob
 type DepInSameApexInfo struct {
 	Checker DepInSameApexChecker
 }
@@ -347,6 +351,11 @@ func (m *ApexModuleBase) ApexTransitionMutatorIncoming(ctx IncomingTransitionCon
 		return ApexInfo{}
 	}
 
+	// Required modules should be installed regardless of whether it belongs to the apex or not.
+	if ctx.DepTag() == RequiredDepTag {
+		return ApexInfo{}
+	}
+
 	if !ctx.Module().(ApexModule).UniqueApexVariations() && !m.ApexProperties.UniqueApexVariationsForDeps && !info.ForPrebuiltApex {
 		return info.Minimize()
 	}
@@ -462,6 +471,7 @@ func (m *ApexModuleBase) GetDepInSameApexChecker() DepInSameApexChecker {
 	return BaseDepInSameApexChecker{}
 }
 
+// @auto-generate: gob
 type BaseDepInSameApexChecker struct{}
 
 func (m BaseDepInSameApexChecker) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
@@ -614,14 +624,6 @@ type ApexBundleDepsInfoIntf interface {
 	FlatListPath() Path
 	FullListPath() Path
 }
-
-// @auto-generate: gob
-type ApexBundleDepsData struct {
-	Updatable    bool
-	FlatListPath Path
-}
-
-var ApexBundleDepsDataProvider = blueprint.NewProvider[ApexBundleDepsData]()
 
 // ApexBundleTypeInfo is used to identify the module is a apexBundle module.
 // @auto-generate: gob

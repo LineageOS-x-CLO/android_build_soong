@@ -189,7 +189,7 @@ type BaseCompilerProperties struct {
 
 			// List of additional cflags that should be used to build vendor
 			// or product variant of the C/C++ module.
-			Cflags []string
+			Cflags proptools.Configurable[[]string]
 
 			// list of generated sources that should not be used to build
 			// vendor or product variant of the C/C++ module.
@@ -427,12 +427,14 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 
 	cflags := compiler.Properties.Cflags.GetOrDefault(ctx, nil)
 	cppflags := compiler.Properties.Cppflags.GetOrDefault(ctx, nil)
+	vendorcflags := compiler.Properties.Target.Vendor.Cflags.GetOrDefault(ctx, nil)
+	productcflags := compiler.Properties.Target.Product.Cflags.GetOrDefault(ctx, nil)
 	CheckBadCompilerFlags(ctx, "cflags", cflags)
 	CheckBadCompilerFlags(ctx, "cppflags", cppflags)
 	CheckBadCompilerFlags(ctx, "conlyflags", compiler.Properties.Conlyflags)
 	CheckBadCompilerFlags(ctx, "asflags", compiler.Properties.Asflags)
-	CheckBadCompilerFlags(ctx, "vendor.cflags", compiler.Properties.Target.Vendor.Cflags)
-	CheckBadCompilerFlags(ctx, "product.cflags", compiler.Properties.Target.Product.Cflags)
+	CheckBadCompilerFlags(ctx, "vendor.cflags", vendorcflags)
+	CheckBadCompilerFlags(ctx, "product.cflags", productcflags)
 	CheckBadCompilerFlags(ctx, "recovery.cflags", compiler.Properties.Target.Recovery.Cflags)
 	CheckBadCompilerFlags(ctx, "ramdisk.cflags", compiler.Properties.Target.Ramdisk.Cflags)
 	CheckBadCompilerFlags(ctx, "vendor_ramdisk.cflags", compiler.Properties.Target.Vendor_ramdisk.Cflags)
@@ -617,11 +619,11 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	flags.Local.CppFlags = append([]string{"-std=" + cppStd}, flags.Local.CppFlags...)
 
 	if ctx.inVendor() {
-		flags.Local.CFlags = append(flags.Local.CFlags, esc(compiler.Properties.Target.Vendor.Cflags)...)
+		flags.Local.CFlags = append(flags.Local.CFlags, esc(vendorcflags)...)
 	}
 
 	if ctx.inProduct() {
-		flags.Local.CFlags = append(flags.Local.CFlags, esc(compiler.Properties.Target.Product.Cflags)...)
+		flags.Local.CFlags = append(flags.Local.CFlags, esc(productcflags)...)
 	}
 
 	if ctx.inRecovery() {
@@ -740,8 +742,10 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	if ctx.optimizeForSize() {
 		flags.Local.CFlags = append(flags.Local.CFlags, "-Oz")
 		if !ctx.Config().IsEnvFalse("THINLTO_USE_MLGO") {
-			flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-enable-ml-inliner=release")
-			flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-ml-inliner-model-selector=arm64-mixed")
+			if ctx.Arch().ArchType == android.Arm64 {
+				flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-enable-ml-inliner=release")
+				flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-ml-inliner-model-selector=arm64-mixed")
+			}
 		}
 	}
 
@@ -755,6 +759,10 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 
 	if flags.Toolchain.Is64Bit() {
 		flags.NoOverrideFlags = append(flags.NoOverrideFlags, "${config.NoOverride64GlobalCflags}")
+	}
+
+	if ctx.testBinary() || ctx.testLibrary() {
+		flags.NoOverrideFlags = append(flags.NoOverrideFlags, "${config.NoOverrideTestsGlobalCflags}")
 	}
 
 	if android.IsThirdPartyPath(ctx.ModuleDir()) {

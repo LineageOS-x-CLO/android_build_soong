@@ -29,6 +29,8 @@ import (
 	"android/soong/provenance"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen
+
 func init() {
 	RegisterAppImportBuildComponents(android.InitRegistrationContext)
 
@@ -95,6 +97,9 @@ type AndroidAppImport struct {
 	android.ModuleBase
 	android.DefaultableModuleBase
 	android.ApexModuleBase
+	// TODO(b/461815001): remove this and replace usage of WalkDepsProxy with
+	//  VisitDirectDepsProxy and DepSets.
+	blueprint.ModuleUsesIncrementalWalkDeps
 	prebuilt android.Prebuilt
 
 	properties       AndroidAppImportProperties
@@ -653,6 +658,7 @@ func (m *AndroidAppImport) GetDepInSameApexChecker() android.DepInSameApexChecke
 	return AppImportDepInSameApexChecker{}
 }
 
+// @auto-generate: gob
 type AppImportDepInSameApexChecker struct {
 	android.BaseDepInSameApexChecker
 }

@@ -1543,10 +1543,10 @@ func (m *ModuleBase) computeInstallDeps(ctx ModuleContext) ([]depset.DepSet[Inst
 	var packagingSpecs []depset.DepSet[PackagingSpec]
 	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
 		if isInstallDepNeeded(ctx, dep) {
+			commonInfo := OtherModulePointerProviderOrDefault(ctx, dep, CommonModuleInfoProvider)
 			// Installation is still handled by Make, so anything hidden from Make is not
 			// installable.
-			info := OtherModuleProviderOrDefault(ctx, dep, InstallFilesProvider)
-			commonInfo := OtherModulePointerProviderOrDefault(ctx, dep, CommonModuleInfoProvider)
+			info := GetInstallFilesCommon(commonInfo)
 			if !commonInfo.HideFromMake && !commonInfo.SkipInstall {
 				installDeps = append(installDeps, info.TransitiveInstallFiles)
 			}
@@ -1722,7 +1722,7 @@ func (m *ModuleBase) VintfFragments(ctx ConfigurableEvaluatorContext) []string {
 // generateModuleTarget generates phony targets so that you can do `m <module-name>`.
 // It will be run on every variant of the module, so it relies on the fact that phony targets
 // are deduped to merge all the deps from different variants together.
-func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls []FilePair) {
+func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls []FilePair) *ModuleBuildTargetsInfo {
 	var namespacePrefix string
 	nameSpace := ctx.Namespace().Path
 	if nameSpace != "." {
@@ -1765,7 +1765,7 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	}
 	// Act as if you built the required dependencies as well when building the current module
 	for _, dep := range ctx.GetDirectDepsProxyWithTag(RequiredDepTag) {
-		if info, ok := OtherModuleProvider(ctx, dep, ModuleBuildTargetsProvider); ok {
+		if info := GetModuleBuildTargets(ctx, dep); info != nil {
 			if info.OutputsTarget != nil {
 				outputDeps = append(outputDeps, info.OutputsTarget)
 			}
@@ -1852,7 +1852,7 @@ func (m *ModuleBase) generateModuleTarget(ctx *moduleContext, testSuiteInstalls 
 	info.OutputsTarget = outputTarget
 	info.InstallTarget = installTarget
 	info.NamespaceExportedToMake = namespaceExportedToMake
-	SetProvider(ctx, ModuleBuildTargetsProvider, info)
+	return &info
 }
 
 func determineModuleKind(m *ModuleBase, ctx ModuleErrorContext) moduleKind {
@@ -1998,14 +1998,10 @@ type InstallFilesInfo struct {
 	DistFiles TaggedDistFiles
 }
 
-var InstallFilesProvider = blueprint.NewProvider[InstallFilesInfo]()
-
 // @auto-generate: gob
 type SourceFilesInfo struct {
 	Srcs Paths
 }
-
-var SourceFilesInfoProvider = blueprint.NewProvider[SourceFilesInfo]()
 
 // ModuleBuildTargetsInfo is used by buildTargetSingleton to create checkbuild and
 // per-directory build targets.
@@ -2019,7 +2015,33 @@ type ModuleBuildTargetsInfo struct {
 	BlueprintDir            string
 }
 
-var ModuleBuildTargetsProvider = blueprint.NewProvider[ModuleBuildTargetsInfo]()
+// Mapping of class names: original --> renamed.  If the value is "", the class will be
+// renamed by the next rdep that has the jarjar_prefix attribute (or this module if it has
+// attribute). Rdeps of that module will inherit the renaming.
+// @auto-generate: gob
+type JarJarRename map[string]string
+
+func (this JarJarRename) GetDebugString() string {
+	result := ""
+	for _, k := range SortedKeys(this) {
+		v := this[k]
+		if strings.Contains(k, "android.companion.virtual.flags.FakeFeatureFlagsImpl") {
+			result += k + "--&gt;" + v + ";"
+		}
+	}
+	return result
+}
+
+// BaseJarJarProviderData contains information that will propagate across dependencies regardless of
+// whether they are java modules or not.
+// @auto-generate: gob
+type BaseJarJarProviderData struct {
+	Rename JarJarRename
+}
+
+func (this BaseJarJarProviderData) GetDebugString() string {
+	return this.Rename.GetDebugString()
+}
 
 // @auto-generate: gob
 type CommonModuleInfo struct {
@@ -2077,6 +2099,29 @@ type CommonModuleInfo struct {
 	ApexAvailableFor           []string
 	ImageVariation             blueprint.Variation
 	IsNonPrimaryImageVariation bool
+	ComplianceMetadata         *ComplianceMetadataInfo
+	ModuleInfoJSON             *ModuleInfoJSONInfo
+	UnstableInfo               *unstableInfo
+	// LicenseMetadata is used to propagate license metadata paths between modules.
+	LicenseMetadata                *LicenseMetadataInfo
+	Licenses                       *LicensesInfo
+	Phonies                        *PhonyInfo
+	OutputFiles                    *OutputFilesInfo
+	ModuleBuildTargets             *ModuleBuildTargetsInfo
+	HostToolInfo                   *HostToolInfo
+	Logtags                        *LogtagsInfo
+	TestModuleInfo                 *TestModuleInformation
+	SymbolicOutput                 *SymbolicOutputInfos
+	IdeInfo                        *IdeInfo
+	AconfigPropagatingDeclarations *aconfigPropagatingDeclarationsInfo
+	MakeNames                      *MakeNamesInfo
+	SourceFiles                    *SourceFilesInfo
+	GeneratedSource                *GeneratedSourceInfo
+	Containers                     *ContainersInfo
+	PackageInfo                    *PackageInfo
+	AndroidMkData                  *AndroidMkDataInfo
+	BaseJarJarProviderData         *BaseJarJarProviderData
+	InstallFiles                   *InstallFilesInfo
 }
 
 // @auto-generate: gob
@@ -2088,11 +2133,10 @@ type ApiLevelOrPlatform struct {
 var CommonModuleInfoProvider = blueprint.NewProvider[*CommonModuleInfo]()
 
 // @auto-generate: gob
-type HostToolProviderInfo struct {
-	HostToolPath OptionalPath
+type HostToolInfo struct {
+	HostToolPath             OptionalPath
+	TransitivePackagingSpecs depset.DepSet[PackagingSpec]
 }
-
-var HostToolProviderInfoProvider = blueprint.NewProvider[HostToolProviderInfo]()
 
 // @auto-generate: gob
 type DistInfo struct {
@@ -2107,14 +2151,30 @@ type SourceFileGenerator interface {
 	GeneratedDeps() Paths
 }
 
+type HostToolDepTagType interface {
+	isHostToolDepTag() bool
+}
+
+type BaseHostToolDepTag struct {
+	blueprint.BaseDependencyTag
+}
+
+var _ HostToolDepTagType = (*BaseHostToolDepTag)(nil)
+
+func (BaseHostToolDepTag) isHostToolDepTag() bool { return true }
+
+var _ ExcludeFromVisibilityEnforcementTag = (*BaseHostToolDepTag)(nil)
+
+func (BaseHostToolDepTag) ExcludeFromVisibilityEnforcement() {}
+
+var HostToolDepTag = BaseHostToolDepTag{}
+
 // @auto-generate: gob
 type GeneratedSourceInfo struct {
 	GeneratedSourceFiles Paths
 	GeneratedHeaderDirs  Paths
 	GeneratedDeps        Paths
 }
-
-var GeneratedSourceInfoProvider = blueprint.NewProvider[GeneratedSourceInfo]()
 
 func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) {
 	ctx := &moduleContext{
@@ -2135,7 +2195,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		ctx.config.modulesForTests.Insert(ctx.ModuleName(), ctx.Module())
 	}
 
-	setContainerInfo(ctx)
+	unstableInfo := setContainerInfo(ctx)
 
 	ctx.licenseMetadataFile = PathForModuleOut(ctx, "meta_lic")
 
@@ -2190,6 +2250,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	}
 
 	var installFiles InstallFilesInfo
+	var licenses *LicensesInfo
+	var aconfigPropagatingDeclarations *aconfigPropagatingDeclarationsInfo
+	var ideInfo *IdeInfo
 
 	if m.Enabled(ctx) {
 		// ensure all direct android.Module deps are enabled
@@ -2235,7 +2298,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			installFiles.InstalledVintfFragmentsPaths = ctx.installedVintfFragmentsPaths
 		}
 
-		licensesPropertyFlattener(ctx)
+		licenses = licensesPropertyFlattener(ctx)
 		if ctx.Failed() {
 			return
 		}
@@ -2249,7 +2312,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 
 		// Call aconfigUpdateAndroidBuildActions to collect merged aconfig files before being used
 		// in m.module.GenerateAndroidBuildActions
-		aconfigUpdateAndroidBuildActions(ctx)
+		aconfigPropagatingDeclarations = aconfigUpdateAndroidBuildActions(ctx)
 		if ctx.Failed() {
 			return
 		}
@@ -2262,10 +2325,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		m.module.base().hooks.runPostGenerateAndroidBuildActionsHooks(ctx)
 
 		if x, ok := m.module.(IDEInfo); ok {
-			var result IdeInfo
-			x.IDEInfo(ctx, &result)
-			result.BaseModuleName = x.BaseModuleName()
-			SetProvider(ctx, IdeInfoProviderKey, result)
+			ideInfo = &IdeInfo{}
+			x.IDEInfo(ctx, ideInfo)
+			ideInfo.BaseModuleName = x.BaseModuleName()
 		}
 
 		if proptools.Bool(m.commonProperties.Unchecked_module) {
@@ -2296,6 +2358,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		ctx.GetMissingDependencies()
 	}
 
+	var sourceFiles *SourceFilesInfo
 	if sourceFileProducer, ok := m.module.(SourceFileProducer); ok {
 		srcs := sourceFileProducer.Srcs()
 		for _, src := range srcs {
@@ -2304,26 +2367,23 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 				return
 			}
 		}
-		SetProvider(ctx, SourceFilesInfoProvider, SourceFilesInfo{Srcs: sourceFileProducer.Srcs()})
+		sourceFiles = &SourceFilesInfo{Srcs: sourceFileProducer.Srcs()}
 	}
 
 	ctx.TransitiveInstallFiles = depset.New[InstallPath](depset.TOPOLOGICAL, ctx.installFiles, dependencyInstallFiles)
 	installFiles.TransitiveInstallFiles = ctx.TransitiveInstallFiles
 	installFiles.TransitivePackagingSpecs = depset.New[PackagingSpec](depset.TOPOLOGICAL, ctx.packagingSpecs, dependencyPackagingSpecs)
 
-	if m.Enabled(ctx) {
-		SetProvider(ctx, InstallFilesProvider, installFiles)
-	}
-
 	var testSuiteInstalls []FilePair
 	if ctx.testSuiteInfoSet {
 		testSuiteInstalls = m.setupTestSuites(ctx, ctx.testSuiteInfo)
 	}
 
-	buildLicenseMetadata(ctx, ctx.licenseMetadataFile, testSuiteInstalls)
+	licenseMetadata := buildLicenseMetadata(ctx, ctx.licenseMetadataFile, testSuiteInstalls)
 
+	var moduleTargets *ModuleBuildTargetsInfo
 	if shouldGeneratePhonyTargets(ctx, m) {
-		m.generateModuleTarget(ctx, testSuiteInstalls)
+		moduleTargets = m.generateModuleTarget(ctx, testSuiteInstalls)
 	}
 	if ctx.Failed() {
 		return
@@ -2405,26 +2465,11 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 				Required:           required,
 			}
 		}
-
-		SetProvider(ctx, ModuleInfoJSONProvider, ModuleInfoJSONInfo{
-			Data: ctx.moduleInfoJSON,
-		})
 	}
 
 	m.buildParams = ctx.buildParams
 	m.ruleParams = ctx.ruleParams
 	m.variables = ctx.variables
-
-	outputFiles := ctx.GetOutputFiles()
-	if outputFiles.DefaultOutputFiles != nil || outputFiles.TaggedOutputFiles != nil {
-		SetProvider(ctx, OutputFilesProvider, outputFiles)
-	}
-
-	if len(ctx.phonies) > 0 {
-		SetProvider(ctx, ModulePhonyProvider, PhonyInfo{
-			Phonies: ctx.phonies,
-		})
-	}
 
 	if len(ctx.dists) > 0 {
 		SetProvider(ctx, DistProvider, DistInfo{
@@ -2432,7 +2477,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		})
 	}
 
-	buildComplianceMetadataProvider(ctx, m)
+	complianceMetadata := buildComplianceMetadataProvider(ctx, m)
 
 	commonData := CommonModuleInfo{
 		Enabled:                          m.Enabled(ctx),
@@ -2463,6 +2508,34 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		PartitionTag:                                 m.PartitionTag(ctx.DeviceConfig()),
 		ImageVariation:                               m.module.ImageVariation(),
 		IsNonPrimaryImageVariation:                   m.commonProperties.IsNonPrimaryImageVariation,
+		ComplianceMetadata:                           complianceMetadata,
+		UnstableInfo:                                 unstableInfo,
+		LicenseMetadata:                              licenseMetadata,
+		Licenses:                                     licenses,
+		ModuleBuildTargets:                           moduleTargets,
+		Logtags:                                      ctx.logTags,
+		TestModuleInfo:                               ctx.testModuleInfo,
+		SymbolicOutput:                               ctx.symbolicOutput,
+		IdeInfo:                                      ideInfo,
+		AconfigPropagatingDeclarations:               aconfigPropagatingDeclarations,
+		MakeNames:                                    ctx.makeNames,
+		SourceFiles:                                  sourceFiles,
+		Containers:                                   ctx.containersInfo,
+		BaseJarJarProviderData:                       ctx.baseJarJarProviderData,
+	}
+	outputFiles := ctx.GetOutputFiles()
+	if outputFiles.DefaultOutputFiles != nil || outputFiles.TaggedOutputFiles != nil {
+		commonData.OutputFiles = &outputFiles
+	}
+	if len(ctx.phonies) > 0 {
+		commonData.Phonies = &PhonyInfo{
+			Phonies: ctx.phonies,
+		}
+	}
+	if len(ctx.moduleInfoJSON) > 0 {
+		commonData.ModuleInfoJSON = &ModuleInfoJSONInfo{
+			Data: ctx.moduleInfoJSON,
+		}
 	}
 	if mm, ok := m.module.(interface {
 		MinSdkVersion(ctx MinSdkVersionFromValueContext) ApiLevel
@@ -2513,12 +2586,25 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
 		commonData.BaseModuleName = mm.BaseModuleName()
 	}
-	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
 
-	if h, ok := m.module.(HostToolProvider); ok {
-		SetProvider(ctx, HostToolProviderInfoProvider, HostToolProviderInfo{
-			HostToolPath: h.HostToolPath()})
+	commonData.HostToolInfo = computeHostToolInfo(ctx, m.module, installFiles.TransitivePackagingSpecs)
+
+	if s, ok := m.module.(SourceFileGenerator); ok {
+		commonData.GeneratedSource = &GeneratedSourceInfo{
+			GeneratedSourceFiles: s.GeneratedSourceFiles(),
+			GeneratedHeaderDirs:  s.GeneratedHeaderDirs(),
+			GeneratedDeps:        s.GeneratedDeps(),
+		}
 	}
+	if m.Enabled(ctx) {
+		if am, ok := m.module.(AndroidMkDataProvider); ok {
+			commonData.AndroidMkData = &AndroidMkDataInfo{
+				Class: am.AndroidMk().Class,
+			}
+		}
+		commonData.InstallFiles = &installFiles
+	}
+	SetProvider(ctx, CommonModuleInfoProvider, &commonData)
 
 	var hasAndroidMkProvider bool
 	if ctx.Config().KatiEnabled() {
@@ -2530,23 +2616,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		}
 	}
 
-	if s, ok := m.module.(SourceFileGenerator); ok {
-		SetProvider(ctx, GeneratedSourceInfoProvider, GeneratedSourceInfo{
-			GeneratedSourceFiles: s.GeneratedSourceFiles(),
-			GeneratedHeaderDirs:  s.GeneratedHeaderDirs(),
-			GeneratedDeps:        s.GeneratedDeps(),
-		})
-	}
-
 	if m.Enabled(ctx) {
 		if v, ok := m.module.(ModuleMakeVarsProvider); ok {
 			SetProvider(ctx, ModuleMakeVarsInfoProvider, v.MakeVars(ctx))
-		}
-
-		if am, ok := m.module.(AndroidMkDataProvider); ok {
-			SetProvider(ctx, AndroidMkDataInfoProvider, AndroidMkDataInfo{
-				Class: am.AndroidMk().Class,
-			})
 		}
 	}
 
@@ -2562,6 +2634,36 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		// then there are no references directly to the Module and it can be freed.
 		ctx.bp.FreeModuleAfterGenerateBuildActions()
 	}
+}
+
+// computeHostToolInfo returns a *HostToolInfo to embed into the CommonInfo for this
+// module.  Some dependencies on host tool providers are added in FinalDepsMutators (genrule.toolDepsMutator,
+// and java.dexpreoptToolDepsMutator), too late for the Prebuilts mutator to replace the dependency with the
+// prebuilt if necessary.  If this module has been replaced by a prebuilt return the prebuilt's
+// HostToolInfo, otherwise return this Module's HostToolPath value if it exists.
+func computeHostToolInfo(ctx ModuleContext, m Module, transitivePackagingSpecs depset.DepSet[PackagingSpec]) *HostToolInfo {
+	if m.IsReplacedByPrebuilt() {
+		var info *HostToolInfo
+		ctx.VisitDirectDepsProxyWithTag(PrebuiltDepTag, func(dep ModuleProxy) {
+			if info == nil {
+				info = GetHostToolInfo(ctx, dep)
+			}
+		})
+		return info
+	} else if htp, ok := m.(HostToolProvider); ok {
+		return &HostToolInfo{
+			HostToolPath:             htp.HostToolPath(),
+			TransitivePackagingSpecs: transitivePackagingSpecs,
+		}
+	}
+	return nil
+}
+
+func GetHostToolInfo(ctx OtherModuleProviderContext, module ModuleOrProxy) *HostToolInfo {
+	if commInfo, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider); ok {
+		return commInfo.HostToolInfo
+	}
+	return nil
 }
 
 func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []FilePair {
@@ -2717,8 +2819,8 @@ func (m *ModuleBase) setupTestSuites(ctx ModuleContext, info TestSuiteInfo) []Fi
 		}
 	}
 
+	info.TestSuiteInstalls = &TestSuiteInstallsInfo{installs, oneVariantInstalls}
 	SetProvider(ctx, TestSuiteInfoProvider, info)
-	SetProvider(ctx, TestSuiteInstallsInfoProvider, TestSuiteInstallsInfo{installs, oneVariantInstalls})
 
 	return slices.Concat(installs, oneVariantInstalls)
 }
@@ -3280,40 +3382,48 @@ func outputFilesForModule(ctx PathContext, module ModuleOrProxy, tag string) (Pa
 			if sourceFileProducer, ok := module.(SourceFileProducer); ok {
 				return sourceFileProducer.Srcs(), nil
 			}
-		} else if sourceFiles, ok := OtherModuleProvider(octx, module, SourceFilesInfoProvider); ok {
+		} else if commonInfo, ok := OtherModuleProvider(octx, module, CommonModuleInfoProvider); ok && commonInfo.SourceFiles != nil {
 			if tag != "" {
 				return nil, fmt.Errorf("module %q is a SourceFileProducer, which does not support tag %q", pathContextName(ctx, module), tag)
 			}
-			paths := sourceFiles.Srcs
+			paths := commonInfo.SourceFiles.Srcs
 			return paths, nil
 		}
 	}
 
-	return nil, fmt.Errorf("module %q is not a SourceFileProducer or having valid output file for tag %q", pathContextName(ctx, module), tag)
+	return nil, fmt.Errorf("module %q is not a SourceFileProducer or have a valid output file for tag %q", pathContextName(ctx, module), tag)
 }
 
-// This method uses OutputFilesProvider for output files
+func GetOutputFiles(ctx OtherModuleProviderContext, module ModuleOrProxy) *OutputFilesInfo {
+	if commInfo, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider); ok {
+		return commInfo.OutputFiles
+	}
+	return nil
+}
+
+// This method uses OutputFiles from CommonModuleInfo for output files
 // *inter-module-communication*.
 // If mctx module is the same as the param module the output files are obtained
 // from outputFiles property of module base, to avoid both setting and
-// reading OutputFilesProvider before GenerateBuildActions is finished.
-// If a module doesn't have the OutputFilesProvider, nil is returned.
+// reading OutputFiles before GenerateBuildActions is finished.
+// If a module doesn't have the OutputFiles set, nil is returned.
 func outputFilesForModuleFromProvider(ctx PathContext, module ModuleOrProxy, tag string) (Paths, error) {
-	var outputFiles OutputFilesInfo
+	var outputFiles *OutputFilesInfo
 
 	if mctx, isMctx := ctx.(OutputFilesProviderModuleContext); isMctx {
 		if !EqualModules(mctx.Module(), module) {
-			outputFiles, _ = OtherModuleProvider(mctx, module, OutputFilesProvider)
+			outputFiles = GetOutputFiles(mctx, module)
 		} else {
-			outputFiles = mctx.GetOutputFiles()
+			tmp := mctx.GetOutputFiles()
+			outputFiles = &tmp
 		}
 	} else if cta, isCta := ctx.(*singletonContextAdaptor); isCta {
-		outputFiles, _ = OtherModuleProvider(cta, module, OutputFilesProvider)
+		outputFiles = GetOutputFiles(cta, module)
 	} else {
 		return nil, fmt.Errorf("unsupported context %q in method outputFilesForModuleFromProvider", reflect.TypeOf(ctx))
 	}
 
-	if outputFiles.isEmpty() {
+	if outputFiles == nil || outputFiles.isEmpty() {
 		return nil, OutputFilesProviderNotSet
 	}
 
@@ -3340,8 +3450,6 @@ type OutputFilesInfo struct {
 	// the corresponding output files for given tags
 	TaggedOutputFiles map[string]Paths
 }
-
-var OutputFilesProvider = blueprint.NewProvider[OutputFilesInfo]()
 
 type UnsupportedOutputTagError struct {
 	tag string
@@ -3414,6 +3522,13 @@ func AddAncestors(ctx SingletonContext, dirMap map[string]Paths, mmName func(str
 	return SortedKeys(dirMap), topDirs
 }
 
+func GetModuleBuildTargets(ctx OtherModuleProviderContext, module ModuleProxy) *ModuleBuildTargetsInfo {
+	if commInfo, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider); ok {
+		return commInfo.ModuleBuildTargets
+	}
+	return nil
+}
+
 func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 	var checkbuildDeps Paths
 
@@ -3427,8 +3542,8 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 	modulesInDir := make(map[string]Paths)
 
 	ctx.VisitAllModuleProxies(func(module ModuleProxy) {
-		info := OtherModuleProviderOrDefault(ctx, module, ModuleBuildTargetsProvider)
-		if !info.NamespaceExportedToMake {
+		info := GetModuleBuildTargets(ctx, module)
+		if info == nil || !info.NamespaceExportedToMake {
 			return
 		}
 
@@ -3482,7 +3597,7 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 		info := OtherModuleProviderOrDefault(ctx, module, CommonModuleInfoProvider)
 		if info.Enabled {
 			key := osAndCross{os: info.Target.Os, hostCross: info.Target.HostCross}
-			osDeps[key] = append(osDeps[key], OtherModuleProviderOrDefault(ctx, module, InstallFilesProvider).CheckbuildFiles...)
+			osDeps[key] = append(osDeps[key], GetInstallFilesCommon(info).CheckbuildFiles...)
 		}
 	})
 
@@ -3541,7 +3656,7 @@ type IdeInfo struct {
 }
 
 // Merge merges two IdeInfos and produces a new one, leaving the origional unchanged
-func (i IdeInfo) Merge(other IdeInfo) IdeInfo {
+func (i IdeInfo) Merge(other *IdeInfo) IdeInfo {
 	return IdeInfo{
 		Deps:              mergeStringLists(i.Deps, other.Deps),
 		Srcs:              mergeStringLists(i.Srcs, other.Srcs),
@@ -3565,9 +3680,18 @@ func mergeStringLists(a, b []string) []string {
 	return FirstUniqueStrings(Concat(a, b))
 }
 
-var IdeInfoProviderKey = blueprint.NewProvider[IdeInfo]()
-
 func CheckBlueprintSyntax(ctx BaseModuleContext, filename string, contents string) []error {
 	bpctx := ctx.blueprintBaseModuleContext()
 	return blueprint.CheckBlueprintSyntax(bpctx.ModuleFactories(), filename, contents)
+}
+
+func GetInstallFilesCommon(common *CommonModuleInfo) InstallFilesInfo {
+	if common != nil && common.InstallFiles != nil {
+		return *common.InstallFiles
+	}
+	return InstallFilesInfo{}
+}
+
+func GetInstallFiles(ctx OtherModuleProviderContext, module ModuleOrProxy) InstallFilesInfo {
+	return GetInstallFilesCommon(OtherModuleProviderOrDefault(ctx, module, CommonModuleInfoProvider))
 }

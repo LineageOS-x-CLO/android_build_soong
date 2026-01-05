@@ -47,6 +47,9 @@ var _ android.ExcludeFromVisibilityEnforcementTag = platformBootclasspathImplLib
 type platformBootclasspathModule struct {
 	android.ModuleBase
 	ClasspathFragmentBase
+	// TODO(b/461815001): remove this and replace usage of WalkDepsProxy with
+	//  VisitDirectDepsProxy and DepSets.
+	blueprint.ModuleUsesIncrementalWalkDeps
 
 	properties platformBootclasspathProperties
 
@@ -116,7 +119,7 @@ func (b *platformBootclasspathModule) DepsMutator(ctx android.BottomUpMutatorCon
 
 	var bootImageModuleNames []string
 
-	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
+	// TODO: b/458374506 - Remove the mechanism of depending on the java_sdk_library(_import) directly
 	addDependenciesOntoBootImageModules(ctx, global.ArtApexJars, artBootJar)
 	bootImageModuleNames = append(bootImageModuleNames, global.ArtApexJars.CopyOfJars()...)
 
@@ -133,7 +136,7 @@ func (b *platformBootclasspathModule) DepsMutator(ctx android.BottomUpMutatorCon
 		apexes = append(apexes, apexJars.Apex(i))
 	}
 	addDependenciesOntoSelectedBootImageApexes(ctx, android.FirstUniqueStrings(apexes)...)
-	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
+	// TODO: b/458374506 - Remove the mechanism of depending on the java_sdk_library(_import) directly
 	addDependenciesOntoBootImageModules(ctx, apexJars, apexBootJar)
 	bootImageModuleNames = append(bootImageModuleNames, apexJars.CopyOfJars()...)
 
