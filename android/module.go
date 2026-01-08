@@ -2630,13 +2630,18 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		})
 	}
 
-	// I don't know of a better way to check if this is the BuildOs variation than by comparing
-	// strings like this.
+	myTarget := ctx.Target()
+	myVariations := ctx.Target().Variations()
+	hasCovVariation := slices.ContainsFunc(myVariations, func(v blueprint.Variation) bool { return v.Mutator == "coverage" })
 	if htp, ok := m.module.(HostToolProvider); ok &&
 		m.Enabled(ctx) &&
 		ctx.requiresFullInstall() &&
-		(ctx.ModuleSubDir() == ctx.Config().BuildOSTarget.String() ||
-			ctx.ModuleSubDir() == ctx.Config().BuildOSCommonTarget.String()) {
+		myTarget.OsVariation() == ctx.Config().BuildOSTarget.OsVariation() &&
+		(myTarget.ArchVariation() == ctx.Config().BuildOSTarget.ArchVariation() || myTarget.ArchVariation() == ctx.Config().BuildOSCommonTarget.ArchVariation()) &&
+		// Only accept an exact match, or the coverage variation. On coverage builds,
+		// the coverage varition of host tools is what's installed. (but that should be fixed,
+		// as it makes coverage builds a lot slower)
+		(len(myVariations) == 2 || len(myVariations) == 3 && hasCovVariation) {
 
 		// This is kindof a hack, but in order to only process host tools, check if this module
 		// produces a binary with the same name as its module in out/host/linux-x86/bin
@@ -3661,39 +3666,57 @@ type IDEInfo interface {
 // Collect information for opening IDE project files in java/jdeps.go.
 // @auto-generate: gob
 type IdeInfo struct {
-	BaseModuleName    string   `json:"-"`
-	ModuleType        string   `json:"module_type,omitempty"`
-	Manifest          string   `json:"manifest,omitempty"`
-	PackageName       string   `json:"package_name,omitempty"`
-	Deps              []string `json:"dependencies,omitempty"`
-	Srcs              []string `json:"srcs,omitempty"`
-	Aidl_srcs         []string `json:"aidl_srcs,omitempty"`
-	Proto_srcs        []string `json:"proto_srcs,omitempty"`
-	Aidl_include_dirs []string `json:"aidl_include_dirs,omitempty"`
-	Jarjar_rules      []string `json:"jarjar_rules,omitempty"`
-	Jars              []string `json:"jars,omitempty"`
-	Imported_jars     []string `json:"imported_jars,omitempty"`
-	Imported_aars     []string `json:"imported_aars,omitempty"`
-	Classes           []string `json:"class,omitempty"`
-	Installed_paths   []string `json:"installed,omitempty"`
-	SrcJars           []string `json:"srcjars,omitempty"`
-	Paths             []string `json:"path,omitempty"`
-	Static_libs       []string `json:"static_libs,omitempty"`
-	Libs              []string `json:"libs,omitempty"`
-	Asset_dirs        []string `json:"asset_dirs,omitempty"`
-	Resource_dirs     []string `json:"resource_dirs,omitempty"`
+	BaseModuleName    string          `json:"-"`
+	ModuleType        string          `json:"module_type,omitempty"`
+	Manifest          string          `json:"manifest,omitempty"`
+	PackageName       string          `json:"package_name,omitempty"`
+	Aconfig           *AconfigIdeInfo `json:"aconfig,omitempty"`
+	Proto             *ProtoIdeInfo   `json:"proto,omitempty"`
+	Deps              []string        `json:"dependencies,omitempty"`
+	Srcs              []string        `json:"srcs,omitempty"`
+	Aidl_srcs         []string        `json:"aidl_srcs,omitempty"`
+	Aidl_include_dirs []string        `json:"aidl_include_dirs,omitempty"`
+	Jarjar_rules      []string        `json:"jarjar_rules,omitempty"`
+	Jars              []string        `json:"jars,omitempty"`
+	Imported_jars     []string        `json:"imported_jars,omitempty"`
+	Imported_aars     []string        `json:"imported_aars,omitempty"`
+	Classes           []string        `json:"class,omitempty"`
+	Installed_paths   []string        `json:"installed,omitempty"`
+	SrcJars           []string        `json:"srcjars,omitempty"`
+	Paths             []string        `json:"path,omitempty"`
+	Static_libs       []string        `json:"static_libs,omitempty"`
+	Libs              []string        `json:"libs,omitempty"`
+	Asset_dirs        []string        `json:"asset_dirs,omitempty"`
+	Resource_dirs     []string        `json:"resource_dirs,omitempty"`
 }
 
-// Merge merges two IdeInfos and produces a new one, leaving the origional unchanged
+// @auto-generate: gob
+type AconfigIdeInfo struct {
+	Srcs      []string `json:"srcs,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
+	Package   string   `json:"package,omitempty"`
+	Container string   `json:"container,omitempty"`
+}
+
+// @auto-generate: gob
+type ProtoIdeInfo struct {
+	Srcs                  []string `json:"srcs,omitempty"`
+	Type                  string   `json:"type,omitempty"`
+	CanonicalPathFromRoot *bool    `json:"canonical_path_from_root,omitempty"`
+	LocalIncludeDirs      []string `json:"local_include_dirs,omitempty"`
+}
+
+// Merge merges two IdeInfos and produces a new one, leaving the original unchanged
 func (i IdeInfo) Merge(other *IdeInfo) IdeInfo {
 	return IdeInfo{
 		ModuleType:        mergeString(i.ModuleType, other.ModuleType),
 		Manifest:          mergeString(i.Manifest, other.Manifest),
 		PackageName:       mergeString(i.PackageName, other.PackageName),
+		Aconfig:           i.Aconfig.merge(other.Aconfig),
+		Proto:             i.Proto.merge(other.Proto),
 		Deps:              mergeStringLists(i.Deps, other.Deps),
 		Srcs:              mergeStringLists(i.Srcs, other.Srcs),
 		Aidl_srcs:         mergeStringLists(i.Aidl_srcs, other.Aidl_srcs),
-		Proto_srcs:        mergeStringLists(i.Proto_srcs, other.Proto_srcs),
 		Aidl_include_dirs: mergeStringLists(i.Aidl_include_dirs, other.Aidl_include_dirs),
 		Jarjar_rules:      mergeStringLists(i.Jarjar_rules, other.Jarjar_rules),
 		Jars:              mergeStringLists(i.Jars, other.Jars),
@@ -3710,9 +3733,49 @@ func (i IdeInfo) Merge(other *IdeInfo) IdeInfo {
 	}
 }
 
+// Merge merges two AconfigIdeInfos and produces a new one, leaving the original unchanged
+func (i *AconfigIdeInfo) merge(other *AconfigIdeInfo) *AconfigIdeInfo {
+	if other == nil {
+		return i
+	}
+	if i == nil {
+		return other
+	}
+	return &AconfigIdeInfo{
+		Srcs:      mergeStringLists(i.Srcs, other.Srcs),
+		Mode:      mergeString(i.Mode, other.Mode),
+		Package:   mergeString(i.Package, other.Package),
+		Container: mergeString(i.Container, other.Container),
+	}
+}
+
+// Merge merges two ProtoIdeInfos and produces a new one, leaving the original unchanged
+func (i *ProtoIdeInfo) merge(other *ProtoIdeInfo) *ProtoIdeInfo {
+	if other == nil {
+		return i
+	}
+	if i == nil {
+		return other
+	}
+	return &ProtoIdeInfo{
+		Srcs:                  mergeStringLists(i.Srcs, other.Srcs),
+		CanonicalPathFromRoot: mergeBool(i.CanonicalPathFromRoot, other.CanonicalPathFromRoot),
+		Type:                  mergeString(i.Type, other.Type),
+		LocalIncludeDirs:      mergeStringLists(i.LocalIncludeDirs, other.LocalIncludeDirs),
+	}
+}
+
 // mergeString returns the first non-empty string.
 func mergeString(a, b string) string {
 	if a != "" {
+		return a
+	}
+	return b
+}
+
+// mergeBool returns the first non-nil *bool.
+func mergeBool(a, b *bool) *bool {
+	if a != nil {
 		return a
 	}
 	return b
