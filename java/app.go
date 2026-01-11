@@ -1541,7 +1541,6 @@ func AndroidAppFactory() android.Module {
 
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
 	module.Module.dexProperties.Optimize.ShrinkByDefault = true
-	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Instrument = true
 	module.Module.properties.Supports_static_instrumentation = true
@@ -2005,7 +2004,6 @@ func AndroidTestHelperAppFactory() android.Module {
 	// TODO(b/192032291): Disable by default after auditing downstream usage.
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
 	module.Module.dexProperties.Optimize.Ignore_library_extends_program = proptools.BoolPtr(true)
-	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Installable = proptools.BoolPtr(true)
 	module.appProperties.Use_embedded_native_libs = proptools.BoolPtr(true)
