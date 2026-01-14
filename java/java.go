@@ -1267,7 +1267,7 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 	}
 
-	setOutputFiles(ctx, j.Module)
+	setOutputFiles(ctx, &j.Module)
 
 	j.javaLibraryModuleInfoJSON(ctx)
 
@@ -2535,11 +2535,11 @@ type ApiLibrary struct {
 	kSnapshotFiles map[string]android.Path
 }
 
-func (al ApiLibrary) JarToSnapshotMap() map[string]android.Path {
+func (al *ApiLibrary) JarToSnapshotMap() map[string]android.Path {
 	return al.kSnapshotFiles
 }
 
-var _ KSnapshotContainer = ApiLibrary{}
+var _ KSnapshotContainer = (*ApiLibrary)(nil)
 
 type JavaApiLibraryProperties struct {
 	// name of the API surface
@@ -4146,6 +4146,7 @@ func getCombinedAconfigProtoFile(ctx android.ModuleContext) android.Path {
 			Flag("--dedup").
 			Flag("--format").
 			Text("protobuf").
+			FlagForEachArg("--filter ", []string{"state:ENABLED", "permission:READ_WRITE"}).
 			FlagForEachInput("--cache ", aconfigProtoFiles).
 			FlagWithOutput("--out ", combinedAconfigProtoFile)
 
