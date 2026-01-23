@@ -460,10 +460,14 @@ type ProductVariables struct {
 
 	Ndk_abis *bool `json:",omitempty"`
 
-	ForceApexSymlinkOptimization *bool   `json:",omitempty"`
-	CompressedApex               *bool   `json:",omitempty"`
-	DefaultApexPayloadType       *string `json:",omitempty"`
-	Aml_abis                     *bool   `json:",omitempty"`
+	ForceApexSymlinkOptimization *bool `json:",omitempty"`
+	CompressedApex               *bool `json:",omitempty"`
+	Aml_abis                     *bool `json:",omitempty"`
+
+	DefaultApexPayloadType               *string `json:",omitempty"`
+	DefaultApexPayloadErofsCompressor    *string `json:",omitempty"`
+	DefaultApexPayloadErofsCompressHints *string `json:",omitempty"`
+	DefaultApexPayloadErofsPclusterSize  int64   `json:",omitempty"`
 
 	DexpreoptGlobalConfig *string `json:",omitempty"`
 
@@ -629,6 +633,7 @@ type PartitionQualifiedVariablesType struct {
 	BoardErofsCompressHints     string `json:",omitempty"`
 	BoardErofsPclusterSize      string `json:",omitempty"`
 	BoardErofsBlockSize         string `json:",omitempty"`
+	BoardErofsEnableDedupe      string `json:",omitempty"`
 	BoardExtfsInodeCount        string `json:",omitempty"`
 	BoardExtfsRsvPct            string `json:",omitempty"`
 	BoardF2fsSloadCompressFlags string `json:",omitempty"`
@@ -695,6 +700,7 @@ type PartitionVariables struct {
 	BoardErofsBlockSize            string `json:",omitempty"`
 	BoardErofsShareDupBlocks       string `json:",omitempty"`
 	BoardErofsUseLegacyCompression string `json:",omitempty"`
+	BoardErofsEnableDedupe         string `json:",omitempty"`
 	BoardExt4ShareDupBlocks        string `json:",omitempty"`
 	BoardFlashLogicalBlockSize     string `json:",omitempty"`
 	BoardFlashEraseBlockSize       string `json:",omitempty"`
@@ -812,18 +818,21 @@ type PartitionVariables struct {
 	DeviceFcmFileOfMakefile                     map[string][]string `json:",omitempty"`
 	ArtifactPathRequirementsIsRelaxedOfMakefile map[string]bool     `json:",omitempty"`
 
-	BuildingSystemDlkmImage             bool     `json:",omitempty"`
-	SystemKernelModules                 []string `json:",omitempty"`
-	SystemKernelBlocklistFile           string   `json:",omitempty"`
-	SystemKernelLoadModules             []string `json:",omitempty"`
-	BuildingVendorDlkmImage             bool     `json:",omitempty"`
-	VendorKernelModules                 []string `json:",omitempty"`
-	VendorKernelModulesLoad             []string `json:",omitempty"`
-	VendorKernelBlocklistFile           string   `json:",omitempty"`
-	VendorKernelModules2ndStage16kbMode []string `json:",omitempty"`
-	BuildingOdmDlkmImage                bool     `json:",omitempty"`
-	OdmKernelModules                    []string `json:",omitempty"`
-	OdmKernelBlocklistFile              string   `json:",omitempty"`
+	BoardKernelModulesZip                              string   `json:",omitempty"`
+	BoardKernelModulesZipExtraVendorKernelRamdiskLoads []string `json:",omitempty"`
+	BoardKernelModulesZipExtraVendorKernelModules      []string `json:",omitempty"`
+	BuildingSystemDlkmImage                            bool     `json:",omitempty"`
+	SystemKernelModules                                []string `json:",omitempty"`
+	SystemKernelBlocklistFile                          string   `json:",omitempty"`
+	SystemKernelLoadModules                            []string `json:",omitempty"`
+	BuildingVendorDlkmImage                            bool     `json:",omitempty"`
+	VendorKernelModules                                []string `json:",omitempty"`
+	VendorKernelModulesLoad                            []string `json:",omitempty"`
+	VendorKernelBlocklistFile                          string   `json:",omitempty"`
+	VendorKernelModules2ndStage16kbMode                []string `json:",omitempty"`
+	BuildingOdmDlkmImage                               bool     `json:",omitempty"`
+	OdmKernelModules                                   []string `json:",omitempty"`
+	OdmKernelBlocklistFile                             string   `json:",omitempty"`
 
 	VendorRamdiskKernelModules       []string `json:",omitempty"`
 	VendorRamdiskKernelBlocklistFile string   `json:",omitempty"`

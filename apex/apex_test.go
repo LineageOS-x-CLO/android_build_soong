@@ -120,6 +120,7 @@ var prepareForApexTest = android.GroupFixturePreparers(
 	// General preparers in alphabetical order as test infrastructure will enforce correct
 	// registration order.
 	android.PrepareForTestWithAndroidBuildComponents,
+	android.PrepareForTestWithHostTools("soong_zip", "zipsync"),
 	bpf.PrepareForTestWithBpf,
 	cc.PrepareForTestWithCcBuildComponents,
 	java.PrepareForTestWithDexpreopt,
@@ -3414,12 +3415,8 @@ func TestApex_withPrebuiltKernelModules(t *testing.T) {
 			"mod2.ko": nil,
 		}))
 	ensureExactContents(t, ctx, "myapex", "android_common_myapex", []string{
-		"lib/modules/mod1.ko",
-		"lib/modules/mod2.ko",
-		"lib/modules/modules.alias",
-		"lib/modules/modules.dep",
 		"lib/modules/modules.load",
-		"lib/modules/modules.softdep",
+		"installs.zip unzips to lib/modules",
 	})
 }
 
@@ -11763,6 +11760,92 @@ func TestUpdatableApexMinSdkVersionCurrent(t *testing.T) {
 			private_key: "testkey.pem",
 		}
 	`)
+}
+
+func TestErofsApexGlobalDefaults(t *testing.T) {
+	t.Parallel()
+	ctx := testApex(t, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			updatable: false,
+			payload_fs_type: "erofs",
+		}
+
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`, android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
+		variables.DefaultApexPayloadErofsCompressor = proptools.StringPtr("lz")
+		variables.DefaultApexPayloadErofsCompressHints = proptools.StringPtr("sub/hints.txt")
+		variables.DefaultApexPayloadErofsPclusterSize = 4096
+	}))
+	apexRule := ctx.ModuleForTests(t, "myapex", "android_common_myapex").Rule("apexRule")
+	optFlags := apexRule.Args["opt_flags"]
+	android.AssertStringDoesContain(t, "--erofs_compressor", optFlags, "--erofs_compressor lz")
+	android.AssertStringDoesContain(t, "--erofs_compress_hints", optFlags, "--erofs_compress_hints sub/hints.txt")
+	android.AssertStringDoesContain(t, "--erofs_pcluster_size", optFlags, "--erofs_pcluster_size 4096")
+}
+
+func TestExt4ApexDoesntGetGlobalDefaults(t *testing.T) {
+	t.Parallel()
+	ctx := testApex(t, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			updatable: false,
+			payload_fs_type: "ext4",
+		}
+
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`, android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
+		variables.DefaultApexPayloadErofsCompressor = proptools.StringPtr("lz")
+		variables.DefaultApexPayloadErofsCompressHints = proptools.StringPtr("sub/hints.txt")
+		variables.DefaultApexPayloadErofsPclusterSize = 4096
+	}))
+	apexRule := ctx.ModuleForTests(t, "myapex", "android_common_myapex").Rule("apexRule")
+	optFlags := apexRule.Args["opt_flags"]
+	android.AssertStringDoesNotContain(t, "--erofs_compressor", optFlags, "--erofs_compressor lz")
+	android.AssertStringDoesNotContain(t, "--erofs_compress_hints", optFlags, "--erofs_compress_hints sub/hints.txt")
+	android.AssertStringDoesNotContain(t, "--erofs_pcluster_size", optFlags, "--erofs_pcluster_size 4096")
+}
+
+func TestErofsApexOverridingGlobalDefaults(t *testing.T) {
+	t.Parallel()
+	ctx := testApex(t, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			updatable: false,
+			payload_fs_type: "erofs",
+			erofs: {
+				compressor: "lz4hc",
+				compress_hints: "own_hints.txt",
+				pcluster_size: 16384,
+			},
+		}
+
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`, android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
+		variables.DefaultApexPayloadErofsCompressor = proptools.StringPtr("lz")
+		variables.DefaultApexPayloadErofsCompressHints = proptools.StringPtr("sub/hints.txt")
+		variables.DefaultApexPayloadErofsPclusterSize = 4096
+	}))
+	apexRule := ctx.ModuleForTests(t, "myapex", "android_common_myapex").Rule("apexRule")
+	optFlags := apexRule.Args["opt_flags"]
+	android.AssertStringDoesContain(t, "--erofs_compressor", optFlags, "--erofs_compressor lz4hc")
+	android.AssertStringDoesContain(t, "--erofs_compress_hints", optFlags, "--erofs_compress_hints own_hints.txt")
+	android.AssertStringDoesContain(t, "--erofs_pcluster_size", optFlags, "--erofs_pcluster_size 16384")
 }
 
 func TestPrebuiltStubNoinstall(t *testing.T) {

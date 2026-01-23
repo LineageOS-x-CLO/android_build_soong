@@ -538,7 +538,11 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		installs = append(installs, ip)
 		p.installDirPaths = append(p.installDirPaths, baseInstallDirPath)
 	} else {
-		ctx.PropertyErrorf("src", "missing prebuilt source file")
+		if ctx.Config().AllowMissingDependencies() {
+			ctx.AddMissingDependencies([]string{"missing_prebuilt_source_file"})
+		} else {
+			ctx.PropertyErrorf("src", "missing prebuilt source file")
+		}
 		return
 	}
 
@@ -599,7 +603,7 @@ func (ip *installProperties) addInstallRules(ctx android.ModuleContext, validati
 	// This ensures that outputFilePath has the correct name for others to
 	// use, as the source file may have a different name.
 	ctx.Build(pctx, android.BuildParams{
-		Rule:        android.Cp,
+		Rule:        android.CpRule,
 		Output:      ip.outputFilePath,
 		Input:       ip.sourceFilePath,
 		Validations: validations,

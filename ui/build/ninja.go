@@ -52,7 +52,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 	// translates it to the soong_ui status output, displaying real-time
 	// progress of the build.
 	fifo := filepath.Join(config.OutDir(), ".ninja_fifo")
-	nr := status.NewNinjaReader(ctx, ctx.Status.StartTool(), fifo)
+	nr := status.NewNinjaReader(ctx, ctx.Status.StartTool(), fifo, ctx.SigNumFunc)
 	defer nr.Close()
 
 	var executable string
@@ -161,6 +161,11 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 		}
 	}
 	args = append(args, ninjaArgs...)
+
+	// TODO(jihoonkang): Remove this check once non-ninja executors start supporting action sandboxing
+	if config.IsActionSandboxedBuild() && config.ninjaCommand != NINJA_NINJA {
+		ctx.Fatalf("Action sandboxing is not supported for %s, set SOONG_NINJA=ninja", config.ninjaCommand)
+	}
 
 	if config.keepGoing != 1 {
 		args = append(args, "-k", strconv.Itoa(config.keepGoing))

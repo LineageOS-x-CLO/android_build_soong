@@ -220,9 +220,7 @@ func Banner(config Config, make_vars map[string]string) string {
 		fmt.Fprintf(b, "SOONG_ONLY=%t\n", make_vars["PRODUCT_SOONG_ONLY"] == "true")
 	}
 
-	if config.incrementalBuildActions {
-		fmt.Fprintf(b, "SOONG_INCREMENTAL_ANALYSIS=%v\n", config.incrementalBuildActions)
-	}
+	fmt.Fprintf(b, "SOONG_INCREMENTAL_ANALYSIS=%t\n", config.incrementalBuildActions)
 
 	fmt.Fprint(b, "============================================")
 
@@ -400,12 +398,9 @@ func runMakeProductConfig(ctx Context, config Config) {
 
 	ctx.Metrics.SetSoongOnly(config.soongOnlyRequested)
 
-	// Enable incremental analysis by default.  Allow disabling it with env variable.
-	if env.IsEnvTrue("SOONG_INCREMENTAL_ANALYSIS") {
-		config.incrementalBuildActions = true
-	} else if env.IsFalse("SOONG_INCREMENTAL_ANALYSIS") {
-		config.incrementalBuildActions = false
-	} else if makeVars["RELEASE_SOONG_INCREMENTAL_ANALYSIS"] == "true" {
+	// Enable incremental analysis by default if requested by the build flag, unless it
+	// was set explicitly in the environment.
+	if !config.incrementalBuildActionsSetInEnv && makeVars["RELEASE_SOONG_INCREMENTAL_ANALYSIS"] == "true" {
 		config.incrementalBuildActions = true
 	}
 

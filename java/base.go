@@ -558,6 +558,12 @@ type Module struct {
 	// list of unique .java and .kt source files
 	uniqueSrcFiles android.Paths
 
+	// list of .aidl source files
+	aidlSrcs android.Paths
+
+	// list of .proto source files
+	protoSrcs android.Paths
+
 	// list of srcjars that was passed to javac
 	compiledSrcJars android.Paths
 
@@ -754,7 +760,7 @@ func (j *Module) provideHiddenAPIPropertyInfo(ctx android.ModuleContext) {
 	hiddenAPIInfo.extractFlagFilesFromProperties(ctx, &j.deviceProperties.HiddenAPIFlagFileProperties)
 
 	// Populate with package rules from the properties.
-	hiddenAPIInfo.extractPackageRulesFromProperties(&j.deviceProperties.HiddenAPIPackageProperties)
+	hiddenAPIInfo.extractPackageRulesFromProperties(ctx, &j.deviceProperties.HiddenAPIPackageProperties)
 
 	android.SetProvider(ctx, hiddenAPIPropertyInfoProvider, hiddenAPIInfo)
 }
@@ -1282,6 +1288,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 	}
 	if hasSrcExt(srcFiles.Strings(), ".proto") {
 		flags = protoFlags(ctx, &j.properties, &j.protoProperties, flags)
+		j.protoSrcs = srcFiles.FilterByExt(".proto")
 	}
 
 	kotlinCommonSrcFiles := android.PathsForModuleSrcExcludes(ctx, j.properties.Common_srcs, j.properties.Exclude_common_srcs)
@@ -1290,6 +1297,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 	}
 
 	aidlSrcs := srcFiles.FilterByExt(".aidl")
+	j.aidlSrcs = aidlSrcs
 	flags.aidlFlags, flags.aidlDeps = j.aidlFlags(ctx, deps.aidlPreprocess, deps.aidlIncludeDirs, aidlSrcs)
 
 	nonGeneratedSrcJars := srcFiles.FilterByExt(".srcjar")
@@ -1889,7 +1897,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 		if stub, _ := moduleStubLinkType(j); stub {
 			copiedJar := android.PathForModuleOut(ctx, "combined", jarName)
 			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.Cp,
+				Rule:   android.CpRule,
 				Input:  jars[0],
 				Output: copiedJar,
 			})
@@ -1980,7 +1988,7 @@ func (j *Module) compile(ctx android.ModuleContext) *JavaInfo {
 		inputFile := outputFile
 		packageCheckOutputFile := android.PathForModuleOut(ctx, "package-check", jarName)
 		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.Cp,
+			Rule:   android.CpRule,
 			Input:  inputFile,
 			Output: packageCheckOutputFile,
 			// Make sure that any dependency on the output file will cause ninja to run the package check
@@ -2576,6 +2584,15 @@ func (j *Module) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo)
 		dpInfo.Jars = append(dpInfo.Jars, j.headerJarFile.String())
 	}
 	dpInfo.Srcs = append(dpInfo.Srcs, j.expandIDEInfoCompiledSrcs...)
+	dpInfo.Aidl_srcs = append(dpInfo.Aidl_srcs, j.aidlSrcs.Strings()...)
+	if len(j.protoSrcs) > 0 {
+		dpInfo.Proto = &android.ProtoIdeInfo{
+			Srcs:                  j.protoSrcs.Strings(),
+			Type:                  proptools.String(j.protoProperties.Proto.Type),
+			CanonicalPathFromRoot: j.protoProperties.Proto.Canonical_path_from_root,
+			LocalIncludeDirs:      j.protoProperties.Proto.Local_include_dirs,
+		}
+	}
 	dpInfo.SrcJars = append(dpInfo.SrcJars, j.compiledSrcJars.Strings()...)
 	dpInfo.SrcJars = append(dpInfo.SrcJars, j.annoSrcJars.Strings()...)
 	dpInfo.Deps = append(dpInfo.Deps, j.CompilerDeps()...)

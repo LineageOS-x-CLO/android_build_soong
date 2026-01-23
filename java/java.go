@@ -569,6 +569,12 @@ type dependencyTag struct {
 	installable bool
 }
 
+type excludeFromVisibilityEnforcementDependencyTag struct {
+	dependencyTag
+}
+
+func (e excludeFromVisibilityEnforcementDependencyTag) ExcludeFromVisibilityEnforcement() {}
+
 var _ android.InstallNeededDependencyTag = (*dependencyTag)(nil)
 
 func (d dependencyTag) InstallDepNeeded() bool {
@@ -642,23 +648,24 @@ var (
 	composeEmbeddablePluginTag = dependencyTag{name: "compose-embeddable-plugin", toolchain: true}
 	composePluginTag           = dependencyTag{name: "compose-plugin", toolchain: true}
 	proguardRaiseTag           = dependencyTag{name: "proguard-raise"}
-	certificateTag             = dependencyTag{name: "certificate"}
-	headerJarOverrideTag       = dependencyTag{name: "header-jar-override"}
-	instrumentationForTag      = dependencyTag{name: "instrumentation_for"}
-	extraLintCheckTag          = dependencyTag{name: "extra-lint-check", toolchain: true}
-	jniLibTag                  = dependencyTag{name: "jnilib", runtimeLinked: true}
-	r8LibraryJarTag            = dependencyTag{name: "r8-libraryjar", runtimeLinked: true}
-	traceReferencesTag         = dependencyTag{name: "trace-references"}
-	syspropPublicStubDepTag    = dependencyTag{name: "sysprop public stub"}
-	javaApiContributionTag     = dependencyTag{name: "java-api-contribution"}
-	aconfigDeclarationTag      = dependencyTag{name: "aconfig-declaration"}
-	jniInstallTag              = dependencyTag{name: "jni install", runtimeLinked: true, installable: true}
-	usesLibReqTag              = makeUsesLibraryDependencyTag(dexpreopt.AnySdkVersion, false)
-	usesLibOptTag              = makeUsesLibraryDependencyTag(dexpreopt.AnySdkVersion, true)
-	usesLibCompat28OptTag      = makeUsesLibraryDependencyTag(28, true)
-	usesLibCompat29ReqTag      = makeUsesLibraryDependencyTag(29, false)
-	usesLibCompat30OptTag      = makeUsesLibraryDependencyTag(30, true)
-	usesLibStagingTag          = usesLibStagingTagStruct{}
+	//TODO(b/465840743): Enable the visibility enforcement for certificateTag dependency.
+	certificateTag          = excludeFromVisibilityEnforcementDependencyTag{dependencyTag{name: "certificate"}}
+	headerJarOverrideTag    = dependencyTag{name: "header-jar-override"}
+	instrumentationForTag   = dependencyTag{name: "instrumentation_for"}
+	extraLintCheckTag       = dependencyTag{name: "extra-lint-check", toolchain: true}
+	jniLibTag               = dependencyTag{name: "jnilib", runtimeLinked: true}
+	r8LibraryJarTag         = dependencyTag{name: "r8-libraryjar", runtimeLinked: true}
+	traceReferencesTag      = dependencyTag{name: "trace-references"}
+	syspropPublicStubDepTag = dependencyTag{name: "sysprop public stub"}
+	javaApiContributionTag  = dependencyTag{name: "java-api-contribution"}
+	aconfigDeclarationTag   = dependencyTag{name: "aconfig-declaration"}
+	jniInstallTag           = dependencyTag{name: "jni install", runtimeLinked: true, installable: true}
+	usesLibReqTag           = makeUsesLibraryDependencyTag(dexpreopt.AnySdkVersion, false)
+	usesLibOptTag           = makeUsesLibraryDependencyTag(dexpreopt.AnySdkVersion, true)
+	usesLibCompat28OptTag   = makeUsesLibraryDependencyTag(28, true)
+	usesLibCompat29ReqTag   = makeUsesLibraryDependencyTag(29, false)
+	usesLibCompat30OptTag   = makeUsesLibraryDependencyTag(30, true)
+	usesLibStagingTag       = usesLibStagingTagStruct{}
 )
 
 // A list of tags for deps used for compiling a module.
@@ -1688,6 +1695,10 @@ type testProperties struct {
 
 	// Install the test into a folder named for the module in all test suites.
 	Per_testcase_directory *bool
+
+	// Whether to include a static aconfig pb as a test resource. If the pb is included and a
+	// flag is read-only, tests read the flag value from the static pb.
+	Enable_static_aconfig_pb *bool
 }
 
 type hostTestProperties struct {
@@ -1981,6 +1992,12 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Host_common_data)...)
 	j.data = append(j.data, android.PathsForModuleSrc(ctx, j.testProperties.Host_first_data)...)
 
+	if Bool(j.testProperties.Enable_static_aconfig_pb) {
+		if pb := getCombinedAconfigProtoFile(ctx); pb != nil {
+			j.extraResources = append(j.extraResources, pb)
+		}
+	}
+
 	j.extraTestConfigs = android.PathsForModuleSrc(ctx, j.testProperties.Test_options.Extra_test_configs)
 
 	ctx.VisitDirectDepsProxyWithTag(dataNativeBinsTag, func(dep android.ModuleProxy) {
@@ -2006,7 +2023,7 @@ func (j *Test) generateAndroidBuildActionsWithConfig(ctx android.ModuleContext, 
 			}
 			relocatedLib := android.PathForModuleOut(ctx, "relocated").Join(ctx, relPath)
 			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.Cp,
+				Rule:   android.CpRule,
 				Input:  sharedLibInfo.SharedLibrary,
 				Output: relocatedLib,
 			})
@@ -2759,18 +2776,15 @@ func (al *ApiLibrary) sortApiFilesByApiScope(ctx android.ModuleContext, srcFiles
 	return srcFilesInfo
 }
 
-var validstubsType = []StubsType{Everything, Runtime, Exportable}
-
 func (al *ApiLibrary) validateProperties(ctx android.ModuleContext) {
 	if al.properties.Stubs_type == nil {
 		ctx.ModuleErrorf("java_api_library module type must specify stubs_type property.")
 	} else {
-		al.stubsType = StringToStubsType(proptools.String(al.properties.Stubs_type))
-	}
-
-	if !android.InList(al.stubsType, validstubsType) {
-		ctx.PropertyErrorf("stubs_type", "%s is not a valid stubs_type property value. "+
-			"Must be one of %s.", proptools.String(al.properties.Stubs_type), validstubsType)
+		stubsType, err := StringToStubsType(proptools.String(al.properties.Stubs_type))
+		if err != nil {
+			ctx.PropertyErrorf("stubs_type", err.Error())
+		}
+		al.stubsType = stubsType
 	}
 }
 
@@ -2881,7 +2895,7 @@ func (al *ApiLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		al.addValidation(ctx, cmd, al.validationPaths)
 	}
 
-	generateRevertAnnotationArgs(ctx, cmd, al.stubsType, al.aconfigProtoFiles)
+	generateMetalavaFlagConfigArgs(ctx, cmd, al.stubsType, al.aconfigProtoFiles)
 
 	al.stubsSrcJar = android.PathForModuleOut(ctx, "metalava", ctx.ModuleName()+"-"+"stubs.srcjar")
 	al.stubsJarWithoutStaticLibs = android.PathForModuleOut(ctx, "metalava", "stubs.jar")
@@ -3600,6 +3614,7 @@ var _ android.IDEInfo = (*Import)(nil)
 // Collect information for opening IDE project files in java/jdeps.go.
 func (j *Import) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	dpInfo.Jars = append(dpInfo.Jars, j.combinedImplementationFile.String())
+	dpInfo.Imported_jars = append(dpInfo.Imported_jars, android.PathsForModuleSrc(ctx, j.properties.Jars).Strings()...)
 }
 
 var _ android.PrebuiltInterface = (*Import)(nil)
@@ -3738,7 +3753,7 @@ func (j *DexImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		rule.Build("uncompress_dex", "uncompress dex")
 	} else {
 		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.Cp,
+			Rule:   android.CpRule,
 			Input:  inputJar,
 			Output: dexOutputFile,
 		})
@@ -4107,4 +4122,36 @@ func setExtraJavaInfo(ctx android.ModuleContext, module android.Module, javaInfo
 		}
 		maps.Copy(javaInfo.KSnapshotFiles, ksc.JarToSnapshotMap())
 	}
+}
+
+func getCombinedAconfigProtoFile(ctx android.ModuleContext) android.Path {
+	var aconfigProtoFiles android.Paths
+	ctx.VisitDirectDepsProxyWithTag(staticLibTag, func(dep android.ModuleProxy) {
+		if provider, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
+			aconfigProtoFiles = append(aconfigProtoFiles, provider.AconfigIntermediateCacheOutputPaths...)
+		}
+	})
+	ctx.VisitDirectDepsProxyWithTag(libTag, func(dep android.ModuleProxy) {
+		if provider, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
+			aconfigProtoFiles = append(aconfigProtoFiles, provider.AconfigIntermediateCacheOutputPaths...)
+		}
+	})
+
+	if len(aconfigProtoFiles) > 0 {
+		combinedAconfigProtoFile := android.PathForModuleOut(ctx, "aconfig.pb")
+		rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
+		rule.Command().
+			BuiltTool("aconfig").
+			Text("dump-cache").
+			Flag("--dedup").
+			Flag("--format").
+			Text("protobuf").
+			FlagForEachInput("--cache ", aconfigProtoFiles).
+			FlagWithOutput("--out ", combinedAconfigProtoFile)
+
+		rule.Build("combine-aconfig-protos", "combine aconfig protos")
+
+		return combinedAconfigProtoFile
+	}
+	return nil
 }

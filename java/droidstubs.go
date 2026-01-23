@@ -78,21 +78,17 @@ type StubsType int
 
 const (
 	Everything StubsType = iota
-	Runtime
 	Exportable
-	Unavailable
 )
 
 func (s StubsType) String() string {
 	switch s {
 	case Everything:
 		return "everything"
-	case Runtime:
-		return "runtime"
 	case Exportable:
 		return "exportable"
 	default:
-		return ""
+		panic("Unsupported StubsType for String")
 	}
 }
 
@@ -107,16 +103,16 @@ func (s StubsType) OutputTagPrefix() string {
 	}
 }
 
-func StringToStubsType(s string) StubsType {
+var validStubsType = []StubsType{Everything, Exportable}
+
+func StringToStubsType(s string) (StubsType, error) {
 	switch strings.ToLower(s) {
 	case Everything.String():
-		return Everything
-	case Runtime.String():
-		return Runtime
+		return Everything, nil
 	case Exportable.String():
-		return Exportable
+		return Exportable, nil
 	default:
-		return Unavailable
+		return Everything, fmt.Errorf("%s is not a valid stubs type, must be one of %s", s, validStubsType)
 	}
 }
 
@@ -907,20 +903,27 @@ func addOptionalApiSurfaceToCmd(cmd *android.RuleBuilderCommand, apiSurface *str
 	}
 }
 
-// Pass flagged apis related flags to metalava. When aconfig_declarations property is not
-// defined for a module, simply revert all flagged apis annotations. If aconfig_declarations
-// property is defined, apply transformations and only revert the flagged apis that are not
-// enabled via release configurations and are not specified in aconfig_declarations
-func generateRevertAnnotationArgs(ctx android.ModuleContext, cmd *android.RuleBuilderCommand, stubsType StubsType, aconfigFlagsPaths android.Paths) {
+// Pass aconfig flags to Metalava. Filters the flags in aconfigFlagsPaths for
+// the stubsType and then transforms them into a Metalava config file.
+//
+// If no flags are passed to Metalava then it will assume all flags are kept.
+// This is needed for StubsType.Everything which is used to generate the checked
+// in signature files and the stub libraries against which the platform is
+// built.
+//
+// Any `*/READ_WRITE` flags that are passed to Metalava will keep the API as the
+// API may be available (depending on the state of the flag) at runtime. In that
+// case it is the caller's responsibility to check that the flag is enabled. The
+// associated `@FlaggedApi` annotations are kept as Android Lint will use them
+// to enforce that the caller checks the state of the flag before calling.
+func generateMetalavaFlagConfigArgs(ctx android.ModuleContext, cmd *android.RuleBuilderCommand, stubsType StubsType, aconfigFlagsPaths android.Paths) {
 	var filterArgs string
+	var overrideArgs string
 	switch stubsType {
 	// No flagged apis specific flags need to be passed to metalava when generating
 	// everything stubs
 	case Everything:
-		return
-
-	case Runtime:
-		filterArgs = "--filter='state:ENABLED+permission:READ_ONLY' --filter='permission:READ_WRITE'"
+		overrideArgs = "--override-flag-state=ENABLED --override-flag-permission=READ_WRITE"
 
 	case Exportable:
 		// When the build flag RELEASE_EXPORT_RUNTIME_APIS is set to true, apis marked with
@@ -952,10 +955,13 @@ func generateRevertAnnotationArgs(ctx android.ModuleContext, cmd *android.RuleBu
 	})
 
 	ctx.Build(pctx, android.BuildParams{
-		Rule:        generateMetalavaRevertAnnotationsRule,
+		Rule:        generateMetalavaFlagConfigRule,
 		Input:       releasedFlagsFile,
 		Output:      metalavaFlagsConfigFile,
 		Description: fmt.Sprintf("%s metalava flags config", stubsType),
+		Args: map[string]string{
+			"args": overrideArgs,
+		},
 	})
 
 	cmd.FlagWithInput("--config-file ", metalavaFlagsConfigFile)
@@ -1009,6 +1015,8 @@ func (d *Droidstubs) commonMetalavaStubCmd(ctx android.ModuleContext, rule *andr
 	for _, o := range d.Javadoc.properties.Out {
 		cmd.ImplicitOutput(android.PathForModuleGen(ctx, o))
 	}
+
+	generateMetalavaFlagConfigArgs(ctx, cmd, params.stubConfig.stubsType, params.stubConfig.deps.aconfigProtoFiles)
 
 	return cmd
 }
@@ -1278,8 +1286,6 @@ func (d *Droidstubs) optionalStubCmd(ctx android.ModuleContext, params stubsComm
 	}
 
 	cmd := d.commonMetalavaStubCmd(ctx, rule, params)
-
-	generateRevertAnnotationArgs(ctx, cmd, params.stubConfig.stubsType, params.stubConfig.deps.aconfigProtoFiles)
 
 	if params.stubConfig.doApiLint {
 		// Pass the lint baseline file as an input to resolve the lint errors.

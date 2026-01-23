@@ -163,9 +163,29 @@ var preDeps = []RegisterMutatorFunc{
 var postDeps = []RegisterMutatorFunc{
 	registerPathDepsMutator,
 	RegisterPrebuiltsPostDepsMutators,
-	RegisterVisibilityRuleEnforcer,
 	registerNeverallowMutator,
-	RegisterOverridePostDepsMutators,
+
+	// Mutators for override/overridable modules. All the fun happens in these functions.
+	// It is critical to keep them in this order and not put any order mutators between them.
+	// We group Override and Visibility logic in this anonymous function to enforce that atomicity
+	// and prevent accidental reordering or injections during registration.
+	func(ctx RegisterMutatorsContext) {
+		RegisterOverrideDepsPostDepsMutators(ctx)
+
+		// The VisibilityRuleEnforcer must run before PrebuiltPostDepsMutator and
+		// replaceDepsOnOverridingModuleMutator.
+		// Visibility checks are strictly enforced on direct dependencies only.
+		// If run later, the mutators might mistakenly check visibility on
+		// transitive dependencies that have been promoted.
+		RegisterVisibilityRuleEnforcer(ctx)
+
+		// Because overridableModuleDepsMutator is run after PrebuiltPostDepsMutator,
+		// prebuilt's ReplaceDependencies doesn't affect to those deps added by
+		// overridable properties. By running PrebuiltPostDepsMutator again after
+		// overridableModuleDepsMutator, deps via overridable properties
+		// can be replaced with prebuilts.
+		RegisterReplaceDepsPostDepsMutators(ctx)
+	},
 }
 
 var postApex = []RegisterMutatorFunc{}
@@ -241,6 +261,10 @@ type BottomUpMutatorContext interface {
 	//
 	// This method will pause until the new dependencies have had the current mutator called on them.
 	AddFarVariationDependencies([]blueprint.Variation, blueprint.DependencyTag, ...string) []ModuleProxy
+
+	// Adds dependencies to the Soong defined host tool modules. This should be called
+	// to utilize the tool in [RuleBuilderCommand.BuiltTool].
+	AddHostToolDependencies(...string)
 
 	// ReplaceDependencies finds all the variants of the module with the specified name, then
 	// replaces all dependencies onto those variants with the current variant of this module.
@@ -551,6 +575,10 @@ func (b *bottomUpMutatorContext) AddFarVariationDependencies(variations []bluepr
 	}
 
 	return bpModuleProxiesToModuleProxies(b.bp.AddFarVariationDependencies(variations, tag, names...))
+}
+
+func (b *bottomUpMutatorContext) AddHostToolDependencies(tools ...string) {
+	b.AddFarVariationDependencies(b.Config().BuildOSTarget.Variations(), HostToolDepTag, tools...)
 }
 
 func (b *bottomUpMutatorContext) ReplaceDependencies(name string) {

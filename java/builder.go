@@ -62,7 +62,9 @@ var (
 	// Removes all outputs of inc-javac rule
 	javacIncClean = pctx.AndroidStaticRule("javac-inc-partialcompileclean",
 		blueprint.RuleParams{
-			Command:         `rm -rf "${srcJarDir}" "${outDir}" "${annoDir}" "${annoSrcJar}" "${builtOut}"`,
+			Command2: blueprint.NewCommand(
+				android.Rm, ` -rf "${srcJarDir}" "${outDir}" "${annoDir}" "${annoSrcJar}" "${builtOut}"`,
+			),
 			SandboxDisabled: true,
 		}, "srcJarDir", "outDir", "annoDir", "annoSrcJar", "builtOut",
 	)
@@ -427,14 +429,15 @@ var (
 
 	writeCombinedProguardFlagsFileRule = pctx.AndroidStaticRule("writeCombinedProguardFlagsFileRule",
 		blueprint.RuleParams{
-			Command: `rm -f $out && ` +
-				`for f in $in; do ` +
-				` echo  && ` +
-				` echo "# including $$f" && ` +
-				` cat $$f; ` +
+			Command2: blueprint.NewCommand(
+				android.Rm, ` -f $out && `,
+				`for f in $in; do `,
+				android.Echo, ` && `,
+				android.Echo, ` "# including $$f" && `,
+				android.Cat, ` $$f; `,
 				`done > $out`,
+			),
 			SandboxDisabled: true,
-			CommandDeps: []string{"Rm-deps", "Echo-deps", "Cat-deps"},
 		})
 
 	gatherReleasedFlaggedApisRule = pctx.AndroidStaticRule("gatherReleasedFlaggedApisRule",
@@ -450,12 +453,12 @@ var (
 			SandboxDisabled: true,
 		}, "flags_path", "filter_args")
 
-	generateMetalavaRevertAnnotationsRule = pctx.AndroidStaticRule("generateMetalavaRevertAnnotationsRule",
+	generateMetalavaFlagConfigRule = pctx.AndroidStaticRule("generateMetalavaFlagConfigRule",
 		blueprint.RuleParams{
-			Command:         `${aconfig-to-metalava-flags} ${in} > ${out}`,
+			Command:         `${aconfig-to-metalava-flags} ${args} ${in} > ${out}`,
 			CommandDeps:     []string{"${aconfig-to-metalava-flags}"},
 			SandboxDisabled: true,
-		})
+		}, "args")
 
 	generateApiXMLRule = pctx.AndroidStaticRule("generateApiXMLRule",
 		blueprint.RuleParams{

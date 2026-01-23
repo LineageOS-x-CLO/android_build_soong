@@ -143,6 +143,22 @@ type apexBundleProperties struct {
 	// The type of filesystem to use. Either 'ext4', 'f2fs' or 'erofs'. Default 'ext4'.
 	Payload_fs_type *string
 
+	// Override default settings (PRODUCT_DEFAULT_APEX_PAYLOAD_EROFS_*) for EROFS APEX
+	Erofs struct {
+		// Compressor and Compression level passed to mkfs.erofs. e.g. (lz4hc,9)
+		// Please see external/erofs-utils/README for complete documentation.
+		// Use "none" for uncompressed EROFS image.
+		// Default: (defined in apexer)
+		Compressor *string
+
+		// Used as --compress-hints for mkfs.erofs
+		Compress_hints *string `android:"path"`
+
+		// Specify the size of compress physical cluster in bytes
+		// Default: (defined in apexer)
+		Pcluster_size *int64
+	}
+
 	// For telling the APEX to ignore special handling for system libraries such as bionic.
 	// Default is false.
 	Ignore_system_library_special_case *bool
@@ -754,6 +770,12 @@ type dependencyTag struct {
 	installable bool
 }
 
+type excludeFromVisibilityEnforcementDependencyTag struct {
+	dependencyTag
+}
+
+func (e excludeFromVisibilityEnforcementDependencyTag) ExcludeFromVisibilityEnforcement() {}
+
 func (d *dependencyTag) SdkMemberType(_ android.ModuleContext, _ android.ModuleProxy) android.SdkMemberType {
 	return d.memberType
 }
@@ -785,11 +807,12 @@ var (
 	fsTag          = &dependencyTag{name: "filesystem", payload: true}
 	bcpfTag        = &dependencyTag{name: "bootclasspathFragment", payload: true, sourceOnly: true, memberType: java.BootclasspathFragmentSdkMemberType}
 	// The dexpreopt artifacts of apex system server jars are installed onto system image.
-	sscpfTag         = &dependencyTag{name: "systemserverclasspathFragment", payload: true, sourceOnly: true, memberType: java.SystemServerClasspathFragmentSdkMemberType, installable: true}
-	compatConfigTag  = &dependencyTag{name: "compatConfig", payload: true, sourceOnly: true, memberType: java.CompatConfigSdkMemberType}
-	javaLibTag       = &dependencyTag{name: "javaLib", payload: true}
-	jniLibTag        = &dependencyTag{name: "jniLib", payload: true}
-	keyTag           = &dependencyTag{name: "key"}
+	sscpfTag        = &dependencyTag{name: "systemserverclasspathFragment", payload: true, sourceOnly: true, memberType: java.SystemServerClasspathFragmentSdkMemberType, installable: true}
+	compatConfigTag = &dependencyTag{name: "compatConfig", payload: true, sourceOnly: true, memberType: java.CompatConfigSdkMemberType}
+	javaLibTag      = &dependencyTag{name: "javaLib", payload: true}
+	jniLibTag       = &dependencyTag{name: "jniLib", payload: true}
+	//TODO(b/465840743): Enable the visibility enforcement for keyTag dependency.
+	keyTag           = &excludeFromVisibilityEnforcementDependencyTag{dependencyTag{name: "key"}}
 	prebuiltTag      = &dependencyTag{name: "prebuilt", payload: true}
 	rroTag           = &dependencyTag{name: "rro", payload: true}
 	sharedLibTag     = &dependencyTag{name: "sharedLib", payload: true}
@@ -2008,7 +2031,9 @@ func (a *apexBundle) depVisitor(vctx *visitorContext, ctx android.ModuleContext,
 					src := ps.SrcPath()
 					dir := path.Dir(ps.RelPathInPackage())
 					makeModuleName := strings.ReplaceAll(filepath.Join(dir, src.Base()), "/", "_")
-					vctx.filesInfo = append(vctx.filesInfo, newApexFile(ctx, src, makeModuleName, dir, etc, child))
+					af := newApexFile(ctx, src, makeModuleName, dir, etc, child)
+					af.extraZip = ps.ExtraZip()
+					vctx.filesInfo = append(vctx.filesInfo, af)
 				}
 			} else {
 				ctx.PropertyErrorf("kernel_modules", "%q is not a prebuilt_kernel_modules module", depName)
@@ -2397,7 +2422,7 @@ func apexBootclasspathFragmentFiles(ctx android.ModuleContext, module android.Mo
 			// We need to copy the profile to a temporary path with the right filename because the apexer
 			// will take the filename as is.
 			ctx.Build(pctx, android.BuildParams{
-				Rule:   android.Cp,
+				Rule:   android.CpRule,
 				Input:  pathOnHost,
 				Output: tempPath,
 			})
