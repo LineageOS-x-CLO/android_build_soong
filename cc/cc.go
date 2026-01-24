@@ -2962,7 +2962,7 @@ func (c *Module) begin(ctx BaseModuleContext) {
 		c.sanitize.begin(ctx)
 	}
 	if c.coverage != nil {
-		c.coverage.begin(ctx)
+		c.coverage.begin(ctx, c.Binary(), c.testModule || c.testLibrary())
 	}
 	if c.afdo != nil {
 		c.afdo.begin(ctx)
