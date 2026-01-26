@@ -650,8 +650,8 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 				ninjaArgs = []string{
 					"--log_dir", sisoLogDir, // for glog, e.g. siso.*INFO*
 					"ninja",
+					"-d", "keepdepfile",
 					// TODO: implement these features, or remove them.
-					//"-d", "keepdepfile",
 					//"-d", "stats",
 					//"-o", "usesphonyoutputs=yes",
 					//"-o", "preremoveoutputs=yes",
@@ -662,7 +662,6 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
 					//"--remote_jobs", strconv.Itoa(config.RemoteParallel()),
 					"--frontend_file", fifo,
 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
-					"--log_dir", sisoLogDir,
 				}
 				if value := config.SisoConfigDir(); value != "" {
 					value = createSisoConfigDir(ctx, config, value)
