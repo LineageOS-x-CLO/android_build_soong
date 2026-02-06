@@ -15,6 +15,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"android/soong/android"
@@ -117,6 +118,7 @@ var (
 const (
 	linuxGccVersion   = "4.8.3"
 	linuxGlibcVersion = "2.17"
+	linuxGccTriple    = "x86_64-linux"
 )
 
 func init() {
@@ -133,7 +135,7 @@ func init() {
 	pctx.SourcePathVariable("LinuxGccRoot",
 		"prebuilts/gcc/linux-x86/host/x86_64-linux-glibc${LinuxGlibcVersion}-${ShortLinuxGccVersion}")
 
-	pctx.StaticVariable("LinuxGccTriple", "x86_64-linux")
+	pctx.StaticVariable("LinuxGccTriple", linuxGccTriple)
 
 	pctx.StaticVariable("LinuxCflags", strings.Join(linuxCflags, " "))
 	pctx.StaticVariable("LinuxLdflags", strings.Join(linuxLdflags, " "))
@@ -366,4 +368,20 @@ func init() {
 	registerToolchainFactory(android.Linux, android.X86_64, linuxGlibcX8664ToolchainFactory)
 	registerToolchainFactory(android.LinuxMusl, android.X86, linuxMuslX86ToolchainFactory)
 	registerToolchainFactory(android.LinuxMusl, android.X86_64, linuxMuslX8664ToolchainFactory)
+}
+
+func LinuxGccRoot() string {
+	shortVersion := linuxGlibcVersion
+	if p := strings.Split(linuxGccVersion, "."); len(p) > 2 {
+		shortVersion = strings.Join(p[:2], ".")
+	}
+	return fmt.Sprintf("prebuilts/gcc/linux-x86/host/x86_64-linux-glibc%s-%s", linuxGlibcVersion, shortVersion)
+}
+
+func LinuxGccVersion() string {
+	return linuxGccVersion
+}
+
+func LinuxGccTriple() string {
+	return linuxGccTriple
 }
