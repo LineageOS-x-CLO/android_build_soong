@@ -1291,6 +1291,7 @@ func TestHwasan(t *testing.T) {
 		},
 		sdk_version: "current",
 			stl: "c++_shared",
+			split_all_variants: true,
 	}
 
 	cc_library_static {
@@ -1300,12 +1301,14 @@ func TestHwasan(t *testing.T) {
 		},
 		sdk_version: "current",
 			stl: "c++_shared",
+			split_all_variants: true,
 	}
 
 	cc_library_static {
 		name: "static_dep_no_hwaddress",
 		sdk_version: "current",
 			stl: "c++_shared",
+			split_all_variants: true,
 	}
 `
 
