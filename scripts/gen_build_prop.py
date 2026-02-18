@@ -161,14 +161,10 @@ def generate_common_build_props(args):
   # Allow optional assignments for ARC forward-declarations (b/249168657)
   # TODO: Remove any tag-related inconsistencies once the goals from
   # go/arc-android-sigprop-changes have been achieved.
-  ######
-  # Temporarily disable the system fingerprint until the allow listing pipeline
-  # is updated. (b/445722292)
-  # TODO (b/437803910): Enable the system fingerprint again.
-  # if partition == "system":
-  #   print(f"ro.{partition}.build.fingerprint?={config['BuildSystemFingerprint']}")
-  # else:
-  print(f"ro.{partition}.build.fingerprint?={config['BuildFingerprint']}")
+  if partition == "system":
+    print(f"ro.{partition}.build.fingerprint?={config['BuildSystemFingerprint']}")
+  else:
+    print(f"ro.{partition}.build.fingerprint?={config['BuildFingerprint']}")
   print(f"ro.{partition}.build.id?={config['BuildId']}")
   print(f"ro.{partition}.build.uuid?={config['BuildUUID']}")
   print(f"ro.{partition}.build.tags?={config['BuildVersionTags']}")
@@ -404,7 +400,6 @@ def append_additional_vendor_props(args):
   props.append(f"ro.bionic.2nd_arch={config['DeviceSecondaryArch']}")
   props.append(f"ro.bionic.2nd_cpu_variant={config['DeviceSecondaryCpuVariantRuntime']}")
 
-  props.append(f"persist.sys.dalvik.vm.lib.2=libart.so")
   props.append(f"dalvik.vm.isa.{config['DeviceArch']}.variant={config['Dex2oatTargetCpuVariantRuntime']}")
   if config["Dex2oatTargetInstructionSetFeatures"]:
     props.append(f"dalvik.vm.isa.{config['DeviceArch']}.features={config['Dex2oatTargetInstructionSetFeatures']}")

@@ -35,6 +35,7 @@ var (
 		NAME                   string
 		PACKAGE                string
 		MODULE_TYPE            string
+		BASE_MODULE_TYPE       string
 		OS                     string
 		ARCH                   string
 		IS_PRIMARY_ARCH        string
@@ -60,10 +61,17 @@ var (
 		// module_type=license_kind
 		LK_CONDITIONS string
 		LK_URL        string
+
+		// module_type=cipd_package
+		CIPD_VERSION string
+
+		// module_type=prebuilt modules
+		CIPD_SRC string
 	}{
 		"name",
 		"package",
 		"module_type",
+		"base_module_type",
 		"os",
 		"arch",
 		"is_primary_arch",
@@ -86,6 +94,10 @@ var (
 
 		"lk_conditions",
 		"lk_url",
+
+		"cipd_version",
+
+		"cipd_src",
 	}
 
 	// A constant list of all property names in compliance metadata
@@ -94,6 +106,7 @@ var (
 		ComplianceMetadataProp.NAME,
 		ComplianceMetadataProp.PACKAGE,
 		ComplianceMetadataProp.MODULE_TYPE,
+		ComplianceMetadataProp.BASE_MODULE_TYPE,
 		ComplianceMetadataProp.OS,
 		ComplianceMetadataProp.ARCH,
 		ComplianceMetadataProp.VARIANT,
@@ -123,6 +136,10 @@ var (
 		// module_type=license_kind
 		ComplianceMetadataProp.LK_CONDITIONS,
 		ComplianceMetadataProp.LK_URL,
+		// module_type=cipd_package
+		ComplianceMetadataProp.CIPD_VERSION,
+		// module_type=prebuilt modules
+		ComplianceMetadataProp.CIPD_SRC,
 	}
 )
 
@@ -216,6 +233,14 @@ func (c *ComplianceMetadataInfo) AddBuiltFiles(files ...string) {
 	c.SetListValue(ComplianceMetadataProp.BUILT_FILES, builtFiles)
 }
 
+func (c *ComplianceMetadataInfo) SetCipdSrc(ctx ModuleContext, src string) {
+	if module, tag := SrcIsModuleWithTag(src); module != "" {
+		if ctx.OtherModuleType(GetModuleProxyFromPathDep(ctx, module, tag)) == "cipd_package" {
+			c.SetStringValue(ComplianceMetadataProp.CIPD_SRC, module)
+		}
+	}
+}
+
 func (c *ComplianceMetadataInfo) getStringValue(propertyName string) string {
 	if !slices.Contains(COMPLIANCE_METADATA_PROPS, propertyName) {
 		panic(fmt.Errorf("Unknown metadata property: %s.", propertyName))
@@ -235,6 +260,12 @@ func buildComplianceMetadataProvider(ctx *moduleContext, m *ModuleBase) *Complia
 	complianceMetadataInfo.SetStringValue(ComplianceMetadataProp.NAME, m.Name())
 	complianceMetadataInfo.SetStringValue(ComplianceMetadataProp.PACKAGE, ctx.ModuleDir())
 	complianceMetadataInfo.SetStringValue(ComplianceMetadataProp.MODULE_TYPE, ctx.ModuleType())
+
+	if baseTypePtr := m.baseProperties.Soong_config_base_module_type; baseTypePtr != nil {
+		if baseType := *baseTypePtr; baseType != "" {
+			complianceMetadataInfo.SetStringValue(ComplianceMetadataProp.BASE_MODULE_TYPE, baseType)
+		}
+	}
 
 	switch ctx.ModuleType() {
 	case "license":

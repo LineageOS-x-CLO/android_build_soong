@@ -16,6 +16,7 @@ package cipd
 
 import (
 	"fmt"
+	"strings"
 
 	"android/soong/android"
 
@@ -25,6 +26,10 @@ import (
 
 func init() {
 	RegisterCipdComponents(android.InitRegistrationContext)
+
+	pctx.VariableConfigMethod("PrebuiltOS", android.Config.PrebuiltOS)
+	pctx.SourcePathVariable("cipd", "prebuilts/cipd/${PrebuiltOS}/cipd")
+	pctx.HostBinToolVariable("soong_zip", "soong_zip")
 }
 
 func RegisterCipdComponents(ctx android.RegistrationContext) {
@@ -33,10 +38,6 @@ func RegisterCipdComponents(ctx android.RegistrationContext) {
 
 var (
 	pctx = android.NewPackageContext("android/cipd")
-
-	PrebuiltOS = pctx.VariableConfigMethod("PrebuiltOS", android.Config.PrebuiltOS)
-	_          = pctx.SourcePathVariable("cipd", "prebuilts/cipd/${PrebuiltOS}/cipd")
-	soong_zip  = pctx.HostBinToolVariable("soong_zip", "soong_zip")
 
 	// CIPD can be expensive for network and disk i/o, so limit the number of concurrent
 	// fetches.
@@ -47,24 +48,26 @@ var (
 	// set up in build/soong/ui/build/cipd.go.
 	cipdExportRule = pctx.AndroidStaticRule("cipd_export",
 		blueprint.RuleParams{
-			Command:         "rm -rf $root && $cipd export -ensure-file $in -root $root",
+			Command:         "rm -rf $root && $cipd export -log-level warning  -ensure-file $in -root $root",
 			CommandDeps:     []string{"$cipd"},
+			Description:     "CIPD export $package@$version",
 			Pool:            cipdPool,
 			SandboxDisabled: true,
-		}, "root",
+		}, "root", "package", "version",
 	)
 
 	soongZipFromDirRule = pctx.AndroidStaticRule("soong_zip_from_dir",
 		blueprint.RuleParams{
 			Command: "rm -rf $tempZipDir && " +
-				"$cipd export -ensure-file $in -root $tempZipDir && " +
+				"$cipd export -log-level warning -ensure-file $in -root $tempZipDir && " +
 				"$soong_zip -write_if_changed -o $out -C $tempZipDir -D $tempZipDir && " +
 				"rm -rf $tempZipDir",
 			CommandDeps:     []string{"$cipd", "$soong_zip"},
+			Description:     "CIPD export and zip $package@$version",
 			Pool:            cipdPool,
 			Restat:          true,
 			SandboxDisabled: true,
-		}, "tempZipDir",
+		}, "tempZipDir", "package", "version",
 	)
 )
 
@@ -102,10 +105,32 @@ func (p *cipdPackageModule) GenerateAndroidBuildActions(ctx android.ModuleContex
 		resolvedVersionsFile.OutputPath)
 
 	ensureContents := fmt.Sprintf("$ResolvedVersions %s\n", resolvedVersionsTxt)
-	version := p.properties.Version.Get(ctx)
-	packageProp := p.properties.Package.Get(ctx)
-	ensureContents += fmt.Sprintf("%s %s\n", packageProp.Get(), version.Get())
-	android.WriteFileRule(ctx, ensureFile, ensureContents)
+	var errors []string
+	var packageVal, version string
+	packageProp, err := p.properties.Package.GetOrErr(ctx)
+	if err == nil {
+		packageVal = packageProp.GetOrDefault("")
+		if len(packageVal) == 0 {
+			errors = append(errors, "package property is empty")
+		}
+	} else {
+		errors = append(errors, err.Error())
+	}
+	versionProp, err := p.properties.Version.GetOrErr(ctx)
+	if err == nil {
+		version = versionProp.GetOrDefault("")
+		if len(version) == 0 {
+			errors = append(errors, "version property is empty")
+		}
+	} else {
+		errors = append(errors, err.Error())
+	}
+	if len(errors) > 0 {
+		android.ErrorRule(ctx, ensureFile, p.Name()+": "+strings.Join(errors, ","))
+	} else {
+		ensureContents += fmt.Sprintf("%s %s\n", packageVal, version)
+		android.WriteFileRule(ctx, ensureFile, ensureContents)
+	}
 
 	if len(p.properties.Files) > 0 {
 		outFiles := make(android.WritablePaths, len(p.properties.Files))
@@ -119,7 +144,9 @@ func (p *cipdPackageModule) GenerateAndroidBuildActions(ctx android.ModuleContex
 			Outputs:  outFiles,
 			Implicit: resolvedVersionsFile,
 			Args: map[string]string{
-				"root": outPath.String(),
+				"root":    outPath.String(),
+				"package": packageVal,
+				"version": version,
 			},
 		})
 		ctx.SetOutputFiles(outFiles.Paths(), "")
@@ -136,9 +163,13 @@ func (p *cipdPackageModule) GenerateAndroidBuildActions(ctx android.ModuleContex
 		Implicit: resolvedVersionsFile,
 		Args: map[string]string{
 			"tempZipDir": tempZipDir.String(),
+			"package":    packageVal,
+			"version":    version,
 		},
 	})
 	ctx.SetOutputFiles(android.Paths{outputZipFile}, ".zip")
+
+	ctx.ComplianceMetadataInfo().SetStringValue(android.ComplianceMetadataProp.CIPD_VERSION, version)
 }
 
 // cipd_package module installs the given CIPD package version.

@@ -440,7 +440,9 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	filename := proptools.String(p.properties.Filename)
 	filenameFromSrc := proptools.Bool(p.properties.Filename_from_src)
 	if srcProperty.IsPresent() {
-		p.sourceFilePaths = android.PathsForModuleSrc(ctx, []string{srcProperty.Get()})
+		src := srcProperty.Get()
+		p.sourceFilePaths = android.PathsForModuleSrc(ctx, []string{src})
+
 		// If the source was not found, set a fake source path to
 		// support AllowMissingDependencies executions.
 		if len(p.sourceFilePaths) == 0 {
@@ -476,6 +478,10 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		}
 		installs = append(installs, ip)
 		p.installDirPaths = append(p.installDirPaths, baseInstallDirPath)
+
+		// Build compliance metadata
+		ctx.ComplianceMetadataInfo().SetCipdSrc(ctx, src)
+
 	} else if len(srcsProperty) > 0 {
 		p.usedSrcsProperty = true
 		if filename != "" {
@@ -495,6 +501,7 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		if len(dstsProperty) > 0 && len(p.sourceFilePaths) != len(dstsProperty) {
 			ctx.PropertyErrorf("dsts", "Must have one entry in dsts per source file")
 		}
+
 		for i, src := range p.sourceFilePaths {
 			var filename string
 			var installDirPath android.InstallPath
@@ -519,6 +526,14 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			installs = append(installs, ip)
 			p.installDirPaths = append(p.installDirPaths, installDirPath)
 		}
+
+		// Build compliance metadata
+		// Iterate through srcs and set CIPD_SRC accordingly.
+		// Note: only the metadata for the last cipd source will be counted.
+		for _, s := range srcsProperty {
+			ctx.ComplianceMetadataInfo().SetCipdSrc(ctx, s)
+		}
+
 	} else if ctx.Config().AllowMissingDependencies() {
 		// If no srcs was set and AllowMissingDependencies is enabled then
 		// mark the module as missing dependencies and set a fake source path

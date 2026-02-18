@@ -56,6 +56,7 @@ func registerBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("avb_gen_vbmeta_image", avbGenVbmetaImageFactory)
 	ctx.RegisterModuleType("avb_gen_vbmeta_image_defaults", avbGenVbmetaImageDefaultsFactory)
 	ctx.RegisterModuleType("bootimg", BootimgFactory)
+	ctx.RegisterModuleType("raw_binary", rawBinaryFactory)
 }
 
 func registerMutators(ctx android.RegistrationContext) {
@@ -281,6 +282,12 @@ type FilesystemProperties struct {
 	// Whether to enable per-file compression in f2fs
 	Enable_compression *bool
 
+	// F2FS block size which must be the same with the page size
+	F2fs_blocksize *int64
+
+	// Whether to format f2fs in a way that supports packed ssa feature
+	Support_f2fs_packedssa *bool
+
 	// Whether this partition is not supported by flashall.
 	// If true, this partition will not be included in the `updatedpackage` dist artifact.
 	No_flashall *bool
@@ -456,7 +463,7 @@ func (f *filesystem) DepsMutator(ctx android.BottomUpMutatorContext) {
 	for _, partition := range f.properties.Include_files_of {
 		ctx.AddDependency(ctx.Module(), interPartitionInstallDependencyTag, partition)
 	}
-	// TODO: remove this once android_system_image_prebuilt is fully implemented.
+	// TODO: remove this once android_filesystem_prebuilt is fully implemented.
 	if f.properties.Prebuilt_module_name != nil {
 		ctx.AddDependency(ctx.Module(), android.PrebuiltDepTag, proptools.String(f.properties.Prebuilt_module_name))
 	}
@@ -814,6 +821,10 @@ func (f *filesystem) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			prebuiltInfo = fsProvider
 		} else {
 			ctx.PropertyErrorf("prebuilt_module_name", "must provide filesystem")
+		}
+
+		if apexKeysInfo, ok := android.OtherModuleProvider(ctx, m, ApexKeyPathInfoProvider); ok {
+			android.SetProvider(ctx, ApexKeyPathInfoProvider, apexKeysInfo)
 		}
 	})
 
@@ -1460,6 +1471,13 @@ func (f *filesystem) buildPropFile(ctx android.ModuleContext) (android.Path, and
 			// https://source.corp.google.com/h/googleplex-android/platform/build/+/88b1c67239ca545b11580237242774b411f2fed9:core/Makefile;l=2294;drc=ea8f34bc1d6e63656b4ec32f2391e9d54b3ebb6b;bpv=1;bpt=0
 			addStr("f2fs_sparse_flag", "-S")
 		}
+		if f.properties.F2fs_blocksize != nil {
+			addStr("f2fs_blocksize", strconv.FormatInt(*f.properties.F2fs_blocksize, 10))
+		}
+		if proptools.BoolDefault(f.properties.Support_f2fs_packedssa, false) {
+			addStr("f2fs_packed_ssa", "1")
+		}
+
 	case ext4Type:
 		// build_image.py implicitly adds some properties when mount point is not specified.
 		// Make built prop files does not specify mount_point, but Soong built prop files do.
@@ -1566,11 +1584,20 @@ func (f *filesystem) buildPropFileForMiscInfo(ctx android.ModuleContext) android
 		if f.properties.Erofs.Block_size != nil {
 			addStr(f.partitionName()+"_erofs_blocksize", fmt.Sprintf("%d", *f.properties.Erofs.Block_size))
 		}
+		if proptools.Bool(f.properties.Erofs.Enable_dedupe) {
+			addStr("erofs_enable_dedupe", "true")
+		}
 
 	case f2fsType:
 		if proptools.BoolDefault(f.properties.F2fs.Sparse, true) {
 			// https://source.corp.google.com/h/googleplex-android/platform/build/+/88b1c67239ca545b11580237242774b411f2fed9:core/Makefile;l=2294;drc=ea8f34bc1d6e63656b4ec32f2391e9d54b3ebb6b;bpv=1;bpt=0
 			addStr("f2fs_sparse_flag", "-S")
+		}
+		if f.properties.F2fs_blocksize != nil {
+			addStr("f2fs_blocksize", strconv.FormatInt(*f.properties.F2fs_blocksize, 10))
+		}
+		if proptools.BoolDefault(f.properties.Support_f2fs_packedssa, false) {
+			addStr("f2fs_packed_ssa", "1")
 		}
 	}
 
@@ -1624,7 +1651,12 @@ func (f *filesystem) getAvbAddHashtreeFooterArgs(ctx android.ModuleContext) (str
 	// We're not going to add BuildFingerPrintFile as a dep. If it changed, it's likely because
 	// the build number changed, and we don't want to trigger rebuilds solely based on the build
 	// number.
-	if ctx.Module().UseGenericConfig() {
+	if f.partitionName() == "system" {
+		// The system partition has product-agnostic fingerprint.
+		avb_add_hashtree_footer_args += fmt.Sprintf(" --prop com.android.build.%s.fingerprint:{CONTENTS_OF:%s}", f.partitionName(), ctx.Config().BuildSystemFingerprintFile(ctx))
+		deps = append(deps, ctx.Config().BuildSystemFingerprintFile(ctx))
+	} else if ctx.Module().UseGenericConfig() {
+		// If non-system partition wants to use generic config, use thumbprint instead.
 		avb_add_hashtree_footer_args += fmt.Sprintf(" --prop com.android.build.%s.fingerprint:{CONTENTS_OF:%s}", f.partitionName(), ctx.Config().BuildThumbprintFile(ctx))
 		deps = append(deps, ctx.Config().BuildThumbprintFile(ctx))
 	} else {
@@ -1633,6 +1665,8 @@ func (f *filesystem) getAvbAddHashtreeFooterArgs(ctx android.ModuleContext) (str
 	}
 	if f.properties.Security_patch != nil && proptools.String(f.properties.Security_patch) != "" {
 		avb_add_hashtree_footer_args += fmt.Sprintf(" --prop com.android.build.%s.security_patch:%s", f.partitionName(), proptools.String(f.properties.Security_patch))
+	} else if android.InList(f.partitionName(), []string{"system", "system_ext", "product"}) {
+		avb_add_hashtree_footer_args += fmt.Sprintf(" --prop com.android.build.%s.security_patch:%s", f.partitionName(), ctx.Config().PlatformSecurityPatch())
 	}
 	return avb_add_hashtree_footer_args, deps
 }
@@ -2137,6 +2171,9 @@ func addAutogeneratedRroDeps(ctx android.BottomUpMutatorContext) {
 
 		// Auto generated rros of apps that are installed via apex are not installed in make.
 		// Only add the dependencies for non-apex variants.
+		if android.OtherModuleProviderOrDefault(ctx, child, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform {
+			return true
+		}
 		if apexInfo, ok := android.OtherModuleProvider(ctx, child, android.ApexInfoProvider); !ok || apexInfo.ApexVariationName == "" {
 			if vendorOverlay := overlayModuleName(child, "vendor"); ctx.OtherModuleExists(vendorOverlay) && thisPartition == "vendor" {
 				ctx.AddFarVariationDependencies(nil, dependencyTagWithVisibilityEnforcementBypass, vendorOverlay)

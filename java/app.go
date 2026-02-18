@@ -39,6 +39,7 @@ import (
 func init() {
 	RegisterAppBuildComponents(android.InitRegistrationContext)
 	pctx.HostBinToolVariable("ModifyAllowlistCmd", "modify_permissions_allowlist")
+	pctx.HostBinToolVariable("ModifyPreinstallAllowlistCmd", "modify_preinstall_allowlist")
 }
 
 var (
@@ -46,6 +47,13 @@ var (
 		blueprint.RuleParams{
 			Command:         "${ModifyAllowlistCmd} $in $packageName $out",
 			CommandDeps:     []string{"${ModifyAllowlistCmd}"},
+			SandboxDisabled: true,
+		}, "packageName")
+
+	modifyPreinstallAllowlist = pctx.AndroidStaticRule("modifyPreinstallAllowlist",
+		blueprint.RuleParams{
+			Command:         "${ModifyPreinstallAllowlistCmd} $in $packageName $out",
+			CommandDeps:     []string{"${ModifyPreinstallAllowlistCmd}"},
 			SandboxDisabled: true,
 		}, "packageName")
 )
@@ -88,6 +96,7 @@ type AppInfo struct {
 	JacocoInfo                    JacocoInfo
 	Certificate                   Certificate
 	PrivAppAllowlist              android.OptionalPath
+	PreinstallAllowlist           android.OptionalPath
 	OverriddenManifestPackageName *string
 	ApkCertsFile                  android.Path
 	JniLibs                       []jniLib
@@ -175,6 +184,9 @@ type appProperties struct {
 	// Specifies the file that contains the allowlist for this app.
 	Privapp_allowlist *string `android:"path"`
 
+	// Specifies the file that contains the preinstall allowlist for this app. To be used by apps in apexes.
+	Preinstall_allowlist *string `android:"path"`
+
 	// If set, create an RRO package which contains only resources having PRODUCT_CHARACTERISTICS
 	// and install the RRO package to /product partition, instead of passing --product argument
 	// to aapt2. Default is false.
@@ -248,6 +260,8 @@ type AndroidApp struct {
 
 	privAppAllowlist android.OptionalPath
 
+	preinstallAllowlist android.OptionalPath
+
 	requiredModuleNames []string
 }
 
@@ -273,6 +287,10 @@ func (a *AndroidApp) JniCoverageOutputs() android.Paths {
 
 func (a *AndroidApp) PrivAppAllowlist() android.OptionalPath {
 	return a.privAppAllowlist
+}
+
+func (a *AndroidApp) PreinstallAllowlist() android.OptionalPath {
+	return a.preinstallAllowlist
 }
 
 var _ AndroidLibraryDependency = (*AndroidApp)(nil)
@@ -360,6 +378,12 @@ func (a *AndroidApp) OverridablePropertiesDepsMutator(ctx android.BottomUpMutato
 	cert := android.SrcIsModule(a.getCertString(ctx))
 	if cert != "" {
 		ctx.AddDependency(ctx.Module(), certificateTag, cert)
+	}
+
+	if preinstallAllowlist := a.appProperties.Preinstall_allowlist; preinstallAllowlist != nil {
+		if moduleName := android.SrcIsModule(*preinstallAllowlist); moduleName != "" {
+			ctx.AddDependency(ctx.Module(), nil, moduleName)
+		}
 	}
 
 	if a.appProperties.Privapp_allowlist != nil && !Bool(a.appProperties.Privileged) {
@@ -516,13 +540,13 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.requiredModuleNames = a.getRequiredModuleNames(ctx)
 
 	if a.dexer.proguardDictionary.Valid() {
-		android.SetProvider(ctx, ProguardProvider, ProguardInfo{
+		android.SetProvider(ctx, ProguardProvider, ProguardInfos{{
 			ModuleName:         android.ModuleNameWithPossibleOverride(ctx),
 			Class:              "APPS",
 			ProguardDictionary: a.dexer.proguardDictionary.Path(),
 			ProguardUsageZip:   a.dexer.proguardUsageZip.Path(),
 			ClassesJar:         a.implementationAndResourcesJar,
-		})
+		}})
 	}
 }
 
@@ -992,6 +1016,36 @@ func (a *AndroidApp) createPrivappAllowlist(ctx android.ModuleContext) android.P
 	return outPath
 }
 
+func (a *AndroidApp) createPreinstallAllowlist(ctx android.ModuleContext) android.Path {
+	if a.appProperties.Preinstall_allowlist == nil {
+		return nil
+	}
+
+	isOverrideApp := a.GetOverriddenBy() != ""
+	if !isOverrideApp {
+		// if this is not an override, we don't need to rewrite the existing preinstall allowlist
+		return android.PathForModuleSrc(ctx, *a.appProperties.Preinstall_allowlist)
+	}
+
+	packageNameProp := a.overridableAppProperties.Package_name.Get(ctx)
+	if packageNameProp.IsEmpty() {
+		ctx.PropertyErrorf("preinstall_allowlist", "package_name must be set to use preinstall_allowlist")
+	}
+
+	packageName := packageNameProp.Get()
+	fileName := "preinstall_allowlist_" + packageName + ".xml"
+	outPath := android.PathForModuleOut(ctx, fileName)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   modifyPreinstallAllowlist,
+		Input:  android.PathForModuleSrc(ctx, *a.appProperties.Preinstall_allowlist),
+		Output: outPath,
+		Args: map[string]string{
+			"packageName": packageName,
+		},
+	})
+	return outPath
+}
+
 func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	a.jacocoInfo.Class = "APPS"
 
@@ -1094,7 +1148,8 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	rotationMinSdkVersion := String(a.overridableAppProperties.RotationMinSdkVersion)
 
-	CreateAndSignAppPackage(ctx, packageFile, packageResources, jniJarFile, dexJarFile, certificates, apkDeps, v4SignatureFile, lineageFile, rotationMinSdkVersion)
+	CreateAndSignAppPackage(ctx, packageFile, packageResources, jniJarFile, dexJarFile, certificates, apkDeps,
+		v4SignatureFile, lineageFile, rotationMinSdkVersion, a.MinSdkVersion(ctx))
 	a.outputFile = packageFile
 	if v4SigningRequested {
 		a.extraOutputFiles = append(a.extraOutputFiles, v4SignatureFile)
@@ -1127,7 +1182,8 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 		if v4SigningRequested {
 			v4SignatureFile = android.PathForModuleOut(ctx, a.installApkName+"_"+split.suffix+".apk.idsig")
 		}
-		CreateAndSignAppPackage(ctx, packageFile, split.path, nil, nil, certificates, apkDeps, v4SignatureFile, lineageFile, rotationMinSdkVersion)
+		CreateAndSignAppPackage(ctx, packageFile, split.path, nil, nil, certificates, apkDeps,
+			v4SignatureFile, lineageFile, rotationMinSdkVersion, a.MinSdkVersion(ctx))
 		a.extraOutputFiles = append(a.extraOutputFiles, packageFile)
 		if v4SigningRequested {
 			a.extraOutputFiles = append(a.extraOutputFiles, v4SignatureFile)
@@ -1147,6 +1203,12 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 		complianceMetadataInfo.AddBuiltFiles(a.privAppAllowlist.Path().String())
 	}
 
+	preinstallAllowlist := a.createPreinstallAllowlist(ctx)
+	if preinstallAllowlist != nil {
+		a.preinstallAllowlist = android.OptionalPathForPath(preinstallAllowlist)
+		complianceMetadataInfo.AddBuiltFiles(a.preinstallAllowlist.Path().String())
+	}
+
 	// Install the app package.
 	shouldInstallAppPackage := (Bool(a.Module.properties.Installable) || ctx.Host()) && apexInfo.IsForPlatform()
 	if shouldInstallAppPackage {
@@ -1154,6 +1216,11 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 			allowlistInstallPath := android.PathForModuleInstall(ctx, "etc", "permissions")
 			allowlistInstallFilename := a.installApkName + ".xml"
 			ctx.InstallFile(allowlistInstallPath, allowlistInstallFilename, a.privAppAllowlist.Path())
+		}
+		if a.preinstallAllowlist.Valid() {
+			allowlistInstallPath := android.PathForModuleInstall(ctx, "etc", "sysconfig")
+			allowlistInstallFilename := a.installApkName + "_preinstall_allowlist.xml"
+			ctx.InstallFile(allowlistInstallPath, allowlistInstallFilename, a.preinstallAllowlist.Path())
 		}
 
 		var extraInstalledPaths android.InstallPaths
@@ -1290,7 +1357,7 @@ func (a *AndroidApp) setOutputFiles(ctx android.ModuleContext) {
 	ctx.SetOutputFiles([]android.Path{a.outputFile}, ".apk")
 	ctx.SetOutputFiles([]android.Path{a.exportPackage}, ".export-package.apk")
 	ctx.SetOutputFiles([]android.Path{a.aapt.manifestPath}, ".manifest.xml")
-	setOutputFiles(ctx, a.Library.Module)
+	setOutputFiles(ctx, &a.Library.Module)
 }
 
 type appDepsInterface interface {
@@ -1541,7 +1608,6 @@ func AndroidAppFactory() android.Module {
 
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
 	module.Module.dexProperties.Optimize.ShrinkByDefault = true
-	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Instrument = true
 	module.Module.properties.Supports_static_instrumentation = true
@@ -2005,7 +2071,6 @@ func AndroidTestHelperAppFactory() android.Module {
 	// TODO(b/192032291): Disable by default after auditing downstream usage.
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
 	module.Module.dexProperties.Optimize.Ignore_library_extends_program = proptools.BoolPtr(true)
-	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Installable = proptools.BoolPtr(true)
 	module.appProperties.Use_embedded_native_libs = proptools.BoolPtr(true)
@@ -2379,6 +2444,7 @@ type androidApp interface {
 	Certificate() Certificate
 	BaseModuleName() string
 	PrivAppAllowlist() android.OptionalPath
+	PreinstallAllowlist() android.OptionalPath
 }
 
 var _ androidApp = (*AndroidApp)(nil)
@@ -2392,6 +2458,7 @@ func setCommonAppInfo(appInfo *AppInfo, m androidApp) {
 	appInfo.JacocoInfo = m.JacocoInfo()
 	appInfo.Certificate = m.Certificate()
 	appInfo.PrivAppAllowlist = m.PrivAppAllowlist()
+	appInfo.PreinstallAllowlist = m.PreinstallAllowlist()
 }
 
 // @auto-generate: gob

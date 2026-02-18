@@ -21,7 +21,9 @@ import (
 
 type TestConfigReducer struct {
 	// Args
-	Top string
+	Top       string
+	Projects  string
+	Filepaths string
 
 	// Parsed Data
 	ExecutionPlans        map[string]*protos.TestExecutionPlan

@@ -177,6 +177,10 @@ func (p propagateRROEnforcementTransitionMutator) Split(ctx android.BaseModuleCo
 	return []string{""}
 }
 
+func (p propagateRROEnforcementTransitionMutator) SplitOnDemand(ctx android.BaseModuleContext) []string {
+	return nil
+}
+
 func (p propagateRROEnforcementTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
 	// Non-static dependencies are not involved in RRO and always use the empty variant.
 	if ctx.DepTag() != staticLibTag {
@@ -1177,7 +1181,7 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 
 func (a *AndroidLibrary) setOutputFiles(ctx android.ModuleContext) {
 	ctx.SetOutputFiles([]android.Path{a.aarFile}, ".aar")
-	setOutputFiles(ctx, a.Library.Module)
+	setOutputFiles(ctx, &a.Library.Module)
 }
 
 func (a *AndroidLibrary) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
@@ -1731,11 +1735,11 @@ func (a *AARImport) addKSnapshot(ctx android.ModuleContext, jarFile android.Path
 	}
 }
 
-func (a AARImport) JarToSnapshotMap() map[string]android.Path {
+func (a *AARImport) JarToSnapshotMap() map[string]android.Path {
 	return a.kSnapshotFiles
 }
 
-var _ KSnapshotContainer = AARImport{}
+var _ KSnapshotContainer = (*AARImport)(nil)
 
 func (a *AARImport) HeaderJars() android.Paths {
 	return android.Paths{a.headerJarFile}

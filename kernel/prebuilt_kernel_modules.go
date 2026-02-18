@@ -93,7 +93,7 @@ type PrebuiltKernelModulesProperties struct {
 	// some such as srcs will be merged with the contents / information from the zip file.
 	Zip struct {
 		// The zip file containing the kernel modules and other files like the load/blocklist files.
-		Src *string
+		Src *string `android:"path,arch_variant"`
 
 		// The name of the load file inside of the zip file. Only modules listed in it will
 		// be installed.
@@ -112,10 +112,10 @@ type PrebuiltKernelModulesProperties struct {
 	}
 }
 
-func (p *PrebuiltKernelModulesProperties) resolve(ctx android.ModuleContext) common.PrebuiltKernelModulesPropertiesJSON {
+func (p *PrebuiltKernelModulesProperties) resolve(ctx android.ModuleContext, command *android.RuleBuilderCommand) common.PrebuiltKernelModulesPropertiesJSON {
 	var systemDep *string
 	if p.System_dep != nil {
-		systemDep = proptools.StringPtr(android.PathForModuleSrc(ctx, *p.System_dep).String())
+		systemDep = proptools.StringPtr(command.PathForInputFromFile(android.PathForModuleSrc(ctx, *p.System_dep)))
 	}
 	var zip *string
 	if p.Zip.Src != nil {
@@ -161,7 +161,7 @@ func (pkm *prebuiltKernelModules) KernelVersion() string {
 }
 
 func (pkm *prebuiltKernelModules) DepsMutator(ctx android.BottomUpMutatorContext) {
-	ctx.AddHostToolDependencies("zipsync", "soong_zip")
+	ctx.AddHostToolDependencies("kernel_modules_builder", "zipsync", "soong_zip", "merge_zips", "depmod")
 }
 
 func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -176,23 +176,32 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 	if systemModulesZip.Valid() {
 		deps = append(deps, systemModulesZip.Path())
 	}
+	blocklistFile := android.OptionalPathForModuleSrc(ctx, pkm.properties.Blocklist_file)
+	if blocklistFile.Valid() {
+		deps = append(deps, blocklistFile.Path())
+	}
+	optionsFile := android.OptionalPathForModuleSrc(ctx, pkm.properties.Options_file)
+	if optionsFile.Valid() {
+		deps = append(deps, optionsFile.Path())
+	}
 	if proptools.String(pkm.properties.Zip.Src) != "" {
 		deps = append(deps, android.PathForModuleSrc(ctx, *pkm.properties.Zip.Src))
 	}
 
 	propsFile := android.PathForModuleOut(ctx, "props.json")
-	props := pkm.properties.resolve(ctx)
-	android.WriteFileRule(ctx, propsFile, props.ToJSON())
-
 	sboxDir := android.PathForModuleOut(ctx, "sbox")
 	sboxManifest := android.PathForModuleOut(ctx, "sbox.manifest")
 	loadFile := sboxDir.Join(ctx, "modules.load")
 	installsZip := sboxDir.Join(ctx, "installs.zip")
 	tempDir := sboxDir.Join(ctx, "temp")
 
-	builder := android.NewRuleBuilder(pctx, ctx).SandboxDisabled().Sbox(sboxDir, sboxManifest)
+	builder := android.NewRuleBuilder(pctx, ctx).
+		SandboxDisabled().
+		Sbox(sboxDir, sboxManifest)
 
 	llvmStrip := config.ClangPath(ctx, "bin/llvm-strip")
+	// llvm-strip is a symlink to llvm-objcopy
+	llvmObjcopy := config.ClangPath(ctx, "bin/llvm-objcopy")
 	llvmLib := config.ClangPath(ctx, "lib/x86_64-unknown-linux-gnu/libc++.so")
 
 	builder.Command().BuiltTool("kernel_modules_builder").
@@ -200,7 +209,10 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 		Flag("--zipsync").BuiltTool("zipsync").
 		Flag("--merge_zips").BuiltTool("merge_zips").
 		Flag("--depmod").BuiltTool("depmod").
-		Flag("--llvm-strip").Input(llvmStrip).Implicit(llvmLib).
+		Flag("--llvm-strip").Input(llvmStrip).Implicit(llvmLib).Implicit(llvmObjcopy).
+		// depmod needs libc++
+		// TODO: Get this from the depmod dep automatically
+		ImplicitTool(ctx.Config().HostCcSharedLibPath(ctx, "libc++")).
 		Input(propsFile).
 		Text(partition(ctx)).
 		Text(tempDir.String()).
@@ -208,6 +220,9 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 		Output(installsZip).
 		Implicits(deps)
 	builder.Build("zip_modules", "zip kernel modules")
+
+	props := pkm.properties.resolve(ctx, builder.Command())
+	android.WriteFileRule(ctx, propsFile, props.ToJSON())
 
 	installDir := android.PathForModuleInstall(ctx, "lib", "modules")
 	// Kernel module is installed to vendor_ramdisk/lib/modules regardless of product

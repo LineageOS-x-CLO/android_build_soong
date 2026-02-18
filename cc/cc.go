@@ -239,9 +239,10 @@ type LinkableInfo struct {
 	// CrateName returns the crateName for a Rust library
 	CrateName string
 	// DepFlags returns a slice of Rustc string flags
-	ExportedCrateLinkDirs []string
-	HasNonSystemVariants  bool
-	IsLlndk               bool
+	ExportedCrateLinkDirs     []string
+	ExportedCrateLinkDirsDeps []android.Path
+	HasNonSystemVariants      bool
+	IsLlndk                   bool
 	// True if the library is in the configs known NDK list.
 	IsNdk             bool
 	InVendorOrProduct bool
@@ -400,9 +401,10 @@ type Deps struct {
 // A struct which to collect flags for rlib dependencies
 // @auto-generate: gob
 type RustRlibDep struct {
-	LibPath   android.Path // path to the rlib
-	LinkDirs  []string     // flags required for dependency (e.g. -L flags)
-	CrateName string       // crateNames associated with rlibDeps
+	LibPath      android.Path   // path to the rlib
+	LinkDirs     []string       // flags required for dependency (e.g. -L flags)
+	LinkDirsDeps []android.Path // files in linkdirs to be used as implicit deps
+	CrateName    string         // crateNames associated with rlibDeps
 }
 
 func EqRustRlibDeps(a RustRlibDep, b RustRlibDep) bool {
@@ -501,12 +503,13 @@ type Flags struct {
 	Global          LocalOrGlobalFlags
 	NoOverrideFlags []string // Flags applied to the end of list of flags so they are not overridden
 
-	aidlFlags     []string // Flags that apply to aidl source files
-	rsFlags       []string // Flags that apply to renderscript source files
-	libFlags      []string // Flags to add libraries early to the link order
-	extraLibFlags []string // Flags to add libraries late in the link order after LdFlags
-	TidyFlags     []string // Flags that apply to clang-tidy
-	SAbiFlags     []string // Flags that apply to header-abi-dumper
+	aidlFlags     []string      // Flags that apply to aidl source files
+	aidlFlagsDeps android.Paths // Implicit deps of the flags in aidlFlags
+	rsFlags       []string      // Flags that apply to renderscript source files
+	libFlags      []string      // Flags to add libraries early to the link order
+	extraLibFlags []string      // Flags to add libraries late in the link order after LdFlags
+	TidyFlags     []string      // Flags that apply to clang-tidy
+	SAbiFlags     []string      // Flags that apply to header-abi-dumper
 
 	// Global include flags that apply to C, C++, and assembly source files
 	// These must be after any module include flags, which will be in CommonFlags.
@@ -856,7 +859,6 @@ type linker interface {
 	baseLinkerProps() BaseLinkerProperties
 
 	link(ctx ModuleContext, flags Flags, deps PathDeps, objs Objects) android.Path
-	appendLdflags([]string)
 	unstrippedOutputFilePath() android.Path
 	strippedAllOutputFilePath() android.Path
 
@@ -1383,7 +1385,7 @@ func (c *Module) CrateName() string {
 	panic(fmt.Errorf("CrateName called on non-Rust module: %q", c.BaseModuleName()))
 }
 
-func (c *Module) ExportedCrateLinkDirs() []string {
+func (c *Module) ExportedCrateLinkDirs() ([]string, android.Paths) {
 	panic(fmt.Errorf("ExportedCrateLinkDirs called on non-Rust module: %q", c.BaseModuleName()))
 }
 
@@ -2218,6 +2220,10 @@ func (c *Module) getSymbolInfo(ctx android.ModuleContext, t any, info *SymbolInf
 		info.Uninstallable = true
 	case *kernelHeadersDecorator:
 		c.getSymbolInfo(ctx, tt.libraryDecorator, info)
+	case *artlessDenylistDecorator:
+		c.getSymbolInfo(ctx, tt.libraryDecorator, info)
+	case *allArtlessDenylistsDecorator:
+		c.getSymbolInfo(ctx, tt.libraryDecorator, info)
 	}
 	return info
 }
@@ -2962,7 +2968,7 @@ func (c *Module) begin(ctx BaseModuleContext) {
 		c.sanitize.begin(ctx)
 	}
 	if c.coverage != nil {
-		c.coverage.begin(ctx)
+		c.coverage.begin(ctx, c.Binary(), c.testModule || c.testLibrary())
 	}
 	if c.afdo != nil {
 		c.afdo.begin(ctx)
@@ -3186,41 +3192,6 @@ func FilterNdkLibs(c LinkableInterface, config android.Config, list []string) (n
 	}
 	return nonvariantLibs, variantLibs
 
-}
-
-func rewriteLibsForApiImports(c LinkableInterface, libs []string, replaceList map[string]string, config android.Config) ([]string, []string) {
-	nonVariantLibs := []string{}
-	variantLibs := []string{}
-
-	for _, lib := range libs {
-		replaceLibName := GetReplaceModuleName(lib, replaceList)
-		if replaceLibName == lib {
-			// Do not handle any libs which are not in API imports
-			nonVariantLibs = append(nonVariantLibs, replaceLibName)
-		} else if c.UseSdk() && inList(replaceLibName, *getNDKKnownLibs(config)) {
-			variantLibs = append(variantLibs, replaceLibName)
-		} else {
-			nonVariantLibs = append(nonVariantLibs, replaceLibName)
-		}
-	}
-
-	return nonVariantLibs, variantLibs
-}
-
-func (c *Module) shouldUseApiSurface() bool {
-	if c.Os() == android.Android && c.Target().NativeBridge != android.NativeBridgeEnabled {
-		if GetImageVariantType(c) == vendorImageVariant || GetImageVariantType(c) == productImageVariant {
-			// LLNDK Variant
-			return true
-		}
-
-		if c.Properties.IsSdkVariant {
-			// NDK Variant
-			return true
-		}
-	}
-
-	return false
 }
 
 func (c *Module) DepsMutator(actx android.BottomUpMutatorContext) {
@@ -3901,7 +3872,12 @@ func (c *Module) depsToPaths(ctx android.ModuleContext) PathDeps {
 
 			case libDepTag.static():
 				if linkableInfo.RustLibraryInterface {
-					rlibDep := RustRlibDep{LibPath: linkFile.Path(), CrateName: linkableInfo.CrateName, LinkDirs: linkableInfo.ExportedCrateLinkDirs}
+					rlibDep := RustRlibDep{
+						LibPath:      linkFile.Path(),
+						CrateName:    linkableInfo.CrateName,
+						LinkDirs:     linkableInfo.ExportedCrateLinkDirs,
+						LinkDirsDeps: linkableInfo.ExportedCrateLinkDirsDeps,
+					}
 					depPaths.RustRlibDeps = append(depPaths.RustRlibDeps, rlibDep)
 					depPaths.IncludeDirs = append(depPaths.IncludeDirs, depExporterInfo.IncludeDirs...)
 					if libDepTag.wholeStatic {

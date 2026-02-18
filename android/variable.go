@@ -147,6 +147,7 @@ type variableProperties struct {
 		Eng struct {
 			Cflags   []string
 			Cppflags []string
+			Flags    []string
 			Lto      struct {
 				Never *bool
 			}
@@ -642,10 +643,6 @@ type PartitionQualifiedVariablesType struct {
 	BoardJournalSize            string `json:",omitempty"`
 	BoardPartitionReservedSize  string `json:",omitempty"`
 	BoardPartitionSize          string `json:",omitempty"`
-	BoardSquashfsBlockSize      string `json:",omitempty"`
-	BoardSquashfsCompressor     string `json:",omitempty"`
-	BoardSquashfsCompressorOpt  string `json:",omitempty"`
-	BoardSquashfsDisable4kAlign string `json:",omitempty"`
 	ProductBaseFsPath           string `json:",omitempty"`
 	ProductHeadroom             string `json:",omitempty"`
 	ProductVerityPartition      string `json:",omitempty"`
@@ -691,7 +688,6 @@ type PartitionVariables struct {
 
 	TargetUserimagesSparseExtDisabled      bool `json:",omitempty"`
 	TargetUserimagesSparseErofsDisabled    bool `json:",omitempty"`
-	TargetUserimagesSparseSquashfsDisabled bool `json:",omitempty"`
 	TargetUserimagesSparseF2fsDisabled     bool `json:",omitempty"`
 
 	BoardErofsCompressor           string `json:",omitempty"`
@@ -821,6 +817,7 @@ type PartitionVariables struct {
 	BoardKernelModulesZip                              string   `json:",omitempty"`
 	BoardKernelModulesZipExtraVendorKernelRamdiskLoads []string `json:",omitempty"`
 	BoardKernelModulesZipExtraVendorKernelModules      []string `json:",omitempty"`
+	BoardKernelModulesZipExtraBlocked16kModules        []string `json:",omitempty"`
 	BuildingSystemDlkmImage                            bool     `json:",omitempty"`
 	SystemKernelModules                                []string `json:",omitempty"`
 	SystemKernelBlocklistFile                          string   `json:",omitempty"`
@@ -855,6 +852,8 @@ type PartitionVariables struct {
 	ProductFsCasefold    string `json:",omitempty"`
 	ProductQuotaProjid   string `json:",omitempty"`
 	ProductFsCompression string `json:",omitempty"`
+	BoardF2fsBlockSize   string `json:",omitempty"`
+	BoardF2fsPackedSsa   string `json:",omitempty"`
 
 	ReleaseToolsExtensionDir string `json:",omitempty"`
 

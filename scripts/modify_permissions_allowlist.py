@@ -60,7 +60,7 @@ def main():
     with open(args.output, 'w') as output_file:
       doc.writexml(output_file, encoding='utf-8')
   except Exception as err:
-    print('error: ' + str(err), file=sys.stderr)
+    print('error: ' + repr(err), file=sys.stderr)
     sys.exit(-1)
 
 

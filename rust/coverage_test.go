@@ -28,10 +28,12 @@ func TestCoverageFlags(t *testing.T) {
 			name: "libfoo_cov",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
+			split_all_variants: true,
 		}
 		rust_binary {
 			name: "fizz_cov",
 			srcs: ["foo.rs"],
+			split_all_variants: true,
 		}
         rust_binary {
 			name: "buzzNoCov",
@@ -43,6 +45,7 @@ func TestCoverageFlags(t *testing.T) {
 			srcs: ["foo.rs"],
 			crate_name: "bar",
 			native_coverage: false,
+			split_all_variants: true,
 		}`)
 
 	// Make sure native_coverage: false isn't creating a coverage variant.
@@ -101,6 +104,7 @@ func TestCoverageDeps(t *testing.T) {
 		rust_binary {
 			name: "fizz",
 			srcs: ["foo.rs"],
+			split_all_variants: true,
 		}`)
 
 	fizz := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a_cov").Rule("rustc")

@@ -129,12 +129,16 @@ func dumpMakeVars(ctx Context, config Config, goals, vars []string, tmpDir strin
 	cmd.Stdout = &output
 	pipe, err := cmd.StderrPipe()
 	if err != nil {
-		ctx.Fatalln("Error getting output pipe for kati:", err)
+		return nil, fmt.Errorf("Error getting output pipe for kati: %s", err)
 	}
-	cmd.StartOrFatal()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
 	// TODO: error out when Stderr contains any content
 	status.KatiReader(tool, pipe)
-	cmd.WaitOrFatal()
+	if err := cmd.Wait(); err != nil {
+		return nil, err
+	}
 
 	ret := make(map[string]string, len(vars))
 	for _, line := range strings.Split(output.String(), "\n") {
@@ -378,7 +382,11 @@ func runMakeProductConfig(ctx Context, config Config) {
 	for _, k := range sisoStringVars {
 		config.SisoStringVars[k] = makeVars[k]
 	}
+	if config.IsActionSandboxedBuild() {
+		config.SisoStringVars["nsjail_path"] = config.PrebuiltBuildTool("nsjail")
+	}
 	config.SisoBoolVars = map[string]bool{
+		"use_rbe":      config.UseRBE(),
 		"use_reclient": config.UseRewrapper(),
 	}
 

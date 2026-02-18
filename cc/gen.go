@@ -16,6 +16,7 @@ package cc
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"android/soong/aidl_library"
@@ -103,7 +104,8 @@ func genYacc(ctx android.ModuleContext, rule *android.RuleBuilder, yaccFile andr
 		Flag("-d").
 		Flags(flags).
 		FlagWithOutput("--defines=", headerFile).
-		Flag("-o").Output(outFile).Input(yaccFile)
+		Flag("-o").Output(outFile).Input(yaccFile).
+		Implicits(ctx.GlobFilesOutsideModuleDir("prebuilts/build-tools/common/bison/**/*", nil))
 
 	return ret
 }
@@ -255,8 +257,11 @@ func genSources(
 	var yaccRule_ *android.RuleBuilder
 	yaccRule := func() *android.RuleBuilder {
 		if yaccRule_ == nil {
-			yaccRule_ = android.NewRuleBuilder(pctx, ctx).SandboxDisabled().Sbox(android.PathForModuleGen(ctx, "yacc"),
-				android.PathForModuleGen(ctx, "yacc.sbox.textproto"))
+			yaccRule_ = android.NewRuleBuilder(pctx, ctx).
+				SandboxDisabled().
+				Sbox(
+					android.PathForModuleGen(ctx, "yacc"),
+					android.PathForModuleGen(ctx, "yacc.sbox.textproto"))
 		}
 		return yaccRule_
 	}
@@ -294,16 +299,23 @@ func genSources(
 			generatedSources = append(generatedSources, ccFile)
 		case ".aidl":
 			if aidlRule == nil {
-				aidlRule = android.NewRuleBuilder(pctx, ctx).SandboxDisabled().Sbox(android.PathForModuleGen(ctx, "aidl"),
-					android.PathForModuleGen(ctx, "aidl.sbox.textproto"))
+				aidlRule = android.NewRuleBuilder(pctx, ctx).
+					SandboxDisabled().
+					Sbox(
+						android.PathForModuleGen(ctx, "aidl"),
+						android.PathForModuleGen(ctx, "aidl.sbox.textproto"))
 			}
 			baseDir := strings.TrimSuffix(srcFile.String(), srcFile.Rel())
+			flagDeps := slices.Concat(
+				buildFlags.aidlFlagsDeps,
+				ctx.GlobFilesOutsideModuleDir(filepath.Join(baseDir, "**/*.aidl"), nil),
+			)
 			cppFile, aidlHeaders := genAidl(
 				ctx,
 				aidlRule,
 				"aidl",
 				srcFile,
-				nil,
+				flagDeps,
 				buildFlags.aidlFlags+" -I"+baseDir,
 			)
 			srcFiles[i] = cppFile
@@ -337,7 +349,7 @@ func genSources(
 			aidlLibraryRule = android.NewRuleBuilder(pctx, ctx).SandboxDisabled().Sbox(
 				android.PathForModuleGen(ctx, "aidl_library"),
 				android.PathForModuleGen(ctx, "aidl_library.sbox.textproto"),
-			).SandboxInputs()
+			)
 		}
 		for _, aidlSrc := range aidlLibraryInfo.Srcs {
 			cppFile, aidlHeaders := genAidl(

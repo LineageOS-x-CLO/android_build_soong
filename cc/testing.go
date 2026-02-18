@@ -37,6 +37,8 @@ func RegisterRequiredBuildComponentsForTest(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("cc_genrule_defaults", genruleDefaultsFactory)
 	ctx.RegisterModuleType("ndk_library", NdkLibraryFactory)
 	ctx.RegisterModuleType("ndk_headers", NdkHeadersFactory)
+	ctx.RegisterModuleType("artless_denylist_stub", ArtlessDenylistFactory)
+	ctx.RegisterModuleType("all_artless_denylists", AllArtlessDenylistsFactory)
 }
 
 func GatherRequiredDepsForTest(oses ...android.OsType) string {
@@ -424,6 +426,10 @@ func commonDefaultModules() string {
 			name: "libprotobuf-cpp-lite",
 		}
 
+		cc_library_headers {
+			name: "liblog_headers",
+		}
+
 		ndk_library {
 			name: "libc",
 			first_version: "minimum",
@@ -601,6 +607,8 @@ var PrepareForTestWithCcBuildComponents = android.GroupFixturePreparers(
 
 		RegisterLlndkLibraryTxtType(ctx)
 	}),
+	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_SANITIZER_VARIANT_ON_DEMAND", "true"),
+	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_COV_VARIANT_ON_DEMAND", "true"),
 )
 
 // Preparer that will define default cc modules, e.g. standard prebuilt modules.

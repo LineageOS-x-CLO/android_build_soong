@@ -61,6 +61,9 @@ var (
 		"-Werror=bool-operation",
 		// Using __DATE__/__TIME__ causes build nondeterminism.
 		"-Werror=date-time",
+		// Bans format strings in printf-like functions that are not known at
+		// compile time and cannot be checked against their arguments.
+		"-Werror=format-security",
 		// Detects forgotten */& that usually cause a crash
 		"-Werror=int-conversion",
 		// Detects multi-character constants such as 'abcd', which have
@@ -187,9 +190,13 @@ var (
 		"-fdata-sections",
 		"-fno-short-enums",
 		"-funwind-tables",
-		"-fstack-protector-strong",
 		"-Wa,--noexecstack",
 		"-D_FORTIFY_SOURCE=3",
+
+		// Add stack canaries on every frame, checked on return.
+		// -fstack-clash-protection isn't supported in clang for ILP32,
+		// so that's in each of the LP64 architectures' configurations instead.
+		"-fstack-protector-strong",
 
 		// Bans classes that have virtual functions and a public non-virtual destructor.
 		// This potentially allows the class to be partially destroyed, causing memory
@@ -200,9 +207,6 @@ var (
 		"-Werror=address",
 		// Detects stuff like 'x++ = x++ * x++;', which has undefined effects.
 		"-Werror=sequence-point",
-		// Bans format strings in printf-like functions that are not known at
-		// compile time and cannot be checked against their arguments.
-		"-Werror=format-security",
 		"-nostdlibinc",
 	}
 
@@ -341,6 +345,10 @@ var (
 		"-Wno-default-const-init-var-unsafe",
 		"-Wno-preferred-type-bitfield-enum-conversion",
 		"-Wno-implicit-enum-enum-cast",
+		// New warnings to be fixed after clang-r584948
+		"-Wno-character-conversion", // http://b/452740154
+		// TODO: Disable this warning in external projects after switching clang.
+		"-Wno-error=uninitialized-const-pointer", // http://b/458489157
 
 		//Android T Vendor Compilation
 		"-Wno-reorder-init-list",
@@ -505,10 +513,10 @@ var (
 	ClangDefaultBase = "prebuilts/clang/host"
 	// The Clang version used in the trunk branch.
 	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
-	ClangDefaultVersion = "clang-r574158"
+	ClangDefaultVersion = "clang-r584948"
 	// The Clang short version used in the trunk branch.
 	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
-	ClangDefaultShortVersion = "21"
+	ClangDefaultShortVersion = "22"
 
 	RsGlobalIncludes = []string{
 		"external/clang/lib/Headers",
@@ -600,13 +608,6 @@ func init() {
 
 	pctx.VariableFunc("NoOverrideGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := noOverrideGlobalCflags
-		if ClangVersionAtLeast(ctx, 584948) {
-			// http://b/452740154
-			flags = append(flags, "-Wno-character-conversion")
-			// http://b/458489157.
-			// TODO: Disable this warning in external projects after switching clang.
-			flags = append(flags, "-Wno-error=uninitialized-const-pointer")
-		}
 		if ctx.Config().IsEnvTrue("LLVM_NEXT") {
 			flags = append(noOverrideGlobalCflags, llvmNextExtraCommonGlobalCflags...)
 			IllegalFlags = []string{} // Don't fail build while testing a new compiler.
@@ -864,10 +865,15 @@ func ClangShortVersion(ctx android.PathContext) string {
 // Check if the Clang revision is greater or equal to minRev. Returns false if failed to parse.
 func ClangVersionAtLeast(ctx android.PathContext, minRev int) bool {
 	curRevStr := ClangVersion(ctx)
+	// Slice the string to keep only the digits (e.g., "584948")
 	if !strings.HasPrefix(curRevStr, "clang-r") {
 		return false
 	}
-	curRev, err := strconv.Atoi(curRevStr[7:])
+	i := 7
+	for i < len(curRevStr) && curRevStr[i] >= '0' && curRevStr[i] <= '9' {
+		i++
+	}
+	curRev, err := strconv.Atoi(curRevStr[7:i])
 	if err != nil {
 		return false
 	}

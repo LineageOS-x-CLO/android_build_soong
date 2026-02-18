@@ -91,7 +91,6 @@ var (
 			"$launcher",
 			"build/soong/python/scripts/precompile_python.py",
 		},
-		SandboxDisabled: true,
 	}, "stdlibZip", "stdlibPkg", "launcher", "ldLibraryPath")
 )
 

@@ -524,7 +524,8 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 
 		rotationMinSdkVersion := String(a.properties.RotationMinSdkVersion)
 
-		SignAppPackage(ctx, signed, jnisUncompressed, certificates, nil, lineageFile, rotationMinSdkVersion)
+		SignAppPackage(ctx, signed, jnisUncompressed, certificates, nil, lineageFile,
+			rotationMinSdkVersion, a.MinSdkVersion(ctx))
 		a.outputFile = signed
 	} else {
 		validationStamp := a.validatePresignedApk(ctx, srcApk)
@@ -562,6 +563,8 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 	ctx.SetOutputFiles([]android.Path{a.outputFile}, "")
 
 	buildComplianceMetadata(ctx)
+	src := a.prebuilt.SingleSource(ctx)
+	ctx.ComplianceMetadataInfo().SetCipdSrc(ctx, src)
 
 	// TODO: androidmk converter jni libs
 }
@@ -614,6 +617,10 @@ func (a *AndroidAppImport) Certificate() Certificate {
 }
 
 func (a *AndroidAppImport) PrivAppAllowlist() android.OptionalPath {
+	return android.OptionalPath{}
+}
+
+func (a *AndroidAppImport) PreinstallAllowlist() android.OptionalPath {
 	return android.OptionalPath{}
 }
 

@@ -15,8 +15,9 @@
 package android
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
-	"path/filepath"
 
 	"github.com/google/blueprint"
 )
@@ -71,46 +72,62 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx SingletonContext) {
 		records = append(records, record)
 	})
 
+	// Serialize the records into JSON format in memory.
 	jsonData, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		ctx.Errorf("Failed to marshal soong api records: %s", err)
 		return
 	}
 
-	jsonPath := PathForOutput(ctx, "soong_api", "soong_api.json")
-	WriteFileRule(ctx, jsonPath, string(jsonData))
+	// Create the ZIP content directly in memory.
+	var zipBuf bytes.Buffer
+	zipWriter := zip.NewWriter(&zipBuf)
 
-	zipPath := PathForOutput(ctx, "soong_api", "soong_api.zip")
-	baseDir := filepath.Dir(jsonPath.String())
+	// Create a file entry within the ZIP named "soong_api.json".
+	f, err := zipWriter.Create("soong_api.json")
+	if err != nil {
+		ctx.Errorf("Failed to create zip entry: %s", err)
+		return
+	}
+	if _, err := f.Write(jsonData); err != nil {
+		ctx.Errorf("Failed to write json to zip: %s", err)
+		return
+	}
+	zipWriter.Close()
 
-	// Rule to build soong_api.zip
-	zipRb := NewRuleBuilder(soongApiPctx, ctx)
-	zipRb.Command().
-		BuiltTool("soong_zip").
-		FlagWithOutput("-o ", zipPath).
-		FlagWithArg("-C ", baseDir).
-		FlagWithInput("-f ", jsonPath)
-	zipRb.Build("build_soong_api_zip", "Building soong_api zip")
+	// Use TARGET_PRODUCT (DeviceProduct) to partition the output directory.
+	product := "generic" // Fallback for safety
+	if ctx.Config().HasDeviceProduct() {
+		product = ctx.Config().DeviceProduct()
+	}
 
-	// Phony target for soong_api.zip
+	// Write the binary ZIP data to the product-specific output path.
+	// Path: out/soong/soong_api/<product>/soong_api.zip
+	zipPath := PathForOutput(ctx, "soong_api", product, "soong_api.zip")
+	WriteFileRule(ctx, zipPath, zipBuf.String())
+
+	// Phony target for 'm soong_api.zip'
 	ctx.Build(soongApiPctx, BuildParams{
 		Rule:   blueprint.Phony,
 		Input:  zipPath,
 		Output: PathForPhony(ctx, "soong_api.zip"),
 	})
 
-	soongApiDbPath := PathForOutput(ctx, "soong_api", "soong_api.db")
+	// Generate the soong_api.db using the ZIP file as the input source.
+	// Path: out/soong/soong_api/<product>/soong_api.db
+	soongApiDbPath := PathForOutput(ctx, "soong_api", product, "soong_api.db")
+
 	dbRb := NewRuleBuilder(soongApiPctx, ctx)
 
 	loaderPath := ctx.Config().HostToolPath(ctx, "soong_api_db_loader")
 
-	// Build the command: <loader> -i <json_input> -o <db_output>
+	// Build the command: <loader> -i <zip_file_input> -o <db_output>
 	dbRb.Command().
 		Tool(loaderPath).
-		FlagWithInput("-i ", jsonPath).
+		FlagWithInput("-i ", zipPath).
 		FlagWithOutput("-o ", soongApiDbPath)
 
-	dbRb.Build("build_soong_api_db", "Building soong_api.db from soong_api.json")
+	dbRb.Build("build_soong_api_db", "Building soong_api.db from soong_api.zip")
 
 	// Phony target for 'm soong_api.db'
 	ctx.Build(soongApiPctx, BuildParams{

@@ -219,6 +219,11 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	r.Library.ravenizer.enabled = true
 
 	r.Library.GenerateAndroidBuildActions(ctx)
+	// r.Library.GenerateAndroidBuildActions() may fail, stop here to avoid overwriting its errors
+	// with new ones.
+	if ctx.Failed() {
+		return
+	}
 
 	// Start by depending on all files installed by dependencies
 	var installDeps android.InstallPaths
@@ -372,21 +377,12 @@ func (r *ravenwoodTest) aaptBuildActions(ctx android.ModuleContext) {
 	}
 }
 
-func (r *ravenwoodTest) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
-	info := r.Library.prepareAndroidMKProviderInfo(config)
+type ravenwoodDataProperties struct {
+	// The name of the subdirectory under the ravenwood runtime directory to install the files.
+	Path string
 
-	if info.PrimaryInfo.OutputFile.Valid() {
-		info.PrimaryInfo.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
-		info.PrimaryInfo.AddStrings("LOCAL_COMPATIBILITY_SUITE",
-			"general-tests", "ravenwood-tests")
-		if r.testConfig != nil {
-			info.PrimaryInfo.SetPath("LOCAL_FULL_TEST_CONFIG", r.testConfig)
-		}
-	}
-
-	r.addHostDexAndroidMkInfo(info)
-
-	return info
+	// The files to install.
+	Srcs []string `android:"path,arch_variant"`
 }
 
 type ravenwoodLibgroupProperties struct {
@@ -394,11 +390,8 @@ type ravenwoodLibgroupProperties struct {
 
 	Jni_libs proptools.Configurable[[]string]
 
-	// We use this to copy framework-res.apk to the ravenwood runtime directory.
-	Data []string `android:"path,arch_variant"`
-
-	// We use this to copy font files to the ravenwood runtime directory.
-	Fonts []string `android:"path,arch_variant"`
+	// We use this to copy various data files to the ravenwood runtime directory.
+	Data []ravenwoodDataProperties
 
 	// "ravenwood-runtime" uses it to specify "sub" runtimes,
 	// which allows partially updating ravenwood-runtime without
@@ -518,22 +511,18 @@ func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContex
 		libJar := android.OutputFileForModule(ctx, libModule, "")
 		install(installPath, libJar)
 	}
-	soInstallPath := android.PathForModuleInstall(ctx, r.installName()).Join(ctx, getLibPath(r.forceArchType))
 
+	soInstallPath := android.PathForModuleInstall(ctx, r.installName()).Join(ctx, getLibPath(r.forceArchType))
 	for _, jniLib := range jniLibs {
 		install(soInstallPath, jniLib.path)
 	}
 
-	dataInstallPath := installPath.Join(ctx, "ravenwood-data")
-	data := android.PathsForModuleSrc(ctx, r.ravenwoodLibgroupProperties.Data)
-	for _, file := range data {
-		install(dataInstallPath, file)
-	}
-
-	fontsInstallPath := installPath.Join(ctx, "fonts")
-	fonts := android.PathsForModuleSrc(ctx, r.ravenwoodLibgroupProperties.Fonts)
-	for _, file := range fonts {
-		install(fontsInstallPath, file)
+	for _, data := range r.ravenwoodLibgroupProperties.Data {
+		dataInstallPath := installPath.Join(ctx, data.Path)
+		dataSrcs := android.PathsForModuleSrc(ctx, data.Srcs)
+		for _, file := range dataSrcs {
+			install(dataInstallPath, file)
+		}
 	}
 
 	// Copy aconfig flag storage files.

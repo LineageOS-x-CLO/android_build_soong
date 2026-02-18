@@ -1289,7 +1289,10 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 		if fsInfos[partition].FilesystemConfig == nil {
 			continue
 		}
-		if android.InList(partition, []string{"userdata"}) {
+		if android.InList(partition, []string{"userdata", "vendor_kernel_ramdisk"}) {
+			continue
+		}
+		if android.InList(partition, a.partitionProps.Custom_partitions) {
 			continue
 		}
 		if partition != "vendor_ramdisk" {
@@ -1341,6 +1344,11 @@ func (a *androidDevice) copyMetadataToTargetZip(ctx android.ModuleContext, build
 			installedApexKeys = append(installedApexKeys, info.ApexKeyPath)
 		}
 	}
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
+		if info, ok := android.OtherModuleProvider(ctx, m, ApexKeyPathInfoProvider); ok {
+			installedApexKeys = append(installedApexKeys, info.ApexKeyPath)
+		}
+	})
 	installedApexKeys = android.SortedUniquePaths(installedApexKeys) // Sort by keypath to match make
 	builder.Command().Text("cat").Inputs(installedApexKeys).Textf(" >> %s/META/apexkeys.txt", targetFilesDir.String())
 	// apkcerts.txt

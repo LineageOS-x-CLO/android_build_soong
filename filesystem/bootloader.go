@@ -45,6 +45,9 @@ type PrebuiltBootloaderProperties struct {
 
 	// Tool for unpacking bootloader.img
 	Unpack_tool *string `android:"path"`
+
+	// Additional files needed to run unpack_tool
+	Unpack_tool_deps []string `android:"path"`
 }
 
 // TODO(soong-team): This module should be registered with the name
@@ -90,6 +93,7 @@ func (p *prebuiltBootloader) partitionFilesBootloader(ctx android.ModuleContext)
 		unpackedImg := unpackedDir.Join(ctx, partition+".img")
 		cmd := builder.Command()
 		cmd.Input(android.PathForModuleSrc(ctx, proptools.String(p.properties.Unpack_tool))).
+			Implicits(android.PathsForModuleSrc(ctx, p.properties.Unpack_tool_deps)).
 			Flag(" unpack ").
 			Flag("-o ").
 			Textf("%s ", cmd.PathForOutput(unpackedDir)).

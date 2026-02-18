@@ -364,7 +364,7 @@ type VendorConfig soongconfig.SoongConfig
 // envDeps must be a singleton. non-generic and generic configurations share a single
 // instance of envDeps.
 type envDeps struct {
-	envLock   sync.Mutex
+	envLock   sync.RWMutex
 	envDeps   map[string]string
 	envFrozen bool
 }
@@ -572,7 +572,6 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 		default:
 			panic(fmt.Errorf("Invalid state %v in parsePartialCompileFlags.makeVal", state))
 		}
-		return false
 	}
 	for _, tok := range tokens {
 		var state string
@@ -1087,6 +1086,16 @@ func (c *config) CpPreserveSymlinksFlags() string {
 func (c *config) Getenv(key string) string {
 	var val string
 	var exists bool
+	c.envDeps.envLock.RLock()
+	if c.envDeps.envDeps != nil {
+		val, exists = c.envDeps.envDeps[key]
+	}
+	c.envDeps.envLock.RUnlock()
+
+	if exists {
+		return val
+	}
+
 	c.envDeps.envLock.Lock()
 	defer c.envDeps.envLock.Unlock()
 	if c.envDeps.envDeps == nil {
@@ -2217,7 +2226,7 @@ func (c *config) XOMDisabledForPath(path string) bool {
 	if c.productVariables.XOMExcludePaths == nil {
 		return false
 	}
-	return PrefixInList(c.productVariables.XOMExcludePaths, path)
+	return HasAnyPrefix(path, c.productVariables.XOMExcludePaths)
 }
 
 func (c *config) VendorConfig(name string) VendorConfig {

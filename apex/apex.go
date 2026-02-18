@@ -40,6 +40,8 @@ import (
 	"android/soong/sh"
 )
 
+var sdvApexPattern = regexp.MustCompile(`^com\.(?:\w+\.)?sdv\.`)
+
 func init() {
 	registerApexBuildComponents(android.InitRegistrationContext)
 }
@@ -109,7 +111,7 @@ type apexBundleProperties struct {
 	Java_libs []string
 
 	// List of sh binaries that are embedded inside this APEX bundle.
-	Sh_binaries []string
+	Sh_binaries proptools.Configurable[[]string]
 
 	// List of platform_compat_config files that are embedded inside this APEX bundle.
 	Compat_configs proptools.Configurable[[]string]
@@ -975,7 +977,7 @@ func (a *apexBundle) DepsMutator(ctx android.BottomUpMutatorContext) {
 			ctx.AddFarVariationDependencies([]blueprint.Variation{
 				{Mutator: "os", Variation: target.OsVariation()},
 				{Mutator: "arch", Variation: target.ArchVariation()},
-			}, shBinaryTag, a.properties.Sh_binaries...)
+			}, shBinaryTag, a.properties.Sh_binaries.GetOrDefault(ctx, nil)...)
 		}
 	}
 
@@ -1250,6 +1252,10 @@ func (a *apexTransitionMutator) Split(ctx android.BaseModuleContext) []android.A
 		return ai.ApexTransitionMutatorSplit(ctx)
 	}
 	return []android.ApexInfo{{}}
+}
+
+func (a *apexTransitionMutator) SplitOnDemand(ctx android.BaseModuleContext) []android.ApexInfo {
+	return nil
 }
 
 func (a *apexTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceInfo android.ApexInfo) android.ApexInfo {
@@ -1623,6 +1629,12 @@ func apexFilesForAndroidApp(ctx android.BaseModuleContext, module android.Module
 		dirInApex := filepath.Join("etc", "permissions")
 		privAppAllowlist := newApexFile(ctx, allowlist.Path(), commonInfo.BaseModuleName+"_privapp", dirInApex, etc, module)
 		apexFiles = append(apexFiles, privAppAllowlist)
+	}
+
+	if preinstall := aapp.PreinstallAllowlist; preinstall.Valid() {
+		dirInApex := filepath.Join("etc", "sysconfig")
+		preinstallAllowlist := newApexFile(ctx, preinstall.Path(), commonInfo.BaseModuleName+"_preinstall", dirInApex, etc, module)
+		apexFiles = append(apexFiles, preinstallAllowlist)
 	}
 
 	apexFiles = append(apexFiles, af)
@@ -2306,6 +2318,7 @@ func (a *apexBundle) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	android.SetProvider(ctx, java.ApkCertsInfoProvider, a.apkCerts)
 	a.setSymbolInfosProvider(ctx)
+	a.setProguardInfosProvider(ctx)
 
 	pem, key := a.getCertificateAndPrivateKey(ctx)
 	android.SetProvider(ctx, android.ApexBundleTypeInfoProvider, android.ApexBundleTypeInfo{
@@ -2726,7 +2739,7 @@ func (a *apexBundle) checkApexAvailability(ctx android.ModuleContext) {
 
 	// Temporarily bypass /product APEXes with a specific prefix.
 	// TODO: b/352818241 - Remove this after APEX availability is enforced for /product APEXes.
-	if a.ProductSpecific() && strings.HasPrefix(a.ApexVariationName(), "com.sdv.") {
+	if a.ProductSpecific() && sdvApexPattern.MatchString(a.ApexVariationName()) {
 		return
 	}
 
@@ -3048,5 +3061,21 @@ func (a *apexBundle) setSymbolInfosProvider(ctx android.ModuleContext) {
 		}
 
 		cc.CopySymbolsAndSetSymbolsInfoProvider(ctx, infos)
+	}
+}
+
+func (a *apexBundle) setProguardInfosProvider(ctx android.ModuleContext) {
+	var proguardInfos java.ProguardInfos
+	ctx.VisitDirectDepsProxy(func(child android.ModuleProxy) {
+		tag := ctx.OtherModuleDependencyTag(child)
+		if tag == androidAppTag || tag == bcpfTag || tag == sscpfTag || tag == javaLibTag {
+			if infos, ok := android.OtherModuleProvider(ctx, child, java.ProguardProvider); ok {
+				proguardInfos = append(proguardInfos, infos...)
+			}
+		}
+	})
+
+	if len(proguardInfos) > 0 {
+		android.SetProvider(ctx, java.ProguardProvider, proguardInfos)
 	}
 }

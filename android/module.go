@@ -139,6 +139,8 @@ type Module interface {
 	UseGenericConfig() bool
 
 	NoFullInstall() bool
+
+	SplitAllVariants() bool
 }
 
 // Qualified id for a module
@@ -436,6 +438,10 @@ type commonProperties struct {
 	// Whether this module is built for non-native architectures (also known as native bridge binary)
 	Native_bridge_supported *bool `android:"arch_variant"`
 
+	// Whether this module can be built with for lightweight fault isolation (LFI), an
+	// in-process sandboxing technique.
+	Lfi_supported *bool `android:"arch_variant"`
+
 	// The OsType of artifacts that this module variant is responsible for creating.
 	//
 	// Set by osMutator
@@ -540,6 +546,10 @@ type commonProperties struct {
 
 	// If this property is set to true, this module will not be built on checkbuilds.
 	Unchecked_module *bool
+
+	// If this property is set to true, all supported variants of the module will be created.
+	// Primarily intended for use in unit tests.
+	Split_all_variants *bool
 }
 
 // Properties common to all modules inheriting from ModuleBase. Unlike commonProperties, these
@@ -1059,7 +1069,11 @@ func (m *ModuleBase) baseOverridablePropertiesDepsMutator(ctx BottomUpMutatorCon
 func addRequiredDeps(ctx BottomUpMutatorContext) {
 	addDep := func(target Target, depName string) {
 		if !blueprint.IsValidModuleName(depName) {
-			ctx.PropertyErrorf("required", "%s is not a valid module", depName)
+			if strings.HasPrefix(depName, ":") {
+				ctx.PropertyErrorf("required", "%q is not a valid module name, did you mean %q?", depName, depName[1:])
+			} else {
+				ctx.PropertyErrorf("required", "%q is not a valid module name", depName)
+			}
 		}
 		if !ctx.OtherModuleExists(depName) {
 			if ctx.Config().AllowMissingDependencies() {
@@ -1333,6 +1347,10 @@ func (m *ModuleBase) IsCommonOSVariant() bool {
 
 func (m *ModuleBase) NoFullInstall() bool {
 	return proptools.Bool(m.commonProperties.No_full_install)
+}
+
+func (m *ModuleBase) SplitAllVariants() bool {
+	return proptools.Bool(m.commonProperties.Split_all_variants)
 }
 
 // supportsTarget returns true if the given Target is supported by the current module.
@@ -2328,7 +2346,9 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 			ideInfo = &IdeInfo{}
 			x.IDEInfo(ctx, ideInfo)
 			ideInfo.BaseModuleName = x.BaseModuleName()
-			ideInfo.ModuleType = ctx.ModuleType()
+			if ideInfo.ModuleType == "" {
+				ideInfo.ModuleType = ctx.ModuleType()
+			}
 		}
 
 		if proptools.Bool(m.commonProperties.Unchecked_module) {
@@ -2663,6 +2683,11 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 		// then there are no references directly to the Module and it can be freed.
 		ctx.bp.FreeModuleAfterGenerateBuildActions()
 	}
+}
+
+// IdeInfoPopulator is an interface that can be implemented to populate the IdeInfo struct.
+type IdeInfoPopulator interface {
+	PopulateIdeInfo(ctx BaseModuleContext, ideInfo *IdeInfo)
 }
 
 // computeHostToolInfo returns a *HostToolInfo to embed into the CommonInfo for this
@@ -3115,7 +3140,7 @@ func (e configurationEvalutor) EvaluateConfiguration(condition proptools.Configu
 				case "bool":
 					return proptools.ConfigurableValueBool(v == "true")
 				case "int":
-					i, err := strconv.ParseInt(v, 10, 64)
+					i, err := strconv.ParseInt(v, 0, 64)
 					if err != nil {
 						ctx.OtherModulePropertyErrorf(m, property, "integer soong_config_variable was not an int: %q", v)
 						return proptools.ConfigurableValueUndefined()
@@ -3666,28 +3691,32 @@ type IDEInfo interface {
 // Collect information for opening IDE project files in java/jdeps.go.
 // @auto-generate: gob
 type IdeInfo struct {
-	BaseModuleName    string          `json:"-"`
-	ModuleType        string          `json:"module_type,omitempty"`
-	Manifest          string          `json:"manifest,omitempty"`
-	PackageName       string          `json:"package_name,omitempty"`
-	Aconfig           *AconfigIdeInfo `json:"aconfig,omitempty"`
-	Proto             *ProtoIdeInfo   `json:"proto,omitempty"`
-	Deps              []string        `json:"dependencies,omitempty"`
-	Srcs              []string        `json:"srcs,omitempty"`
-	Aidl_srcs         []string        `json:"aidl_srcs,omitempty"`
-	Aidl_include_dirs []string        `json:"aidl_include_dirs,omitempty"`
-	Jarjar_rules      []string        `json:"jarjar_rules,omitempty"`
-	Jars              []string        `json:"jars,omitempty"`
-	Imported_jars     []string        `json:"imported_jars,omitempty"`
-	Imported_aars     []string        `json:"imported_aars,omitempty"`
-	Classes           []string        `json:"class,omitempty"`
-	Installed_paths   []string        `json:"installed,omitempty"`
-	SrcJars           []string        `json:"srcjars,omitempty"`
-	Paths             []string        `json:"path,omitempty"`
-	Static_libs       []string        `json:"static_libs,omitempty"`
-	Libs              []string        `json:"libs,omitempty"`
-	Asset_dirs        []string        `json:"asset_dirs,omitempty"`
-	Resource_dirs     []string        `json:"resource_dirs,omitempty"`
+	BaseModuleName             string          `json:"-"`
+	ModuleType                 string          `json:"module_type,omitempty"`
+	Manifest                   string          `json:"manifest,omitempty"`
+	PackageName                string          `json:"package_name,omitempty"`
+	Aconfig                    *AconfigIdeInfo `json:"aconfig,omitempty"`
+	Proto                      *ProtoIdeInfo   `json:"proto,omitempty"`
+	Aidl                       *AidlIdeInfo    `json:"aidl,omitempty"`
+	Deps                       []string        `json:"dependencies,omitempty"`
+	Srcs                       []string        `json:"srcs,omitempty"`
+	Aidl_include_dirs          []string        `json:"aidl_include_dirs,omitempty"`
+	Jarjar_rules               []string        `json:"jarjar_rules,omitempty"`
+	Jars                       []string        `json:"jars,omitempty"`
+	Imported_jars              []string        `json:"imported_jars,omitempty"`
+	Imported_aars              []string        `json:"imported_aars,omitempty"`
+	Classes                    []string        `json:"class,omitempty"`
+	Installed_paths            []string        `json:"installed,omitempty"`
+	SrcJars                    []string        `json:"srcjars,omitempty"`
+	Paths                      []string        `json:"path,omitempty"`
+	Static_libs                []string        `json:"static_libs,omitempty"`
+	Libs                       []string        `json:"libs,omitempty"`
+	Asset_dirs                 []string        `json:"asset_dirs,omitempty"`
+	Resource_dirs              []string        `json:"resource_dirs,omitempty"`
+	Associates                 []string        `json:"associates,omitempty"`
+	Kotlincflags               []string        `json:"kotlincflags,omitempty"`
+	Annotation_processor_flags []string        `json:"annotation_processor_flags,omitempty"`
+	Plugins                    []string        `json:"plugins,omitempty"`
 }
 
 // @auto-generate: gob
@@ -3706,30 +3735,40 @@ type ProtoIdeInfo struct {
 	LocalIncludeDirs      []string `json:"local_include_dirs,omitempty"`
 }
 
+// @auto-generate: gob
+type AidlIdeInfo struct {
+	Srcs      []string `json:"srcs,omitempty"`
+	Stability string   `json:"stability,omitempty"`
+}
+
 // Merge merges two IdeInfos and produces a new one, leaving the original unchanged
 func (i IdeInfo) Merge(other *IdeInfo) IdeInfo {
 	return IdeInfo{
-		ModuleType:        mergeString(i.ModuleType, other.ModuleType),
-		Manifest:          mergeString(i.Manifest, other.Manifest),
-		PackageName:       mergeString(i.PackageName, other.PackageName),
-		Aconfig:           i.Aconfig.merge(other.Aconfig),
-		Proto:             i.Proto.merge(other.Proto),
-		Deps:              mergeStringLists(i.Deps, other.Deps),
-		Srcs:              mergeStringLists(i.Srcs, other.Srcs),
-		Aidl_srcs:         mergeStringLists(i.Aidl_srcs, other.Aidl_srcs),
-		Aidl_include_dirs: mergeStringLists(i.Aidl_include_dirs, other.Aidl_include_dirs),
-		Jarjar_rules:      mergeStringLists(i.Jarjar_rules, other.Jarjar_rules),
-		Jars:              mergeStringLists(i.Jars, other.Jars),
-		Imported_jars:     mergeStringLists(i.Imported_jars, other.Imported_jars),
-		Imported_aars:     mergeStringLists(i.Imported_aars, other.Imported_aars),
-		Classes:           mergeStringLists(i.Classes, other.Classes),
-		Installed_paths:   mergeStringLists(i.Installed_paths, other.Installed_paths),
-		SrcJars:           mergeStringLists(i.SrcJars, other.SrcJars),
-		Paths:             mergeStringLists(i.Paths, other.Paths),
-		Static_libs:       mergeStringLists(i.Static_libs, other.Static_libs),
-		Libs:              mergeStringLists(i.Libs, other.Libs),
-		Asset_dirs:        mergeStringLists(i.Asset_dirs, other.Asset_dirs),
-		Resource_dirs:     mergeStringLists(i.Resource_dirs, other.Resource_dirs),
+		ModuleType:                 mergeString(i.ModuleType, other.ModuleType),
+		Manifest:                   mergeString(i.Manifest, other.Manifest),
+		PackageName:                mergeString(i.PackageName, other.PackageName),
+		Aconfig:                    i.Aconfig.merge(other.Aconfig),
+		Proto:                      i.Proto.merge(other.Proto),
+		Aidl:                       i.Aidl.merge(other.Aidl),
+		Deps:                       mergeStringLists(i.Deps, other.Deps),
+		Srcs:                       mergeStringLists(i.Srcs, other.Srcs),
+		Aidl_include_dirs:          mergeStringLists(i.Aidl_include_dirs, other.Aidl_include_dirs),
+		Jarjar_rules:               mergeStringLists(i.Jarjar_rules, other.Jarjar_rules),
+		Jars:                       mergeStringLists(i.Jars, other.Jars),
+		Imported_jars:              mergeStringLists(i.Imported_jars, other.Imported_jars),
+		Imported_aars:              mergeStringLists(i.Imported_aars, other.Imported_aars),
+		Classes:                    mergeStringLists(i.Classes, other.Classes),
+		Installed_paths:            mergeStringLists(i.Installed_paths, other.Installed_paths),
+		SrcJars:                    mergeStringLists(i.SrcJars, other.SrcJars),
+		Paths:                      mergeStringLists(i.Paths, other.Paths),
+		Static_libs:                mergeStringLists(i.Static_libs, other.Static_libs),
+		Libs:                       mergeStringLists(i.Libs, other.Libs),
+		Asset_dirs:                 mergeStringLists(i.Asset_dirs, other.Asset_dirs),
+		Resource_dirs:              mergeStringLists(i.Resource_dirs, other.Resource_dirs),
+		Associates:                 mergeStringLists(i.Associates, other.Associates),
+		Kotlincflags:               mergeStringLists(i.Kotlincflags, other.Kotlincflags),
+		Annotation_processor_flags: mergeStringLists(i.Annotation_processor_flags, other.Annotation_processor_flags),
+		Plugins:                    mergeStringLists(i.Plugins, other.Plugins),
 	}
 }
 
@@ -3762,6 +3801,20 @@ func (i *ProtoIdeInfo) merge(other *ProtoIdeInfo) *ProtoIdeInfo {
 		CanonicalPathFromRoot: mergeBool(i.CanonicalPathFromRoot, other.CanonicalPathFromRoot),
 		Type:                  mergeString(i.Type, other.Type),
 		LocalIncludeDirs:      mergeStringLists(i.LocalIncludeDirs, other.LocalIncludeDirs),
+	}
+}
+
+// Merge merges two AidlIdeInfo and produces a new one, leaving the original unchanged
+func (a *AidlIdeInfo) merge(other *AidlIdeInfo) *AidlIdeInfo {
+	if a == nil {
+		return other
+	}
+	if other == nil {
+		return a
+	}
+	return &AidlIdeInfo{
+		Srcs:      mergeStringLists(a.Srcs, other.Srcs),
+		Stability: mergeString(a.Stability, other.Stability),
 	}
 }
 

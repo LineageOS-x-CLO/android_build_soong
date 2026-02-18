@@ -741,7 +741,6 @@ func TestLibraryAssets(t *testing.T) {
 			} else {
 				aapt2link = m.Output("package-res.apk")
 			}
-			aapt2link = aapt2link
 			aapt2Flags := aapt2link.Args["flags"]
 			if test.assetFlag != "" {
 				android.AssertStringDoesContain(t, "asset flag", aapt2Flags, test.assetFlag)
@@ -2338,7 +2337,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "",
-			expectedCertSigningFlags: "",
+			expectedCertSigningFlags: "--disable-v1",
 			expectedCertificate:      "build/make/target/product/security/testkey",
 		},
 		{
@@ -2357,7 +2356,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "",
-			expectedCertSigningFlags: "",
+			expectedCertSigningFlags: "--disable-v1",
 			expectedCertificate:      "cert/new_cert",
 		},
 		{
@@ -2371,7 +2370,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "",
-			expectedCertSigningFlags: "",
+			expectedCertSigningFlags: "--disable-v1",
 			expectedCertificate:      "build/make/target/product/security/expiredkey",
 		},
 		{
@@ -2390,7 +2389,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "foo:new_certificate",
-			expectedCertSigningFlags: "",
+			expectedCertSigningFlags: "--disable-v1",
 			expectedCertificate:      "cert/new_cert",
 		},
 		{
@@ -2411,7 +2410,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "",
-			expectedCertSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32",
+			expectedCertSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32 --disable-v1",
 			expectedCertificate:      "cert/new_cert",
 		},
 		{
@@ -2437,7 +2436,7 @@ func TestCertificates(t *testing.T) {
 				}
 			`,
 			certificateOverride:      "",
-			expectedCertSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32",
+			expectedCertSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32 --disable-v1",
 			expectedCertificate:      "cert/new_cert",
 		},
 		{
@@ -2452,6 +2451,20 @@ func TestCertificates(t *testing.T) {
 			`,
 			expectedCertificate:      "out/soong/.intermediates/foo/android_common/missing",
 			allowMissingDependencies: true,
+		},
+		{
+			name: "old minSdkVersion",
+			bp: `
+				android_app {
+					name: "foo",
+					srcs: ["a.java"],
+					sdk_version: "current",
+					min_sdk_version: "23",
+				}
+			`,
+			certificateOverride:      "",
+			expectedCertSigningFlags: "",
+			expectedCertificate:      "build/make/target/product/security/testkey",
 		},
 	}
 
@@ -2510,7 +2523,7 @@ func TestRequestV4SigningFlag(t *testing.T) {
 					sdk_version: "current",
 				}
 			`,
-			expected: "",
+			expected: "--disable-v1",
 		},
 		{
 			name: "default",
@@ -2522,7 +2535,7 @@ func TestRequestV4SigningFlag(t *testing.T) {
 					v4_signature: false,
 				}
 			`,
-			expected: "",
+			expected: "--disable-v1",
 		},
 		{
 			name: "module certificate property",
@@ -2534,7 +2547,7 @@ func TestRequestV4SigningFlag(t *testing.T) {
 					v4_signature: true,
 				}
 			`,
-			expected: "--enable-v4",
+			expected: "--enable-v4 --disable-v1",
 		},
 	}
 
@@ -2754,7 +2767,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common",
 			apkPath:          "out/target/product/test_device/system/app/foo/foo.apk",
 			certFlag:         "build/make/target/product/security/expiredkey.x509.pem build/make/target/product/security/expiredkey.pk8",
-			certSigningFlags: "",
+			certSigningFlags: "--disable-v1",
 			overrides:        []string{"qux"},
 			packageFlag:      "",
 			renameResources:  false,
@@ -2766,7 +2779,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common_bar",
 			apkPath:          "out/target/product/test_device/system/app/bar/bar.apk",
 			certFlag:         "cert/new_cert.x509.pem cert/new_cert.pk8",
-			certSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32",
+			certSigningFlags: "--lineage lineage.bin --rotation-min-sdk-version 32 --disable-v1",
 			overrides:        []string{"qux", "foo"},
 			packageFlag:      "",
 			renameResources:  false,
@@ -2778,7 +2791,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common_baz",
 			apkPath:          "out/target/product/test_device/system/app/baz/baz.apk",
 			certFlag:         "build/make/target/product/security/expiredkey.x509.pem build/make/target/product/security/expiredkey.pk8",
-			certSigningFlags: "",
+			certSigningFlags: "--disable-v1",
 			overrides:        []string{"qux", "foo"},
 			packageFlag:      "org.dandroid.bp",
 			renameResources:  true,
@@ -2790,7 +2803,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common_baz_no_rename_resources",
 			apkPath:          "out/target/product/test_device/system/app/baz_no_rename_resources/baz_no_rename_resources.apk",
 			certFlag:         "build/make/target/product/security/expiredkey.x509.pem build/make/target/product/security/expiredkey.pk8",
-			certSigningFlags: "",
+			certSigningFlags: "--disable-v1",
 			overrides:        []string{"qux", "foo"},
 			packageFlag:      "org.dandroid.bp",
 			renameResources:  false,
@@ -2802,7 +2815,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common_baz_base_no_rename_resources",
 			apkPath:          "out/target/product/test_device/system/app/baz_base_no_rename_resources/baz_base_no_rename_resources.apk",
 			certFlag:         "build/make/target/product/security/expiredkey.x509.pem build/make/target/product/security/expiredkey.pk8",
-			certSigningFlags: "",
+			certSigningFlags: "--disable-v1",
 			overrides:        []string{"qux", "foo_no_rename_resources"},
 			packageFlag:      "org.dandroid.bp",
 			renameResources:  false,
@@ -2814,7 +2827,7 @@ func TestOverrideAndroidApp(t *testing.T) {
 			variantName:      "android_common_baz_override_base_rename_resources",
 			apkPath:          "out/target/product/test_device/system/app/baz_override_base_rename_resources/baz_override_base_rename_resources.apk",
 			certFlag:         "build/make/target/product/security/expiredkey.x509.pem build/make/target/product/security/expiredkey.pk8",
-			certSigningFlags: "",
+			certSigningFlags: "--disable-v1",
 			overrides:        []string{"qux", "foo_no_rename_resources"},
 			packageFlag:      "org.dandroid.bp",
 			renameResources:  true,
@@ -4616,6 +4629,44 @@ func TestPrivappAllowlist(t *testing.T) {
 	// verify that permissions are copied to device
 	app.Output("out/target/product/test_device/system/etc/permissions/foo.xml")
 	overrideApp.Output("out/target/product/test_device/system/etc/permissions/bar.xml")
+}
+
+func TestPreinstallAllowlist(t *testing.T) {
+	t.Parallel()
+
+	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(
+		t,
+		`
+		android_app {
+			name: "foo",
+			srcs: ["a.java"],
+			preinstall_allowlist: "preinstall_allowlist_com.android.foo.xml",
+			sdk_version: "current",
+		}
+		override_android_app {
+			name: "bar",
+			base: "foo",
+			package_name: "com.google.android.foo",
+		}
+		`,
+	)
+	app := result.ModuleForTests(t, "foo", "android_common")
+	overrideApp := result.ModuleForTests(t, "foo", "android_common_bar")
+
+	// verify that preinstall allowlist is created for override apps
+	overrideApp.Output("out/soong/.intermediates/foo/android_common_bar/preinstall_allowlist_com.google.android.foo.xml")
+	expectedAllowlistInput := "preinstall_allowlist_com.android.foo.xml"
+	overrideActualAllowlistInput := overrideApp.Rule("modifyPreinstallAllowlist").Input.String()
+	if expectedAllowlistInput != overrideActualAllowlistInput {
+		t.Errorf("expected override allowlist input to be %q; got %q", expectedAllowlistInput, overrideActualAllowlistInput)
+	}
+	expectedPackageName := "com.google.android.foo"
+	overrideActualPackageName := overrideApp.Rule("modifyPreinstallAllowlist").Args["packageName"]
+	if expectedPackageName != overrideActualPackageName {
+		t.Errorf("expected override package name to be %q; got %q", expectedPackageName, overrideActualPackageName)
+	}
+	app.Output("out/target/product/test_device/system/etc/sysconfig/foo_preinstall_allowlist.xml")
+	overrideApp.Output("out/target/product/test_device/system/etc/sysconfig/bar_preinstall_allowlist.xml")
 }
 
 func TestPrivappAllowlistAndroidMk(t *testing.T) {

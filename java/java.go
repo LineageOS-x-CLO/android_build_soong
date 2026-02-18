@@ -1267,7 +1267,7 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 	}
 
-	setOutputFiles(ctx, j.Module)
+	setOutputFiles(ctx, &j.Module)
 
 	j.javaLibraryModuleInfoJSON(ctx)
 
@@ -1276,13 +1276,13 @@ func (j *Library) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	j.createApiXmlFile(ctx)
 
 	if j.dexer.proguardDictionary.Valid() {
-		android.SetProvider(ctx, ProguardProvider, ProguardInfo{
+		android.SetProvider(ctx, ProguardProvider, ProguardInfos{{
 			ModuleName:         android.ModuleNameWithPossibleOverride(ctx),
 			Class:              "JAVA_LIBRARIES",
 			ProguardDictionary: j.dexer.proguardDictionary.Path(),
 			ProguardUsageZip:   j.dexer.proguardUsageZip.Path(),
 			ClassesJar:         j.implementationAndResourcesJar,
-		})
+		}})
 	}
 
 	if ctx.Os() == android.Windows {
@@ -2535,11 +2535,11 @@ type ApiLibrary struct {
 	kSnapshotFiles map[string]android.Path
 }
 
-func (al ApiLibrary) JarToSnapshotMap() map[string]android.Path {
+func (al *ApiLibrary) JarToSnapshotMap() map[string]android.Path {
 	return al.kSnapshotFiles
 }
 
-var _ KSnapshotContainer = ApiLibrary{}
+var _ KSnapshotContainer = (*ApiLibrary)(nil)
 
 type JavaApiLibraryProperties struct {
 	// name of the API surface
@@ -2667,15 +2667,7 @@ func metalavaStubCmd(ctx android.ModuleContext, rule *android.RuleBuilder,
 
 	addOptionalApiSurfaceToCmd(cmd, apiSurface)
 
-	if len(classpath) == 0 {
-		// The main purpose of the `--api-class-resolution api` option is to force metalava to ignore
-		// classes on the classpath when an API file contains missing classes. However, as this command
-		// does not specify `--classpath` this is not needed for that. However, this is also used as a
-		// signal to the special metalava code for generating stubs from text files that it needs to add
-		// some additional items into the API (e.g. default constructors).
-		cmd.FlagWithArg("--api-class-resolution ", "api")
-	} else {
-		cmd.FlagWithArg("--api-class-resolution ", "api:classpath")
+	if len(classpath) != 0 {
 		cmd.FlagWithInputList("--classpath ", classpath, ":")
 	}
 
@@ -2796,8 +2788,7 @@ func (al *ApiLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 
 	rule.Sbox(android.PathForModuleOut(ctx, "metalava"),
-		android.PathForModuleOut(ctx, "metalava.sbox.textproto")).
-		SandboxInputs()
+		android.PathForModuleOut(ctx, "metalava.sbox.textproto"))
 
 	stubsDir := android.OptionalPathForPath(android.PathForModuleOut(ctx, "metalava", "stubsDir"))
 	rule.Command().Text("rm -rf").Text(stubsDir.String())
@@ -4146,6 +4137,7 @@ func getCombinedAconfigProtoFile(ctx android.ModuleContext) android.Path {
 			Flag("--dedup").
 			Flag("--format").
 			Text("protobuf").
+			FlagForEachArg("--filter ", []string{"state:ENABLED", "permission:READ_WRITE"}).
 			FlagForEachInput("--cache ", aconfigProtoFiles).
 			FlagWithOutput("--out ", combinedAconfigProtoFile)
 

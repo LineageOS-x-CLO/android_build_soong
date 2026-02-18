@@ -63,8 +63,9 @@ var (
 	CpWithBash = pctx.AndroidStaticRule("CpWithBash",
 		blueprint.RuleParams{
 			Command2: blueprint.NewCommand(
-				"/bin/bash -c \"", Rm, " -f $out && ", Cp, " $cpFlags $cpPreserveSymlinks $in $out$extraCmds\""),
-			Description: "cp $out",
+				"/bin/bash -c \"rm -f $out && cp $cpFlags $cpPreserveSymlinks $in $out$extraCmds\""),
+			Description:     "cp $out",
+			SandboxDisabled: true,
 		},
 		"cpFlags", "extraCmds")
 
@@ -129,6 +130,14 @@ var (
 			SandboxDisabled: true,
 		},
 		"fromPath")
+
+	// A rule that verifies that $in is not a symlink. Touches a stamp file when done.
+	VerifyNotSymlinkRule = pctx.AndroidStaticRule("VerifyNotSymlink",
+		blueprint.RuleParams{
+			Command2: blueprint.NewCommand(
+				Rm, " -rf $out && ( ! ", Test, " -L $in ) && ", Touch, " $out"),
+			Description: "verify not a symlink: $in",
+		})
 
 	// A rule that always fails at execution time with the given error message.
 	// The error message must be passed through proptools.NinjaAndShellEscape() first.
@@ -276,75 +285,76 @@ var (
 	assembleVintf   = pctx.HostTool("assemble_vintf")
 	SoongZip        = pctx.HostTool("soong_zip")
 	MergeZips       = pctx.HostTool("merge_zips")
+	ZipSync         = pctx.HostTool("zipsync")
 )
 
-var commonToyboxSymlinks = []string{
-	"basename",
-	"cat",
-	"chmod",
-	"cmp",
-	"comm",
-	"cp",
-	"cut",
-	"date",
-	"dd",
-	"dirname",
-	"dos2unix",
-	"du",
-	"echo",
-	"egrep",
-	"env",
-	"file",
-	"find",
-	"getconf",
-	"getopt",
-	"grep",
-	"gzip",
-	"head",
-	"id",
-	"install",
-	"ln",
-	"ls",
-	"md5sum",
-	"mkdir",
-	"mktemp",
-	"mv",
-	"nl",
-	"od",
-	"paste",
-	"patch",
-	"printf",
-	"pwd",
-	"readlink",
-	"realpath",
-	"rm",
-	"rmdir",
-	"sed",
-	"seq",
-	"setsid",
-	"sha1sum",
-	"sha256sum",
-	"sha512sum",
-	"sleep",
-	"sort",
-	"stat",
-	"tail",
-	"tar",
-	"tee",
-	"test",
-	"timeout",
-	"touch",
-	"tr",
-	"true",
-	"truncate",
-	"uname",
-	"uniq",
-	"unix2dos",
-	"wc",
-	"which",
-	"whoami",
-	"xargs",
-	"xxd",
+var commonToyboxSymlinks = map[string]struct{}{
+	"basename":  {},
+	"cat":       {},
+	"chmod":     {},
+	"cmp":       {},
+	"comm":      {},
+	"cp":        {},
+	"cut":       {},
+	"date":      {},
+	"dd":        {},
+	"dirname":   {},
+	"dos2unix":  {},
+	"du":        {},
+	"echo":      {},
+	"egrep":     {},
+	"env":       {},
+	"file":      {},
+	"find":      {},
+	"getconf":   {},
+	"getopt":    {},
+	"grep":      {},
+	"gzip":      {},
+	"head":      {},
+	"id":        {},
+	"install":   {},
+	"ln":        {},
+	"ls":        {},
+	"md5sum":    {},
+	"mkdir":     {},
+	"mktemp":    {},
+	"mv":        {},
+	"nl":        {},
+	"od":        {},
+	"paste":     {},
+	"patch":     {},
+	"printf":    {},
+	"pwd":       {},
+	"readlink":  {},
+	"realpath":  {},
+	"rm":        {},
+	"rmdir":     {},
+	"sed":       {},
+	"seq":       {},
+	"setsid":    {},
+	"sha1sum":   {},
+	"sha256sum": {},
+	"sha512sum": {},
+	"sleep":     {},
+	"sort":      {},
+	"stat":      {},
+	"tail":      {},
+	"tar":       {},
+	"tee":       {},
+	"test":      {},
+	"timeout":   {},
+	"touch":     {},
+	"tr":        {},
+	"true":      {},
+	"truncate":  {},
+	"uname":     {},
+	"uniq":      {},
+	"unix2dos":  {},
+	"wc":        {},
+	"which":     {},
+	"whoami":    {},
+	"xargs":     {},
+	"xxd":       {},
 }
 
 func init() {
@@ -354,16 +364,7 @@ func init() {
 		return ctx.Config().RBEWrapper()
 	})
 
-	pctx.HostBinToolVariable("DepfileVerifier", "depfile_verifier")
 	pctx.SourcePathVariable("toybox", "prebuilts/build-tools/${HostPrebuiltTag}/bin/toybox")
-
-	// Create a variable for every toybox command. toybox_phonies_singleton will also create
-	// a -deps phony, but we can't do that here because blueprint doesn't currently have a way to
-	// create phonies in the init() function.
-	for _, name := range commonToyboxSymlinks {
-		varName := string(unicode.ToUpper(rune(name[0]))) + name[1:]
-		pctx.SourcePathVariable(varName, "prebuilts/build-tools/path/${HostPrebuiltTag}/"+name)
-	}
 
 	InitRegistrationContext.RegisterParallelSingletonType("toybox_phonies_singleton", toyboxPhoniesSingletonFactory)
 }
@@ -425,7 +426,7 @@ func toyboxPhoniesSingletonFactory() Singleton {
 // Generate the phonies for the deps in a singleton, as blueprint currently doesn't have
 // a way to create phonies from the init() function.
 func (t *toyboxPhoniesSingleton) GenerateBuildActions(ctx SingletonContext) {
-	for _, name := range commonToyboxSymlinks {
+	for _, name := range SortedKeys(commonToyboxSymlinks) {
 		varName := string(unicode.ToUpper(rune(name[0]))) + name[1:]
 		binary := PathForSource(ctx, fmt.Sprintf("prebuilts/build-tools/%s/bin/toybox", ctx.Config().PrebuiltOS()))
 		symlink := PathForSource(ctx, fmt.Sprintf("prebuilts/build-tools/path/%s/%s", ctx.Config().PrebuiltOS(), name))

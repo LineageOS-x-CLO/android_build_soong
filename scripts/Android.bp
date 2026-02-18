@@ -298,6 +298,23 @@ python_test_host {
 }
 
 python_binary_host {
+    name: "modify_preinstall_allowlist",
+    main: "modify_preinstall_allowlist.py",
+    srcs: [
+        "modify_preinstall_allowlist.py",
+    ],
+}
+
+python_test_host {
+    name: "modify_preinstall_allowlist_test",
+    main: "modify_preinstall_allowlist_test.py",
+    srcs: [
+        "modify_preinstall_allowlist_test.py",
+        "modify_preinstall_allowlist.py",
+    ],
+}
+
+python_binary_host {
     name: "aconfig-to-metalava-flags",
     main: "aconfig-to-metalava-flags.py",
     srcs: ["aconfig-to-metalava-flags.py"],
@@ -332,9 +349,4 @@ python_binary_host {
     srcs: [
         "rustc_linker.py",
     ],
-}
-
-sh_binary_host {
-    name: "rustc_wrapper",
-    src: "rustc_wrapper.sh",
 }
