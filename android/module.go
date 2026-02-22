@@ -2068,6 +2068,7 @@ type CommonModuleInfo struct {
 	Target                  Target
 	SkipAndroidMkProcessing bool
 	BaseModuleName          string
+	BaseModuleType          string
 	CanHaveApexVariants     bool
 	MinSdkVersion           ApiLevelOrPlatform
 	SdkVersion              string
@@ -2616,6 +2617,7 @@ func (m *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 	if mm, ok := m.module.(interface{ BaseModuleName() string }); ok {
 		commonData.BaseModuleName = mm.BaseModuleName()
 	}
+	commonData.BaseModuleType = proptools.String(m.module.base().baseProperties.Soong_config_base_module_type)
 
 	commonData.HostToolInfo = computeHostToolInfo(ctx, m.module, installFiles.TransitivePackagingSpecs)
 
