@@ -501,7 +501,7 @@ var (
 	}
 
 	CStdVersion               = "gnu23"
-	CppStdVersion             = "gnu++20"
+	CppDefaultStdVersion      = "gnu++20"
 	ExperimentalCStdVersion   = "gnu2y"
 	ExperimentalCppStdVersion = "gnu++2b"
 
@@ -651,6 +651,9 @@ func init() {
 			return override
 		}
 		return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+	})
+	pctx.VariableFunc("CppStdVersion", func(ctx android.PackageVarContext) string {
+		return ctx.Config().ReleaseBuildCppStdVersion(CppDefaultStdVersion)
 	})
 
 	pctx.StaticVariable("ClangPath", "${ClangBase}/${HostPrebuiltTag}/${ClangVersion}")
@@ -872,6 +875,10 @@ func ClangVersion(ctx android.PathContext) string {
 
 func ClangShortVersion(ctx android.PathContext) string {
 	return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+}
+
+func CppStdVersion(ctx android.PathContext) string {
+	return ctx.Config().ReleaseBuildCppStdVersion(CppDefaultStdVersion)
 }
 
 // Check if the Clang revision is greater or equal to minRev. Returns false if failed to parse.
