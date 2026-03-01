@@ -180,9 +180,9 @@ type FakeToolchainFlagsContext struct {
  android.MakeVarsContext
 }
 
-func (f *FakeToolchainFlagsContext) CreateNinjaPhonyOnce(name string, deps android.Paths) android.Path {
- // Don't do this. Makevars won't read the deps of the flags so it's not needed.
- return nil
+func (f *FakeToolchainFlagsContext) CreateNinjaPhonyOnce(_ string, _ []string) android.Path {
+  // Don't do this. Makevars won't read the deps of the flags so it's not needed.
+  return android.PathForPhony(f, "FakeToolchainFlagsContextPhony")
 }
 
 var _ config.ToolchainFlagsContext = &FakeToolchainFlagsContext{}
@@ -209,7 +209,7 @@ func makeVarsToolchain(ctx android.MakeVarsContext, secondPrefix string,
 	}
 	makePrefix := secondPrefix + typePrefix
 
-	toolchain := config.FindToolchain(target.Os, target.Arch)
+	toolchain := config.FindToolchain(target.Os, target.Arch, false)
 
 	var productExtraCflags string
 	var productExtraLdflags string

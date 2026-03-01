@@ -463,6 +463,8 @@ type libraryDecorator struct {
 	// Forces production of the generated Rust staticlib for cc_library_static.
 	// Intended to be used to provide these generated staticlibs for Make.
 	wideStaticlibForMake bool
+
+	lfiInfo lfiInfo
 }
 
 // linkerProps returns the list of properties structs relevant for this library. (For example, if
@@ -783,8 +785,13 @@ func (library *libraryDecorator) compileModuleLibApiStubs(ctx ModuleContext, fla
 	}
 	flag := GetApiStubsFlags(apiParams)
 
-	nativeAbiResult := ParseNativeAbiDefinition(ctx, symbolFile,
-		android.ApiLevelOrPanic(ctx, library.MutatedProperties.StubsVersion), flag)
+	nativeAbiResult := ParseNativeAbiDefinition(ctx,
+		symbolFile,
+		// Raise the version to at least the minimum API level for the device architecture.
+		// This might mean that some old API level stubs contain the symbols from minimum API level.
+		nativeClampedApiLevel(ctx, android.ApiLevelOrPanic(ctx, library.MutatedProperties.StubsVersion)),
+		flag,
+	)
 	objs := CompileStubLibrary(ctx, flags, nativeAbiResult.StubSrc, ctx.getSharedFlags())
 
 	library.versionScriptPath = android.OptionalPathForPath(
@@ -1110,7 +1117,6 @@ func (library *libraryDecorator) linkStatic(ctx ModuleContext,
 			// these.
 			deps.WholeStaticLibsFromPrebuilts = append(deps.WholeStaticLibsFromPrebuilts, generatedLib)
 		}
-
 	}
 
 	fileName := library.getLibName(ctx) + staticLibraryExtension
@@ -1301,6 +1307,12 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 		} else {
 			deps.StaticLibs = append(deps.StaticLibs, generatedLib)
 		}
+	}
+
+	if ctx.isLFIVariation() || ctx.isLFIEnabled() {
+		// Technically it could be, but the android security team has decided we only want it
+		// on static libraries.
+		ctx.ModuleErrorf("LFI cannot be enabled on a shared library")
 	}
 
 	objs.sAbiDumpFiles = append(objs.sAbiDumpFiles, deps.StaticLibObjs.sAbiDumpFiles...)
@@ -1794,6 +1806,18 @@ func (library *libraryDecorator) link(ctx ModuleContext,
 	library.reexportFlags(deps.ReexportedFlags...)
 	library.reexportDeps(deps.ReexportedDeps...)
 	library.addExportedGeneratedHeaders(deps.ReexportedGeneratedHeaders...)
+
+	for _, lfiDep := range ctx.GetDirectDepsProxyWithTag(LFIDepTag) {
+		lfiInfo, ok := android.OtherModuleProvider(ctx, lfiDep, lfiInfoProvider)
+		if !ok {
+			ctx.ModuleErrorf("Expected lfi dep %s(%s) to provide lfi info", ctx.OtherModuleName(lfiDep), ctx.OtherModuleSubDir(lfiDep))
+			continue
+		}
+		if lfiInfo.includeDir != nil {
+			library.reexportDirs(lfiInfo.includeDir)
+			library.reexportDeps(lfiInfo.header)
+		}
+	}
 
 	if library.static() && len(deps.ReexportedRustRlibDeps) > 0 {
 		library.reexportRustStaticDeps(deps.ReexportedRustRlibDeps...)
@@ -2486,7 +2510,7 @@ func setStubsVersions(mctx android.BaseModuleContext, module VersionedLinkableIn
 type versionTransitionMutator struct{}
 
 func (versionTransitionMutator) Split(ctx android.BaseModuleContext) []string {
-	if ctx.Os() != android.Android {
+	if ctx.Os() != android.Android || ctx.Target().LFI {
 		return []string{""}
 	}
 	if m, ok := ctx.Module().(VersionedLinkableInterface); ok {
@@ -2513,7 +2537,7 @@ func (versionTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitio
 }
 
 func (versionTransitionMutator) IncomingTransition(ctx android.IncomingTransitionContext, incomingVariation string) string {
-	if ctx.Os() != android.Android {
+	if ctx.Os() != android.Android || ctx.Target().LFI {
 		return ""
 	}
 	m, ok := ctx.Module().(VersionedLinkableInterface)
@@ -2541,7 +2565,7 @@ func (versionTransitionMutator) IncomingTransition(ctx android.IncomingTransitio
 
 func (versionTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, variation string) {
 	// Optimization: return early if this module can't be affected.
-	if ctx.Os() != android.Android {
+	if ctx.Os() != android.Android || ctx.Target().LFI {
 		return
 	}
 
