@@ -74,7 +74,6 @@ func (c *notOnHostContext) Host() bool {
 func makeVarsProvider(ctx android.MakeVarsContext) {
 	sdclangMakeVars(ctx)
 
-	ctx.Strict("LLVM_RELEASE_VERSION", "${config.ClangShortVersion}")
 	ctx.Strict("LLVM_PREBUILTS_VERSION", "${config.ClangVersion}")
 	ctx.Strict("LLVM_PREBUILTS_BASE", "${config.ClangBase}")
 	ctx.Strict("LLVM_PREBUILTS_PATH", "${config.ClangBin}")
