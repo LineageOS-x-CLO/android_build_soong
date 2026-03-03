@@ -731,6 +731,13 @@ func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 		s.Integer_overflow = nil
 	}
 
+	// LFI doesn't support MTE
+	if ctx.Target().LFI {
+		s.Memtag_globals = nil
+		s.Memtag_heap = nil
+		s.Memtag_stack = nil
+	}
+
 	if ctx.inRamdisk() || ctx.inVendorRamdisk() || ctx.inRecovery() {
 		// HWASan ramdisk (which is built from recovery) goes over some bootloader limit.
 		// Keep libc instrumented so that ramdisk / vendor_ramdisk / recovery can run hwasan-instrumented code if necessary.
@@ -866,7 +873,14 @@ func (s *sanitize) flags(ctx ModuleContext, flags Flags) Flags {
 			}
 		} else {
 			flags.Local.CFlags = append(flags.Local.CFlags, "-mllvm", "-asan-globals=0")
-			if ctx.bootstrap() {
+
+			// Check if this module needs to use the bootstrap linker
+			useBootstrap := ctx.bootstrap()
+			if ctx.Config().GetBuildFlagBool("RELEASE_DEPRECATE_RUNTIME_APEX") {
+				useBootstrap = false
+			}
+
+			if useBootstrap {
 				flags.DynamicLinker = "/system/bin/bootstrap/linker_asan"
 			} else {
 				flags.DynamicLinker = "/system/bin/linker_asan"
@@ -891,7 +905,14 @@ func (s *sanitize) flags(ctx ModuleContext, flags Flags) Flags {
 			flags.Local.CFlags = append(flags.Local.CFlags, "-mllvm", "-hwasan-instrument-reads=0")
 		}
 		if !ctx.staticBinary() && !ctx.Host() {
-			if ctx.bootstrap() {
+
+			// Check if this module needs to use the bootstrap linker
+			useBootstrap := ctx.bootstrap()
+			if ctx.Config().GetBuildFlagBool("RELEASE_DEPRECATE_RUNTIME_APEX") {
+				useBootstrap = false
+			}
+
+			if useBootstrap {
 				flags.DynamicLinker = "/system/bin/bootstrap/linker_hwasan64"
 			} else {
 				flags.DynamicLinker = "/system/bin/linker_hwasan64"
