@@ -870,6 +870,8 @@ type linker interface {
 	unstrippedOutputFilePath() android.Path
 	strippedAllOutputFilePath() android.Path
 
+	extraOutputFilePaths() map[string]android.Paths
+
 	nativeCoverage() bool
 	coverageOutputFilePath() android.OptionalPath
 
@@ -1769,6 +1771,10 @@ func isBionic(name string) bool {
 }
 
 func InstallToBootstrap(name string, config android.Config) bool {
+	// With Bionic in /system, no bootstrap needed
+	if config.GetBuildFlagBool("RELEASE_DEPRECATE_RUNTIME_APEX") {
+		return false
+	}
 	if name == "libclang_rt.hwasan" || name == "libc_hwasan" {
 		return true
 	}
@@ -2878,6 +2884,9 @@ func (c *Module) setOutputFiles(ctx ModuleContext) {
 	if c.linker != nil {
 		ctx.SetOutputFiles(android.PathsIfNonNil(c.linker.unstrippedOutputFilePath()), "unstripped")
 		ctx.SetOutputFiles(android.PathsIfNonNil(c.linker.strippedAllOutputFilePath()), "stripped_all")
+		for tag, paths := range c.linker.extraOutputFilePaths() {
+			ctx.SetOutputFiles(paths, tag)
+		}
 		defaultDistFiles := c.linker.defaultDistFiles()
 		if len(defaultDistFiles) > 0 {
 			ctx.SetOutputFiles(defaultDistFiles, android.DefaultDistTag)
@@ -2943,6 +2952,10 @@ func buildComplianceMetadataInfo(ctx ModuleContext, c *Module, deps PathDeps) {
 		headerLibDepNames = append(headerLibDepNames, dep.Name())
 	}
 	complianceMetadataInfo.SetListValue(android.ComplianceMetadataProp.HEADER_LIBS, android.FirstUniqueStrings(headerLibDepNames))
+
+	if p, ok := c.linker.(*prebuiltLibraryLinker); ok && len(p.SingleSource(ctx)) > 0 {
+		complianceMetadataInfo.SetPrebuiltSrc(ctx, p.SingleSource(ctx))
+	}
 }
 
 func (c *Module) maybeUnhideFromMake() {
@@ -4174,6 +4187,11 @@ func ShouldUseStubForApex(ctx android.ModuleContext, parent android.ModuleProxy,
 			inVendorOrProduct = linkable.InVendorOrProduct
 			bootstrap = linkable.Bootstrap
 		}
+	}
+
+	// With Bionic in /system, no bootstrap needed. Ignore "bootstrap: true".
+	if ctx.Config().GetBuildFlagBool("RELEASE_DEPRECATE_RUNTIME_APEX") {
+		bootstrap = false
 	}
 
 	apexInfo, _ := android.OtherModuleProvider(ctx, parent, android.ApexInfoProvider)
