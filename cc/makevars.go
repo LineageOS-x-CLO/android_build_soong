@@ -176,15 +176,26 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	}
 }
 
+type FakeToolchainFlagsContext struct {
+ android.MakeVarsContext
+}
+
+func (f *FakeToolchainFlagsContext) CreateNinjaPhonyOnce(name string, deps android.Paths) android.Path {
+ // Don't do this. Makevars won't read the deps of the flags so it's not needed.
+ return nil
+}
+
+var _ config.ToolchainFlagsContext = &FakeToolchainFlagsContext{}
+
 func sdclangMakeVars(ctx android.MakeVarsContext) {
-	if config.ForceSDClangOff {
-		ctx.Strict("FORCE_SDCLANG_OFF", strconv.FormatBool(config.ForceSDClangOff))
-	}
-	if config.SDClang {
-		ctx.Strict("SDCLANG", strconv.FormatBool(config.SDClang))
-	}
-	ctx.Strict("SDCLANG_PATH", "${config.SDClangBin}")
-	ctx.Strict("SDCLANG_COMMON_FLAGS", "${config.SDClangFlags}")
+ if config.ForceSDClangOff {
+  ctx.Strict("FORCE_SDCLANG_OFF", strconv.FormatBool(config.ForceSDClangOff))
+ }
+ if config.SDClang {
+  ctx.Strict("SDCLANG", strconv.FormatBool(config.SDClang))
+ }
+ ctx.Strict("SDCLANG_PATH", "${config.SDClangBin}")
+ ctx.Strict("SDCLANG_COMMON_FLAGS", "${config.SDClangFlags}")
 }
 
 func makeVarsToolchain(ctx android.MakeVarsContext, secondPrefix string,
@@ -249,10 +260,12 @@ func makeVarsToolchain(ctx android.MakeVarsContext, secondPrefix string,
 		fmt.Sprintf("${config.%sGlobalCppflags}", hod),
 		toolchain.Cppflags(),
 	}, " "))
+	ldFlags := toolchain.Ldflags(&FakeToolchainFlagsContext{ctx})
+	toolchainLdFlags := toolchain.ToolchainLdflags()
 	ctx.Strict(clangPrefix+"GLOBAL_LDFLAGS", strings.Join([]string{
 		fmt.Sprintf("${config.%sGlobalLdflags}", hod),
-		toolchain.Ldflags(),
-		toolchain.ToolchainLdflags(),
+		ldFlags.Flags,
+		toolchainLdFlags.Flags,
 		productExtraLdflags,
 	}, " "))
 
