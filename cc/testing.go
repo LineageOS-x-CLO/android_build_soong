@@ -507,6 +507,12 @@ func commonDefaultModules() string {
 			product_available: true,
 			cmake_snapshot_supported: true,
 		}
+
+		cc_library_static {
+			name: "libFuzzer_mte_crash_handler",
+			stl: "none",
+			system_shared_libs: [],
+		}
 	`
 }
 
@@ -620,6 +626,7 @@ var PrepareForTestWithCcBuildComponents = android.GroupFixturePreparers(
 	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_COV_VARIANT_ON_DEMAND", "true"),
 	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_SDK_VARIANT_ON_DEMAND", "true"),
 	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_LINK_VARIANT_ON_DEMAND", "true"),
+	android.PrepareForTestWithBuildFlag("RELEASE_SOONG_VERSION_VARIANT_ON_DEMAND", "true"),
 )
 
 // Preparer that will define default cc modules, e.g. standard prebuilt modules.
