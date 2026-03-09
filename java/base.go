@@ -1000,6 +1000,8 @@ func (j *Module) deps(ctx android.BottomUpMutatorContext) {
 	}
 
 	j.EmbeddableSdkLibraryComponent.setComponentDependencyInfoProvider(ctx)
+
+	ctx.AddHostToolDependencies("cp_if_changed")
 }
 
 func hasSrcExt(srcs []string, ext string) bool {
@@ -2612,6 +2614,7 @@ func (j *Module) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo)
 	dpInfo.Libs = append(dpInfo.Libs, j.libs(ctx)...)
 	dpInfo.Associates = append(dpInfo.Associates, j.properties.Associates...)
 	dpInfo.Kotlincflags = append(dpInfo.Kotlincflags, j.properties.Kotlincflags...)
+	dpInfo.Javacflags = append(dpInfo.Javacflags, j.properties.Javacflags...)
 	dpInfo.Annotation_processor_flags = append(dpInfo.Annotation_processor_flags, j.properties.Annotation_processor_flags...)
 	dpInfo.Plugins = append(dpInfo.Plugins, j.properties.Plugins...)
 
