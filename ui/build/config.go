@@ -323,6 +323,8 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	ret.parseArgs(ctx, args)
 
 	switch os.Getenv("SOONG_NINJA") {
+	case "ninja":
+		ret.ninjaCommand = NINJA_NINJA
 	case "n2":
 		ret.ninjaCommand = NINJA_N2
 	case "siso":
@@ -330,11 +332,12 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 	case "ninjago":
 		ret.ninjaCommand = NINJA_NINJAGO
 	default:
-		if os.Getenv("SOONG_USE_N2") == "true" {
-			ret.ninjaCommand = NINJA_N2
-		} else {
-			ret.ninjaCommand = NINJA_DEFAULT
-		}
+		ret.ninjaCommand = NINJA_DEFAULT
+	}
+
+	// TODO(b/490207582): SISO doesn't work on older versions of mac os that our CI builders use
+	if runtime.GOOS == "darwin" && ret.ninjaCommand == NINJA_SISO {
+		ret.ninjaCommand = NINJA_NINJA
 	}
 
 	if value, ok := ret.environ.Get("SOONG_ONLY"); ok && !ret.skipKatiControlledByFlags {
@@ -547,7 +550,6 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 
 		// Use config.ninjaCommand instead.
 		"SOONG_NINJA",
-		"SOONG_USE_N2",
 
 		// Already incorporated into the config object
 		"SOONG_ONLY",
