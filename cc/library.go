@@ -2367,7 +2367,8 @@ func prebuiltOrSourceWithPrebuilt(ctx android.BaseModuleContext) bool {
 }
 
 func (l linkageTransitionMutator) splitAll(ctx android.BaseModuleContext) bool {
-	if _, isLinkable := ctx.Module().(LinkableInterface); !isLinkable {
+	// Not cc
+	if _, isCc := ctx.Module().(*Module); !isCc {
 		return true
 	}
 	// Prebuilt (TODO: b/448182248) Handle prebuilts
@@ -2432,7 +2433,9 @@ func (linkageTransitionMutator) IncomingTransition(ctx android.IncomingTransitio
 		return ""
 	} else if library, ok := ctx.Module().(LinkableInterface); ok && library.CcLibraryInterface() {
 		isLLNDK := false
-		isLLNDK = library.IsLlndk()
+		if m, ok := ctx.Module().(*Module); ok {
+			isLLNDK = m.IsLlndk()
+		}
 		buildStatic := library.BuildStaticVariant() && !isLLNDK
 		buildShared := library.BuildSharedVariant()
 		if library.BuildRlibVariant() && !buildStatic && (incomingVariation == "static" || incomingVariation == "") {

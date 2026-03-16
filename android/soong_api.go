@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package soong_api
+package android
 
 import (
-	"android/soong/android"
-	"android/soong/java"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -24,17 +22,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
 func init() {
-	android.RegisterParallelSingletonType("soong_api_db", soongApiSingletonFactory)
+	RegisterParallelSingletonType("soong_api_db", soongApiSingletonFactory)
 }
 
-var soongApiPctx = android.NewPackageContext("android/soong/android/soong_api")
+var soongApiPctx = NewPackageContext("android/soong/android/soong_api")
 
 // SoongApiModuleRecord represents a single entry in the Soong API database.
 // The term "Record" is used to clarify that this is a data snapshot of a
@@ -60,30 +57,19 @@ type SoongApiModuleRecord struct {
 	InstallFiles []string `json:"install_files,omitempty"`
 	BuiltFiles   []string `json:"built_files,omitempty"`
 	Licenses     []string `json:"license,omitempty"`
-
-	// Test related
-	TestOnly       bool `json:"test_only,omitempty"`
-	TopLevelTarget bool `json:"top_level_target,omitempty"`
-
-	// Java
-	TransitiveSrcFiles []string `json:"transitive_src_files,omitempty"` // Srcs
-	Libs               []string `json:"libs,omitempty"`                 // Module names
-	LibFiles           []string `json:"lib_flies,omitempty"`            // Lib paths to jars
-	StaticLibs         []string `json:"static_libs,omitempty"`          // Module names
-	StaticLibFiles     []string `json:"static_lib_files,omitempty"`     // Path to jars
 }
 
-func soongApiSingletonFactory() android.Singleton {
+func soongApiSingletonFactory() Singleton {
 	return &soongApiSingleton{}
 }
 
 type soongApiSingleton struct{}
 
-func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
+func (c *soongApiSingleton) GenerateBuildActions(ctx SingletonContext) {
 	var records []SoongApiModuleRecord
 
-	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
-		commonInfo, ok := android.OtherModuleProvider(ctx, m, android.CommonModuleInfoProvider)
+	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		commonInfo, ok := OtherModuleProvider(ctx, m, CommonModuleInfoProvider)
 
 		if !ok {
 			return
@@ -100,7 +86,7 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 		record.Os = commonInfo.Target.Os.Name
 		record.Arch = commonInfo.Target.Arch.ArchType.Name
 
-		if team, ok := android.OtherModuleProvider(ctx, m, android.TeamInfoProvider); ok {
+		if team, ok := OtherModuleProvider(ctx, m, TeamInfoProvider); ok {
 			record.TrendyTeamId = proptools.String(team.Properties.Trendy_team_id)
 		}
 
@@ -114,39 +100,6 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 
 		if commonInfo.Licenses != nil {
 			record.Licenses = commonInfo.Licenses.Licenses
-		}
-
-		if javaInfo, ok := android.OtherModuleProvider(ctx, m, java.JavaInfoProvider); ok {
-			srcFiles := javaInfo.TransitiveSrcFiles.ToList()
-			if len(srcFiles) > 0 {
-				record.TransitiveSrcFiles = pathsToStrings(srcFiles)
-			}
-
-			// Module name of Java libs and staitc_libs
-			ctx.VisitDirectDepsProxies(m, func(dep android.ModuleProxy) {
-				tag := ctx.OtherModuleDependencyTag(dep)
-				depName := ctx.ModuleName(dep)
-				tagStr := fmt.Sprintf("%v", tag)
-
-				// Get direct dep's Provider
-				if depJavaInfo, ok := android.OtherModuleProvider(ctx, dep, java.JavaInfoProvider); ok {
-					// Collect only the direct dep's own output files (non-transitive)
-					depFiles := depJavaInfo.ImplementationJars.Strings()
-
-					if strings.Contains(tagStr, "static") {
-						record.StaticLibs = append(record.StaticLibs, depName)
-						record.StaticLibFiles = append(record.StaticLibFiles, depFiles...)
-					} else if strings.Contains(tagStr, "lib") {
-						record.Libs = append(record.Libs, depName)
-						record.LibFiles = append(record.LibFiles, depFiles...)
-					}
-				}
-			})
-		}
-
-		if commonInfo.TestModuleInfo != nil {
-			record.TestOnly = commonInfo.TestModuleInfo.TestOnly
-			record.TopLevelTarget = commonInfo.TestModuleInfo.TopLevelTarget
 		}
 
 		records = append(records, record)
@@ -183,16 +136,16 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 
 	// Output path for soong_api.zip
 	// Path: out/soong/soong_api/<product>/soong_api.zip
-	zipPath := android.PathForOutput(ctx, "soong_api", product, "soong_api.zip")
+	zipPath := PathForOutput(ctx, "soong_api", product, "soong_api.zip")
 	WriteContentToFile(zipPath, zipBuf.String())
 
 	ctx.DistForGoal("droid", zipPath)
 
 	// Generate the soong_api.db using the ZIP file as the input source.
 	// Path: out/soong/soong_api/<product>/soong_api.db
-	soongApiDbPath := android.PathForOutput(ctx, "soong_api", product, "soong_api.db")
+	soongApiDbPath := PathForOutput(ctx, "soong_api", product, "soong_api.db")
 
-	dbRb := android.NewRuleBuilder(soongApiPctx, ctx)
+	dbRb := NewRuleBuilder(soongApiPctx, ctx)
 
 	loaderPath := ctx.Config().HostToolPath(ctx, "soong_api_db_loader")
 
@@ -205,14 +158,14 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 	dbRb.Build("build_soong_api_db", "Building soong_api.db from soong_api.zip")
 
 	// Phony target for 'm soong_api.db'
-	ctx.Build(soongApiPctx, android.BuildParams{
+	ctx.Build(soongApiPctx, BuildParams{
 		Rule:   blueprint.Phony,
 		Input:  soongApiDbPath,
-		Output: android.PathForPhony(ctx, "soong_api.db"),
+		Output: PathForPhony(ctx, "soong_api.db"),
 	})
 }
 
-func pathsToStrings[T android.Path](paths []T) []string {
+func pathsToStrings[T Path](paths []T) []string {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -224,7 +177,7 @@ func pathsToStrings[T android.Path](paths []T) []string {
 }
 
 // WriteContentToFile writes content to the given Path no matter what the file exist.
-func WriteContentToFile(path android.Path, content string) {
+func WriteContentToFile(path Path, content string) {
 	// 1. Convert Path to an absolute path string (e.g., "/usr/local/xxx/git_main/out/soong/soong_api/...")
 	filePath := absolutePath(path.String())
 
@@ -247,11 +200,4 @@ func WriteContentToFile(path android.Path, content string) {
 	if _, err := io.WriteString(f, content); err != nil {
 		panic(fmt.Errorf("failed to write content to %q: %w", filePath, err))
 	}
-}
-
-func absolutePath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(android.AbsSrcDirForExistingUseCases(), path)
 }

@@ -116,7 +116,8 @@ var (
 		blueprint.RuleParams{
 			Command2: blueprint.NewCommand(
 				Rm, " -f $out && ", Ln, " -f -s $fromPath $out"),
-			Description: "symlink $out",
+			Description:     "symlink $out",
+			SandboxDisabled: true,
 		},
 		"fromPath")
 
@@ -179,7 +180,9 @@ var (
 	AssembleVintfRule = pctx.StaticRule("AssembleVintfRule", blueprint.RuleParams{
 		Command2: blueprint.NewCommand(
 			Rm, " -f $out && VINTF_IGNORE_TARGET_FCM_VERSION=true ", assembleVintf, " -i $in -o $out"),
-		Description: "run assemble_vintf",
+		Description:     "run assemble_vintf",
+		SandboxDisabled: true,
+
 	})
 
 	depfileVerifierRule = pctx.AndroidStaticRule("DepfileVerifierRule",
