@@ -537,6 +537,10 @@ func init() {
 	if runtime.GOOS == "linux" {
 		commonGlobalCflags = append(commonGlobalCflags, "-fdebug-prefix-map=/proc/self/cwd=")
 	}
+	if runtime.GOOS == "darwin" {
+		commonGlobalCflags = append(commonGlobalCflags, "-Wno-unguarded-availability")
+	}
+
 	qiifaBuildConfig := os.Getenv("QIIFA_BUILD_CONFIG")
 	if _, err := os.Stat(qiifaBuildConfig); !os.IsNotExist(err) {
 		data, _ := ioutil.ReadFile(qiifaBuildConfig)
