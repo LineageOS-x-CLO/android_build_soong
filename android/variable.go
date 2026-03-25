@@ -75,10 +75,6 @@ type variableProperties struct {
 			Header_libs         []string `android:"arch_variant"`
 		} `android:"arch_variant"`
 
-		Malloc_scudo_tsds_max struct {
-			Cflags []string `android:"arch_variant"`
-		} `android:"arch_variant"`
-
 		Malloc_zero_contents struct {
 			Cflags []string `android:"arch_variant"`
 		} `android:"arch_variant"`
@@ -313,14 +309,13 @@ type ProductVariables struct {
 
 	AppsDefaultVersionName *string `json:",omitempty"`
 
-Allow_missing_dependencies       *bool    `json:",omitempty"`
+	Allow_missing_dependencies       *bool    `json:",omitempty"`
 	Unbundled_build                  *bool    `json:",omitempty"`
 	Unbundled_build_apps             []string `json:",omitempty"`
 	Unbundled_build_image            *bool    `json:",omitempty"`
 	Always_use_prebuilt_sdks         *bool    `json:",omitempty"`
 	Skip_boot_jars_check             *bool    `json:",omitempty"`
 	Malloc_low_memory                *bool    `json:",omitempty"`
-	Malloc_scudo_tsds_max            *bool    `json:",omitempty"`
 	Malloc_zero_contents             *bool    `json:",omitempty"`
 	Malloc_pattern_fill_contents     *bool    `json:",omitempty"`
 	Safestack                        *bool    `json:",omitempty"`
@@ -921,7 +916,6 @@ func (v *ProductVariables) SetDefaultConfig() {
 		AAPTPrebuiltDPI:     []string{"xhdpi", "xxhdpi"},
 
 		Malloc_low_memory:            boolPtr(false),
-		Malloc_scudo_tsds_max:        boolPtr(false),
 		Malloc_zero_contents:         boolPtr(true),
 		Malloc_pattern_fill_contents: boolPtr(false),
 		Safestack:                    boolPtr(false),

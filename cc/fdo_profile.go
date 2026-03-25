@@ -39,16 +39,12 @@ type fdoProfile struct {
 
 type fdoProfileProperties struct {
 	Profile proptools.Configurable[string] `android:"arch_variant,replace_instead_of_append"`
-
-	// If set to true, do not add -fprofile-sample-accurate to the module.
-	Incomplete_coverage *bool
 }
 
 // FdoProfileInfo is provided by FdoProfileProvider
 // @auto-generate: gob
 type FdoProfileInfo struct {
-	Path               android.Path
-	IncompleteCoverage bool
+	Path android.Path
 }
 
 // FdoProfileProvider is used to provide path to an fdo profile
@@ -60,8 +56,7 @@ func (fp *fdoProfile) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	if profile != "" {
 		path := android.PathForModuleSrc(ctx, profile)
 		android.SetProvider(ctx, FdoProfileProvider, FdoProfileInfo{
-			Path:               path,
-			IncompleteCoverage: proptools.Bool(fp.properties.Incomplete_coverage),
+			Path: path,
 		})
 	}
 }

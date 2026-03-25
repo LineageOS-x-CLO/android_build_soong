@@ -26,7 +26,7 @@ import (
 // This flag needs to be in both CFlags and LdFlags to ensure correct symbol ordering
 // TODO(yikong): -fsample-profile-use-profi is going to be the default in clang-r584948. Turn on the
 // flag in advance to isolate the performance difference. Remove the flag once updated past r584948.
-const afdoFlagsFormat = "-fprofile-sample-use=%s -fsample-profile-use-profi"
+const afdoFlagsFormat = "-fprofile-sample-use=%s -fprofile-sample-accurate -fsample-profile-use-profi"
 
 type AfdoProperties struct {
 	// Afdo allows developers self-service enroll for
@@ -62,16 +62,18 @@ func (afdo *afdo) afdoEnabled() bool {
 }
 
 func (afdo *afdo) isAfdoCompile(ctx ModuleContext) bool {
-	info, ok := getFdoProfileInfoFromDep(ctx)
-	return !ctx.Host() && (afdo.Properties.Afdo || afdo.Properties.AfdoDep) && ok && (info.Path != nil)
+	fdoProfilePath := getFdoProfilePathFromDep(ctx)
+	return !ctx.Host() && (afdo.Properties.Afdo || afdo.Properties.AfdoDep) && (fdoProfilePath != "")
 }
 
-func getFdoProfileInfoFromDep(ctx ModuleContext) (FdoProfileInfo, bool) {
+func getFdoProfilePathFromDep(ctx ModuleContext) string {
 	fdoProfileDeps := ctx.GetDirectDepsProxyWithTag(FdoProfileTag)
 	if len(fdoProfileDeps) > 0 {
-		return android.OtherModuleProvider(ctx, fdoProfileDeps[0], FdoProfileProvider)
+		if info, ok := android.OtherModuleProvider(ctx, fdoProfileDeps[0], FdoProfileProvider); ok {
+			return info.Path.String()
+		}
 	}
-	return FdoProfileInfo{}, false
+	return ""
 }
 
 func (afdo *afdo) flags(ctx ModuleContext, flags Flags) Flags {
@@ -102,15 +104,9 @@ func (afdo *afdo) flags(ctx ModuleContext, flags Flags) Flags {
 		//flags.Local.CFlags = append([]string{"-mllvm", "-improved-fs-discriminator=true"}, flags.Local.CFlags...)
 		flags.Local.LdFlags = append([]string{"-Wl,-mllvm,-improved-fs-discriminator=true"}, flags.Local.LdFlags...)
 	}
-	if fdoProfileInfo, ok := getFdoProfileInfoFromDep(ctx); ok && fdoProfileInfo.Path != nil {
-		fdoProfilePath := fdoProfileInfo.Path.String()
+	if fdoProfilePath := getFdoProfilePathFromDep(ctx); fdoProfilePath != "" {
 		// The flags are prepended to allow overriding.
 		profileUseFlag := fmt.Sprintf(afdoFlagsFormat, fdoProfilePath)
-		if !fdoProfileInfo.IncompleteCoverage {
-			profileUseFlag += " -fprofile-sample-accurate"
-		} else {
-			profileUseFlag += " -fno-profile-sample-accurate"
-		}
 		flags.Local.CFlags = append([]string{profileUseFlag}, flags.Local.CFlags...)
 		// Salvage stale profile by fuzzy matching and use the remapped location for sample profile query.
 		flags.Local.CFlags = append([]string{"-mllvm", "--salvage-stale-profile=true"}, flags.Local.CFlags...)

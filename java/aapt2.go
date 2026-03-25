@@ -81,8 +81,9 @@ const AAPT2_SHARD_SIZE = 100
 
 var aapt2CompileRule = pctx.AndroidStaticRule("aapt2Compile",
 	blueprint.RuleParams{
-		Command:     `${config.Aapt2Cmd} compile -o $outDir $cFlags $in`,
-		CommandDeps: []string{"${config.Aapt2Cmd}"},
+		Command:         `${config.Aapt2Cmd} compile -o $outDir $cFlags $in`,
+		CommandDeps:     []string{"${config.Aapt2Cmd}"},
+		SandboxDisabled: true,
 	},
 	"outDir", "cFlags")
 
@@ -159,13 +160,13 @@ func aapt2Compile(ctx android.ModuleContext, dir android.Path, paths android.Pat
 
 var aapt2CompileZipRule = pctx.AndroidStaticRule("aapt2CompileZip",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.ZipSync, ` -d $resZipDir $zipSyncFlags $in && `,
+		Command: `${config.ZipSyncCmd} -d $resZipDir $zipSyncFlags $in && ` +
 			`${config.Aapt2Cmd} compile -o $out $cFlags --dir $resZipDir`,
-		),
 		CommandDeps: []string{
 			"${config.Aapt2Cmd}",
+			"${config.ZipSyncCmd}",
 		},
+		SandboxDisabled: true,
 	}, "cFlags", "resZipDir", "zipSyncFlags")
 
 // Unzips the given compressed file and compiles the resource source files in it. The zipPrefix
@@ -191,32 +192,19 @@ func aapt2CompileZip(ctx android.ModuleContext, flata android.WritablePath, zip 
 
 var aapt2LinkRule = pctx.AndroidStaticRule("aapt2Link",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			`${config.Aapt2Cmd} link -o $out $flags --proguard $proguardOptions `,
-			`--output-text-symbols ${rTxt} $inFlags`,
-		),
-		CommandDeps: []string{
-			"${config.Aapt2Cmd}",
-		},
-		Restat: true,
-	},
-	"flags", "inFlags", "proguardOptions", "rTxt")
+		Command: `$preamble` +
+			`${config.Aapt2Cmd} link -o $out $flags --proguard $proguardOptions ` +
+			`--output-text-symbols ${rTxt} $inFlags` +
+			`$postamble`,
 
-var aapt2LinkAndGenRule = pctx.AndroidStaticRule("aapt2LinkAndGen",
-	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.Rm, ` -rf $aapt2GenDir && `,
-			`${config.Aapt2Cmd} link -o $out $flags --proguard $proguardOptions `,
-			`--output-text-symbols ${rTxt} $inFlags --java $aapt2GenDir && `,
-			android.SoongZip, ` -write_if_changed -jar -o $aapt2GenJar -C $aapt2GenDir -D $aapt2GenDir && `,
-			android.Rm, ` -rf $aapt2GenDir`,
-		),
 		CommandDeps: []string{
 			"${config.Aapt2Cmd}",
+			"${config.SoongZipCmd}",
 		},
-		Restat: true,
+		Restat:          true,
+		SandboxDisabled: true,
 	},
-	"flags", "inFlags", "proguardOptions", "rTxt", "aapt2GenJar", "aapt2GenDir")
+	"flags", "inFlags", "proguardOptions", "rTxt", "extraPackages", "preamble", "postamble")
 
 var aapt2ExtractExtraPackagesRule = pctx.AndroidStaticRule("aapt2ExtractExtraPackages",
 	blueprint.RuleParams{
@@ -228,18 +216,17 @@ var aapt2ExtractExtraPackagesRule = pctx.AndroidStaticRule("aapt2ExtractExtraPac
 
 var fileListToFileRule = pctx.AndroidStaticRule("fileListToFile",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.Cp, ` $out.rsp $out`,
-		),
-		Rspfile:        "$out.rsp",
-		RspfileContent: "$in",
+		Command:         `cp $out.rsp $out`,
+		Rspfile:         "$out.rsp",
+		RspfileContent:  "$in",
+		SandboxDisabled: true,
 	})
 
 var mergeAssetsRule = pctx.AndroidStaticRule("mergeAssets",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.MergeZips, ` ${out} ${in}`,
-		),
+		Command:         `${config.MergeZipsCmd} ${out} ${in}`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 func aapt2Link(ctx android.ModuleContext,
@@ -314,17 +301,18 @@ func aapt2Link(ctx android.ModuleContext,
 		"proguardOptions": proguardOptions.String(),
 		"rTxt":            rTxt.String(),
 	}
-	ruleToUse := aapt2LinkRule
 
 	if genJar != nil {
 		// Generating java source files from aapt2 was requested, use aapt2LinkAndGenRule and pass it
 		// genJar and genDir args.
-		ruleToUse = aapt2LinkAndGenRule
-
 		genDir := android.PathForModuleGen(ctx, "aapt2", "R")
+		ctx.Variable(pctx, "aapt2GenDir", genDir.String())
+		ctx.Variable(pctx, "aapt2GenJar", genJar.String())
 		implicitOutputs = append(implicitOutputs, genJar)
-		args["aapt2GenJar"] = genJar.String()
-		args["aapt2GenDir"] = genDir.String()
+		args["preamble"] = `rm -rf $aapt2GenDir && `
+		args["postamble"] = `&& ${config.SoongZipCmd} -write_if_changed -jar -o $aapt2GenJar -C $aapt2GenDir -D $aapt2GenDir && ` +
+			`rm -rf $aapt2GenDir`
+		args["flags"] += " --java $aapt2GenDir"
 	}
 
 	if resIds != nil {
@@ -333,7 +321,7 @@ func aapt2Link(ctx android.ModuleContext,
 	}
 
 	ctx.Build(pctx, android.BuildParams{
-		Rule:            ruleToUse,
+		Rule:            aapt2LinkRule,
 		Description:     "aapt2 link",
 		Implicits:       deps,
 		Output:          linkOutput,
@@ -358,7 +346,8 @@ var aapt2ConvertRule = pctx.AndroidStaticRule("aapt2Convert",
 	blueprint.RuleParams{
 		Command: `${config.Aapt2Cmd} convert $flags ` +
 			`--output-format $format $in -o $out`,
-		CommandDeps: []string{"${config.Aapt2Cmd}"},
+		CommandDeps:     []string{"${config.Aapt2Cmd}"},
+		SandboxDisabled: true,
 	}, "format", "flags",
 )
 

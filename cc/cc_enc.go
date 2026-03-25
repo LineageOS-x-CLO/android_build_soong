@@ -4700,16 +4700,12 @@ func (r FdoProfileInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error
 	if err = gobtools.EncodeInterface(ctx, buf, r.Path); err != nil {
 		return err
 	}
-
-	if err = gobtools.EncodeBool(buf, r.IncompleteCoverage); err != nil {
-		return err
-	}
 	return err
 }
 
 func (r FdoProfileInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":cc.FdoProfileInfo")
-	hasher.WriteInt(2)
+	hasher.WriteInt(1)
 	hasher.WriteString(":cc.android.Path")
 	val1 := r.Path == nil
 	if val1 {
@@ -4733,12 +4729,6 @@ func (r FdoProfileInfo) CustomHash(hasher *proptools.Hasher) error {
 			r.Path.(proptools.CustomHash).CustomHash(hasher)
 		}
 	}
-	hasher.WriteString(":.bool")
-	if r.IncompleteCoverage {
-		hasher.WriteByte(1)
-	} else {
-		hasher.WriteByte(0)
-	}
 	return nil
 }
 
@@ -4751,11 +4741,6 @@ func (r *FdoProfileInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) erro
 		r.Path = nil
 	} else {
 		r.Path = val2.(android.Path)
-	}
-
-	err = gobtools.DecodeBool(buf, &r.IncompleteCoverage)
-	if err != nil {
-		return err
 	}
 
 	return err

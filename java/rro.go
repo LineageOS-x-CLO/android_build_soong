@@ -324,13 +324,12 @@ func OverrideRuntimeResourceOverlayModuleFactory() android.Module {
 var (
 	generateOverlayManifestFile = pctx.AndroidStaticRule("generate_overlay_manifest",
 		blueprint.RuleParams{
-			Command2: blueprint.NewCommand(
-				android.Python3, ` build/make/tools/generate-enforce-rro-android-manifest.py `,
-				`--package-info $in `,
-				`--partition ${partition} `,
-				`--priority ${priority} -o $out`,
-			),
-			CommandDeps: []string{"build/make/tools/generate-enforce-rro-android-manifest.py"},
+			Command: "build/make/tools/generate-enforce-rro-android-manifest.py " +
+				"--package-info $in " +
+				"--partition ${partition} " +
+				"--priority ${priority} -o $out",
+			CommandDeps:     []string{"build/make/tools/generate-enforce-rro-android-manifest.py"},
+			SandboxDisabled: true,
 		}, "partition", "priority",
 	)
 )

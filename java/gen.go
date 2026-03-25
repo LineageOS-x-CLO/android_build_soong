@@ -25,14 +25,16 @@ import (
 	"android/soong/android"
 )
 
-var (
-	logtagCmd = pctx.HostTool("java-event-log-tags")
+func init() {
+	pctx.HostBinToolVariable("logtagsCmd", "java-event-log-tags")
+}
 
+var (
 	logtags = pctx.AndroidStaticRule("logtags",
 		blueprint.RuleParams{
-			Command2: blueprint.NewCommand(
-				logtagCmd, ` -o $out $in`,
-			),
+			Command:         "$logtagsCmd -o $out $in",
+			CommandDeps:     []string{"$logtagsCmd"},
+			SandboxDisabled: true,
 		})
 )
 

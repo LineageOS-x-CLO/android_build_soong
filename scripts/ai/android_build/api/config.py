@@ -20,9 +20,8 @@ from typing import Any
 from .constants import SOONG_UI_BASH, ACONFIG_BIN_PATH, ALL_ACONFIG_DECLARATIONS_PB_PATH, ALL_ACONFIG_DECLARATIONS_TARGET
 from .env import BuildContext
 from .build import build_targets
-from interface.errors import ToolError
 
-class MissingAconfigCacheError(ToolError):
+class MissingAconfigCacheError(Exception):
     """Custom exception for when aconfig dependencies are missing."""
     pass
 
@@ -43,7 +42,7 @@ def get_build_vars(ctx: BuildContext, *vars: str) -> dict[str, str]:
     env = ctx.env
     android_build_top = env.get('ANDROID_BUILD_TOP')
     if not android_build_top:
-        raise ToolError("ANDROID_BUILD_TOP not found in environment.")
+        raise ValueError("ANDROID_BUILD_TOP not found in environment.")
 
     soong_ui_path = Path(android_build_top) / SOONG_UI_BASH
 
@@ -108,14 +107,8 @@ def get_aconfig_flag(ctx: BuildContext, package: str, flag: str) -> AconfigFlag:
         flag: The aconfig flag name.
     """
     env = ctx.env
-    top = env.get('ANDROID_BUILD_TOP')
-    if not top:
-        raise ToolError("ANDROID_BUILD_TOP not found in environment.")
-    android_build_top = Path(top)
-    android_soong_host_out = env.get('ANDROID_SOONG_HOST_OUT')
-    if not android_soong_host_out:
-        raise ToolError("ANDROID_SOONG_HOST_OUT not found in environment.")
-    soong_host_out_abs_path = Path(android_build_top, android_soong_host_out)
+    android_build_top = Path(str(env.get('ANDROID_BUILD_TOP')))
+    soong_host_out_abs_path = Path(android_build_top, str(env.get('ANDROID_SOONG_HOST_OUT')))
 
     vars_dict = get_build_vars(ctx, "OUT_DIR")
     out_dir_str = vars_dict["OUT_DIR"]
@@ -174,7 +167,7 @@ def get_aconfig_flag(ctx: BuildContext, package: str, flag: str) -> AconfigFlag:
 
     parts = output.split(delimiter)
     if len(parts) != 11:
-        raise ToolError(
+        raise ValueError(
             f"Unexpected output from aconfig: got {len(parts)} parts, expected 11. "
             f"Raw output: {output}"
         )

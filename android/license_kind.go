@@ -21,7 +21,6 @@ import "github.com/google/blueprint"
 // @auto-generate: gob
 type LicenseKindInfo struct {
 	Conditions []string
-	Url        string
 }
 
 var LicenseKindInfoProvider = blueprint.NewProvider[LicenseKindInfo]()
@@ -58,7 +57,6 @@ func (m *licenseKindModule) DepsMutator(ctx BottomUpMutatorContext) {
 func (m *licenseKindModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	SetProvider(ctx, LicenseKindInfoProvider, LicenseKindInfo{
 		Conditions: m.properties.Conditions,
-		Url:        m.properties.Url,
 	})
 }
 

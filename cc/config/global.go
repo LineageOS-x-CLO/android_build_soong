@@ -351,7 +351,6 @@ var (
 		"-Wno-error=uninitialized-const-pointer", // http://b/458489157
 		// New warnings to be fixed after clang-r596125
 		"-Wno-incompatible-pointer-types", // http://b/490481169
-		"-Wno-c2y-extensions",             // http://b/493691159
 
 		//Android T Vendor Compilation
 		"-Wno-reorder-init-list",
@@ -440,6 +439,9 @@ var (
 		// http://b/72331524 Allow null pointer arithmetic until the instances detected by
 		// this new warning are fixed.
 		"-Wno-null-pointer-arithmetic",
+
+		// http://b/165945989
+		"-Wno-psabi",
 
 		// http://b/199369603
 		"-Wno-null-pointer-subtraction",

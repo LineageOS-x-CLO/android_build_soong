@@ -16,7 +16,6 @@ package rust
 
 import (
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -36,12 +35,12 @@ var (
 
 	rustc, rustcRbe = pctx.RemoteStaticRules("rustc",
 		blueprint.RuleParams{
-			Command: "$relPwd $reTemplate ${SoongEnvCmd} -i --allow PWD --allow TMPDIR $envVars ${RustcWrapper} ${rustcCmd} " +
+			Command: "$relPwd $reTemplate/usr/bin/env -i TMPDIR=\"$$TMPDIR\" $envVars ${RustcWrapper} ${rustcCmd} " +
 				"-C linker=${RustcLinkerCmd} -C link-args=\"--android-clang-bin=${config.ClangCmd} ${linkerScriptFlags}\" " +
 				"-C link-args=@${out}.clang.rsp " +
 				"--emit ${emitType} -o $out --emit dep-info=$out.d.raw $in ${libFlags} $rustcFlags" +
 				" && ${DepfileVerifier} --check-suffix-only $out.d ${soongSrcsFile}",
-			CommandDeps:    []string{"$rustcCmd", "${RustcLinkerCmd}", "${config.ClangCmd}", "${DepfileVerifier}", "${RustcWrapper}", "${SoongEnvCmd}"},
+			CommandDeps:    []string{"$rustcCmd", "${RustcLinkerCmd}", "${config.ClangCmd}", "${DepfileVerifier}", "${RustcWrapper}"},
 			Rspfile:        "${out}.clang.rsp",
 			RspfileContent: "${crtBegin} ${earlyLinkFlags} ${linkFlags} ${crtEnd}",
 		}, &remoteexec.REParams{
@@ -60,7 +59,6 @@ var (
 				"${config.LlvmDlltool}",
 				"${DepfileVerifier}",
 				"${RustcWrapper}",
-				"${SoongEnvCmd}",
 			},
 			Platform: map[string]string{remoteexec.PoolKey: "${config.RERustPool}"},
 		},
@@ -118,7 +116,6 @@ func init() {
 	pctx.HostBinToolVariable("SoongZipCmd", "soong_zip")
 	pctx.HostBinToolVariable("RustcLinkerCmd", "rustc_linker")
 	pctx.HostBinToolVariable("RustcWrapper", "rustc_wrapper")
-	pctx.HostBinToolVariable("SoongEnvCmd", "soong_env")
 	pctx.HostBinToolVariable("DepfileVerifier", "depfile_verifier")
 	pctx.StaticVariable("relPwd", cc.PwdPrefix())
 
@@ -694,17 +691,9 @@ func Rustdoc(ctx ModuleContext, main android.Path, deps PathDeps,
 }
 
 func toolchainImplicitsPhony(ctx android.ModuleContext) android.Path {
-	rustPath := config.RustPath(ctx)
-	clangPath := cc_config.ClangPathNoOnce(ctx, "").String()
-
 	return ctx.CreateNinjaPhonyOnce("rustToolchainImplicits", []string{
-		filepath.Join(rustPath, "lib/librustc_driver-*.so"),
-		filepath.Join(rustPath, "lib/rustlib/*/lib/**/*"),
-		filepath.Join(rustPath, "lib/libLLVM*"),
-		filepath.Join(rustPath, "lib64/*.so"),
-		filepath.Join(clangPath, "lib/clang/*/include/**/*"),
-		filepath.Join(clangPath, "lib/clang/*/lib", runtime.GOOS, "**/*"),
-		filepath.Join(clangPath, "lib/libxml2.so*"),
-		filepath.Join(clangPath, "bin/**/*"),
+		filepath.Join(config.RustPath(ctx), "**/*"),
+		cc_config.ClangPathNoOnce(ctx, "lib/**/*").String(),
+		cc_config.ClangPathNoOnce(ctx, "bin/**/*").String(),
 	})
 }

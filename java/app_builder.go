@@ -49,9 +49,9 @@ var (
 
 var combineApk = pctx.AndroidStaticRule("combineApk",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.MergeZips, ` $out $in`,
-		),
+		Command:         `${config.MergeZipsCmd} $out $in`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 func CreateAndSignAppPackage(ctx android.ModuleContext, outputFile android.WritablePath,
@@ -132,14 +132,13 @@ func SignAppPackage(ctx android.ModuleContext, signedApk android.WritablePath, u
 
 var buildAAR = pctx.AndroidStaticRule("buildAAR",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.Rm, ` -rf ${outDir} && `,
-			android.Mkdir, ` -p ${outDir} && `,
-			android.Cp, ` ${manifest} ${outDir}/AndroidManifest.xml && `,
-			android.Cp, ` ${classesJar} ${outDir}/classes.jar && `,
-			android.Cp, ` ${rTxt} ${outDir}/R.txt && `,
-			android.SoongZip, ` -jar -o $out -C ${outDir} -D ${outDir}`,
-		),
+		Command: `rm -rf ${outDir} && mkdir -p ${outDir} && ` +
+			`cp ${manifest} ${outDir}/AndroidManifest.xml && ` +
+			`cp ${classesJar} ${outDir}/classes.jar && ` +
+			`cp ${rTxt} ${outDir}/R.txt && ` +
+			`${config.SoongZipCmd} -jar -o $out -C ${outDir} -D ${outDir}`,
+		CommandDeps:     []string{"${config.SoongZipCmd}"},
+		SandboxDisabled: true,
 	},
 	"manifest", "classesJar", "rTxt", "outDir")
 
@@ -171,24 +170,24 @@ func BuildAAR(ctx android.ModuleContext, outputFile android.WritablePath,
 
 var buildBundleModule = pctx.AndroidStaticRule("buildBundleModule",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.MergeZips, ` ${out} ${in}`,
-		),
+		Command:         `${config.MergeZipsCmd} ${out} ${in}`,
+		CommandDeps:     []string{"${config.MergeZipsCmd}"},
+		SandboxDisabled: true,
 	})
 
 var bundleMungePackage = pctx.AndroidStaticRule("bundleMungePackage",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.Zip2zip, ` -i ${in} -o ${out} AndroidManifest.xml:manifest/AndroidManifest.xml resources.pb "res/**/*" "assets/**/*"`,
-		),
+		Command:         `${config.Zip2ZipCmd} -i ${in} -o ${out} AndroidManifest.xml:manifest/AndroidManifest.xml resources.pb "res/**/*" "assets/**/*"`,
+		CommandDeps:     []string{"${config.Zip2ZipCmd}"},
+		SandboxDisabled: true,
 	})
 
 var bundleMungeDexJar = pctx.AndroidStaticRule("bundleMungeDexJar",
 	blueprint.RuleParams{
-		Command2: blueprint.NewCommand(
-			android.Zip2zip, ` -i ${in} -o ${out} "classes*.dex:dex/" && `,
-			android.Zip2zip, ` -i ${in} -o ${resJar} -x "classes*.dex" "**/*:root/"`,
-		),
+		Command: `${config.Zip2ZipCmd} -i ${in} -o ${out} "classes*.dex:dex/" && ` +
+			`${config.Zip2ZipCmd} -i ${in} -o ${resJar} -x "classes*.dex" "**/*:root/"`,
+		CommandDeps:     []string{"${config.Zip2ZipCmd}"},
+		SandboxDisabled: true,
 	}, "resJar")
 
 // Builds an app into a module suitable for input to bundletool
@@ -301,15 +300,10 @@ func TransformJniLibsToJar(
 }
 
 func (a *AndroidApp) generateJavaUsedByApex(ctx android.ModuleContext) {
-	// Skip generating the XML file for unbundled test apps that don't have the tools
-	if ctx.Config().UnbundledBuild() && !slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) {
-		return
-	}
 	javaApiUsedByOutputFile := android.PathForModuleOut(ctx, a.installApkName+"_using.xml")
 	javaUsedByRule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()
 	javaUsedByRule.Command().
-		BuiltTool("gen_apex_symbols").
-		Text("java_usedby").
+		Tool(android.PathForSource(ctx, "build/soong/scripts/gen_java_usedby_apex.sh")).
 		BuiltTool("dexdeps").
 		Output(javaApiUsedByOutputFile).
 		Input(a.Library.Module.outputFile)

@@ -19,7 +19,6 @@ import os
 from pathlib import Path
 import importlib.resources
 from contextlib import ExitStack
-import typing
 
 # Add the SDK root to sys.path for absolute imports
 sdk_root = Path(__file__).resolve().parent.parent
@@ -35,7 +34,7 @@ class TestInterface(unittest.TestCase):
         cls._exit_stack = ExitStack()
         try:
             anchor = importlib.resources.files('tests')
-            ref = typing.cast(Path, anchor).parent.joinpath('build_sdk_bin')
+            ref = anchor.parent.joinpath('build_sdk_bin')
             cls._cli_path = str(cls._exit_stack.enter_context(importlib.resources.as_file(ref)))
             os.chmod(cls._cli_path, 0o755)
         except Exception:

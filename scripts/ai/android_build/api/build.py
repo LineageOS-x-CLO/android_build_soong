@@ -19,9 +19,8 @@ from typing import Any, Callable, Optional
 from pathlib import Path
 from .env import BuildContext
 from .constants import SOONG_UI_BASH
-from interface.errors import ToolError
 
-class BuildError(ToolError):
+class BuildError(Exception):
     """Custom exception for build failures."""
     def __init__(self, message: str, exit_code: int, logs: str) -> None:
         super().__init__(message)
@@ -43,19 +42,11 @@ class BuildResult:
     exit_code: int
     failure_details: Optional[list[BuildFailure]] = None
 
-def strip_ansi_codes(text: str) -> str:
-    """Removes ANSI escape sequences from a string."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
-
 def parse_build_log(raw_log: str) -> list[BuildFailure]:
     """
     Parses the Android error.log content into a structured list of failures.
     Returns a list of BuildFailure objects.
     """
-    # Remove ANSI codes to ensure clean regex matching
-    clean_log = strip_ansi_codes(raw_log)
-
     # Regex to extract structured Soong errors
     # Format is defined in build/soong/ui/status/log.go
     soong_pattern = re.compile(
@@ -63,30 +54,32 @@ def parse_build_log(raw_log: str) -> list[BuildFailure]:
         r"(?:Outputs:\s+(?P<outputs>.*)\n)?"
         r"(?:Error:\s+(?P<error_summary>.*)\n)?"
         r"(?:Command:\s+(?P<command>.*)\n)?"
-        r"Output:\n(?P<output>[\s\S]*?)(?=\n\nFAILED:|$)"
+        r"Output:\n(?P<output>[\s\S]*?)(?=\n\nFAILED:|$)",
+        re.MULTILINE
     )
 
-    matches = list(soong_pattern.finditer(clean_log))
+    matches = list(soong_pattern.finditer(raw_log))
 
     if matches:
         # Scenario 1: Structured Log Found
         structured_failures = []
         for m in matches:
             data = m.groupdict()
-
             failure = BuildFailure(
                 target=(data.get("target") or "").strip(),
                 command=(data.get("command") or "").strip(),
-                outputs=(data.get("outputs") or "").strip(),
-                message=(data.get("output") or "").strip() or "Build failed."
+                outputs=(data.get("output") or "").strip() or (data.get("outputs") or "").strip(),
+                message=(data.get("error_summary") or "").strip()
             )
             structured_failures.append(failure)
         return structured_failures
     else:
         # Scenario 2: Unstructured / Ninja Error
-        return [BuildFailure(message=clean_log.strip())]
+        return [BuildFailure(message=raw_log.strip())]
 
-def _execute_build_command(ctx: BuildContext, targets: list[str], enforce_no_reanalysis: bool = False, progress_callback: Optional[Callable[[float, Optional[float]], None]] = None) -> int:
+
+
+def _execute_build_command(ctx: BuildContext, targets: list[str], progress_callback: Optional[Callable[[float, Optional[float]], None]] = None) -> int:
     """Helper to run a single Soong build command."""
     env = ctx.env
     android_build_top = env.get('ANDROID_BUILD_TOP')
@@ -94,10 +87,7 @@ def _execute_build_command(ctx: BuildContext, targets: list[str], enforce_no_rea
         raise BuildError("ANDROID_BUILD_TOP not found in environment.", 1, "")
 
     soong_ui_path = Path(android_build_top) / SOONG_UI_BASH
-    command = [str(soong_ui_path), "--make-mode"]
-    if enforce_no_reanalysis:
-        command.append("--enforce-no-reanalysis")
-    command.extend(targets)
+    command = [str(soong_ui_path), "--make-mode"] + targets
 
     process = subprocess.Popen(
         command,
@@ -144,7 +134,7 @@ def _create_failed_result(ctx: BuildContext, exit_code: int) -> BuildResult:
 
     return BuildResult(success=False, exit_code=exit_code, failure_details=failure_details)
 
-def build_targets(ctx: BuildContext, targets: list[str], clean: bool = False, enforce_no_reanalysis: bool = False, progress_callback: Optional[Callable[[float, Optional[float]], None]] = None) -> BuildResult:
+def build_targets(ctx: BuildContext, targets: list[str], clean: bool = False, progress_callback: Optional[Callable[[float, Optional[float]], None]] = None) -> BuildResult:
     """
     Executes an Android build for the given targets.
 
@@ -152,20 +142,17 @@ def build_targets(ctx: BuildContext, targets: list[str], clean: bool = False, en
     Returns a BuildResult object with success status and failure details if applicable.
 
     Args:
-        ctx: Evaluated build configuration.
         targets: List of build targets (e.g., 'SystemUI', 'nothing'). These can be module names or Ninja targets.
         clean: If True, runs 'installclean' before building.
-        enforce_no_reanalysis: If True, blocks re-running analysis and throws an error if reanalysis is required.
-        progress_callback: Optional callback for progress reporting.
     """
     # Step 1: Installclean if requested
     if clean:
-        exit_code = _execute_build_command(ctx, ["installclean"], enforce_no_reanalysis=False, progress_callback=None)
+        exit_code = _execute_build_command(ctx, ["installclean"], progress_callback=None)
         if exit_code != 0:
             return _create_failed_result(ctx, exit_code)
 
     # Step 2: Main Build
-    exit_code = _execute_build_command(ctx, targets, enforce_no_reanalysis=enforce_no_reanalysis, progress_callback=progress_callback)
+    exit_code = _execute_build_command(ctx, targets, progress_callback)
 
     if exit_code == 0:
         return BuildResult(success=True, exit_code=0)
