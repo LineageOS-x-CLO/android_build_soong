@@ -3790,6 +3790,7 @@ func TestMacro(t *testing.T) {
 			static_libs: ["mylib3"],
 			recovery_available: true,
 			min_sdk_version: "29",
+			split_all_variants: true,
 		}
 		cc_library {
 			name: "mylib3",
@@ -3802,6 +3803,7 @@ func TestMacro(t *testing.T) {
 			],
 			recovery_available: true,
 			min_sdk_version: "29",
+			split_all_variants: true,
 		}
 	`)
 
@@ -10341,7 +10343,9 @@ func TestCannedFsConfig(t *testing.T) {
 	generateFsRule := mod.Rule("generateFsConfig")
 	cmd := generateFsRule.RuleParams.Command
 
-	ensureContains(t, cmd, `( echo '/ 1000 1000 0755'; echo '/apex_manifest.json 1000 1000 0644'; echo '/apex_manifest.pb 1000 1000 0644'; ) >`)
+	ensureContains(t, cmd, `echo '/ 1000 1000 0755';`)
+	ensureContains(t, cmd, `echo '/apex_manifest.json 1000 1000 0644';`)
+	ensureContains(t, cmd, `echo '/apex_manifest.pb 1000 1000 0644'; ) >`)
 }
 
 func TestCannedFsConfig_HasCustomConfig(t *testing.T) {
@@ -10364,7 +10368,10 @@ func TestCannedFsConfig_HasCustomConfig(t *testing.T) {
 	cmd := generateFsRule.RuleParams.Command
 
 	// Ensure that canned_fs_config has "cat my_config" at the end
-	ensureContains(t, cmd, `( echo '/ 1000 1000 0755'; echo '/apex_manifest.json 1000 1000 0644'; echo '/apex_manifest.pb 1000 1000 0644'; cat my_config ) >`)
+	ensureContains(t, cmd, `echo '/ 1000 1000 0755';`)
+	ensureContains(t, cmd, `echo '/apex_manifest.json 1000 1000 0644';`)
+	ensureContains(t, cmd, `echo '/apex_manifest.pb 1000 1000 0644';`)
+	ensureContains(t, cmd, `cat my_config ) >`)
 }
 
 func TestStubLibrariesMultipleApexViolation(t *testing.T) {

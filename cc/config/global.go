@@ -349,6 +349,8 @@ var (
 		"-Wno-character-conversion", // http://b/452740154
 		// TODO: Disable this warning in external projects after switching clang.
 		"-Wno-error=uninitialized-const-pointer", // http://b/458489157
+		// New warnings to be fixed after clang-r596125
+		"-Wno-incompatible-pointer-types", // http://b/490481169
 
 		//Android T Vendor Compilation
 		"-Wno-reorder-init-list",
@@ -535,6 +537,10 @@ func init() {
 	if runtime.GOOS == "linux" {
 		commonGlobalCflags = append(commonGlobalCflags, "-fdebug-prefix-map=/proc/self/cwd=")
 	}
+	if runtime.GOOS == "darwin" {
+		commonGlobalCflags = append(commonGlobalCflags, "-Wno-unguarded-availability")
+	}
+
 	qiifaBuildConfig := os.Getenv("QIIFA_BUILD_CONFIG")
 	if _, err := os.Stat(qiifaBuildConfig); !os.IsNotExist(err) {
 		data, _ := ioutil.ReadFile(qiifaBuildConfig)

@@ -16,7 +16,9 @@ package soong_api
 
 import (
 	"android/soong/android"
+	"android/soong/cc"
 	"android/soong/java"
+	"android/soong/rust"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -24,7 +26,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
@@ -49,28 +50,39 @@ type SoongApiModuleRecord struct {
 	Path string `json:"path"`
 
 	// Target / Variation Info
-	Os   string `json:"os,omitempty"`
-	Arch string `json:"arch,omitempty"`
+	Os            string `json:"os,omitempty"`
+	Arch          string `json:"arch,omitempty"`
+	IsPrimaryArch bool   `json:"is_primary_arch"`
+	Variant       string `json:"variant,omitempty"`
 
 	// Status
 	Enabled bool `json:"enabled"`
 
 	// Artifacts
-	TrendyTeamId string   `json:"trendy_team_id,omitempty"`
-	InstallFiles []string `json:"install_files,omitempty"`
-	BuiltFiles   []string `json:"built_files,omitempty"`
-	Licenses     []string `json:"license,omitempty"`
+	TrendyTeamId                     string   `json:"trendy_team_id,omitempty"`
+	InstallFiles                     []string `json:"install_files,omitempty"`
+	BuiltFiles                       []string `json:"built_files,omitempty"`
+	Licenses                         []string `json:"license,omitempty"`
+	PackageDefaultApplicableLicenses []string `json:"package_default_applicable_licenses,omitempty"` // module_type=package
 
 	// Test related
 	TestOnly       bool `json:"test_only,omitempty"`
 	TopLevelTarget bool `json:"top_level_target,omitempty"`
 
-	// Java
-	TransitiveSrcFiles []string `json:"transitive_src_files,omitempty"` // Srcs
-	Libs               []string `json:"libs,omitempty"`                 // Module names
-	LibFiles           []string `json:"lib_flies,omitempty"`            // Lib paths to jars
-	StaticLibs         []string `json:"static_libs,omitempty"`          // Module names
-	StaticLibFiles     []string `json:"static_lib_files,omitempty"`     // Path to jars
+	// Java / CC / Rust
+	Libs           []string `json:"libs,omitempty"`             // Java javalib / CC sharedLibs
+	LibFiles       []string `json:"lib_files,omitempty"`        // Path to jars or .a
+	StaticLibs     []string `json:"static_libs,omitempty"`      // Java staticlib / CC staticLibs
+	StaticLibFiles []string `json:"static_lib_files,omitempty"` // Path to jars or .a
+
+	// For CC / Rust
+	WholeStaticLibs     []string `json:"whole_static_libs,omitempty"`
+	WholeStaticLibFiles []string `json:"whole_static_lib_files,omitempty"`
+	HeaderLibs          []string `json:"header_libs,omitempty"`
+
+	// CRT
+	CrtLibs     []string `json:"crt_libs,omitempty"`
+	CrtLibFiles []string `json:"crt_lib_files,omitempty"`
 }
 
 func soongApiSingletonFactory() android.Singleton {
@@ -90,10 +102,16 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 		}
 
 		record := SoongApiModuleRecord{
-			Name:    ctx.ModuleName(m),
-			Type:    ctx.ModuleType(m),
-			Path:    ctx.ModuleDir(m),
-			Enabled: commonInfo.Enabled,
+			Name:          ctx.ModuleName(m),
+			Type:          ctx.ModuleType(m),
+			Path:          ctx.ModuleDir(m),
+			Enabled:       commonInfo.Enabled,
+			Variant:       ctx.ModuleSubDir(m),
+			IsPrimaryArch: ctx.IsPrimaryModule(m),
+		}
+
+		if record.Type == "package" && commonInfo.PackageInfo != nil {
+			record.PackageDefaultApplicableLicenses = commonInfo.PackageInfo.PrimaryLicenses
 		}
 
 		// Extract OS / Arch
@@ -116,27 +134,24 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 			record.Licenses = commonInfo.Licenses.Licenses
 		}
 
-		if javaInfo, ok := android.OtherModuleProvider(ctx, m, java.JavaInfoProvider); ok {
-			srcFiles := javaInfo.TransitiveSrcFiles.ToList()
-			if len(srcFiles) > 0 {
-				record.TransitiveSrcFiles = pathsToStrings(srcFiles)
-			}
+		if _, ok := android.OtherModuleProvider(ctx, m, java.JavaInfoProvider); ok {
 
 			// Module name of Java libs and staitc_libs
 			ctx.VisitDirectDepsProxies(m, func(dep android.ModuleProxy) {
 				tag := ctx.OtherModuleDependencyTag(dep)
 				depName := ctx.ModuleName(dep)
-				tagStr := fmt.Sprintf("%v", tag)
 
 				// Get direct dep's Provider
 				if depJavaInfo, ok := android.OtherModuleProvider(ctx, dep, java.JavaInfoProvider); ok {
 					// Collect only the direct dep's own output files (non-transitive)
 					depFiles := depJavaInfo.ImplementationJars.Strings()
 
-					if strings.Contains(tagStr, "static") {
+					// Use refined property-based helpers to categorize dependencies.
+					if java.IsStaticLibDepTag(tag) {
 						record.StaticLibs = append(record.StaticLibs, depName)
 						record.StaticLibFiles = append(record.StaticLibFiles, depFiles...)
-					} else if strings.Contains(tagStr, "lib") {
+					} else if java.IsRuntimeDepTag(tag) {
+						// This will now correctly catch libTag, sdkLibTag, jniLibTag, etc.
 						record.Libs = append(record.Libs, depName)
 						record.LibFiles = append(record.LibFiles, depFiles...)
 					}
@@ -148,6 +163,87 @@ func (c *soongApiSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 			record.TestOnly = commonInfo.TestModuleInfo.TestOnly
 			record.TopLevelTarget = commonInfo.TestModuleInfo.TopLevelTarget
 		}
+
+		if _, ok := android.OtherModuleProvider(ctx, m, cc.CcInfoProvider); ok {
+			// Enhance BuiltFiles (retrieve more precise output paths from LinkableInfoProvider)
+			if linkableInfo, ok := android.OtherModuleProvider(ctx, m, cc.LinkableInfoProvider); ok {
+				if linkableInfo.OutputFile.Valid() {
+					record.BuiltFiles = append(record.BuiltFiles, linkableInfo.OutputFile.Path().String())
+				}
+			}
+
+			// Get direct dep's Provider
+			ctx.VisitDirectDepsProxies(m, func(dep android.ModuleProxy) {
+				tag := ctx.OtherModuleDependencyTag(dep)
+				depName := ctx.ModuleName(dep)
+
+				// Retrieve output paths for dependencies via LinkableInfo
+				var depFiles []string
+				if depLinkable, ok := android.OtherModuleProvider(ctx, dep, cc.LinkableInfoProvider); ok {
+					if depLinkable.OutputFile.Valid() {
+						depFiles = append(depFiles, depLinkable.OutputFile.Path().String())
+					}
+				}
+
+				if cc.IsWholeStaticDepTag(tag) {
+					record.WholeStaticLibs = append(record.WholeStaticLibs, depName)
+					record.WholeStaticLibFiles = append(record.WholeStaticLibFiles, depFiles...)
+				} else if cc.IsStaticDepTag(tag) {
+					record.StaticLibs = append(record.StaticLibs, depName)
+					record.StaticLibFiles = append(record.StaticLibFiles, depFiles...)
+				} else if cc.IsCrtDepTag(tag) {
+					record.CrtLibs = append(record.CrtLibs, depName)
+					record.CrtLibFiles = append(record.CrtLibFiles, depFiles...)
+				} else if cc.IsSharedDepTag(tag) {
+					record.Libs = append(record.Libs, depName)
+					record.LibFiles = append(record.LibFiles, depFiles...)
+				} else if cc.IsHeaderDepTag(tag) {
+					record.HeaderLibs = append(record.HeaderLibs, depName)
+				}
+			})
+		}
+
+		// Collect Rust modules information
+		if _, ok := android.OtherModuleProvider(ctx, m, rust.RustInfoProvider); ok {
+			ctx.VisitDirectDepsProxies(m, func(dep android.ModuleProxy) {
+				tag := ctx.OtherModuleDependencyTag(dep)
+				depName := ctx.ModuleName(dep)
+
+				// Retrieve output paths via LinkableInfoProvider, as Rust shares this with other native modules.
+				var depFiles []string
+				if depLinkable, ok := android.OtherModuleProvider(ctx, dep, cc.LinkableInfoProvider); ok {
+					if depLinkable.OutputFile.Valid() {
+						depFiles = append(depFiles, depLinkable.OutputFile.Path().String())
+					}
+				}
+
+				// For rust modules, treat rust_library and cc_static_lib as static deps.
+				if rust.IsRlibDepTag(tag) {
+					record.StaticLibs = append(record.StaticLibs, depName)
+					record.StaticLibFiles = append(record.StaticLibFiles, depFiles...)
+				}
+
+				if cc.IsStaticDepTag(tag) {
+					record.StaticLibs = append(record.StaticLibs, depName)
+					record.StaticLibFiles = append(record.StaticLibFiles, depFiles...)
+				}
+
+				if cc.IsWholeStaticDepTag(tag) {
+					record.WholeStaticLibs = append(record.WholeStaticLibs, depName)
+					record.WholeStaticLibFiles = append(record.WholeStaticLibFiles, depFiles...)
+				}
+			})
+		}
+
+		// --- Final data deduplication and cleanup ---
+		record.BuiltFiles = android.FirstUniqueStrings(record.BuiltFiles)
+		record.StaticLibs = android.FirstUniqueStrings(record.StaticLibs)
+		record.StaticLibFiles = android.FirstUniqueStrings(record.StaticLibFiles)
+		record.Libs = android.FirstUniqueStrings(record.Libs)
+		record.LibFiles = android.FirstUniqueStrings(record.LibFiles)
+		record.WholeStaticLibs = android.FirstUniqueStrings(record.WholeStaticLibs)
+		record.WholeStaticLibFiles = android.FirstUniqueStrings(record.WholeStaticLibFiles)
+		record.HeaderLibs = android.FirstUniqueStrings(record.HeaderLibs)
 
 		records = append(records, record)
 	})

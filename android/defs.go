@@ -16,7 +16,8 @@ package android
 
 import (
 	"fmt"
-        "strings"
+	"path/filepath"
+	"strings"
 	"unicode"
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
@@ -284,6 +285,15 @@ var (
 	MergeZips       = pctx.HostTool("merge_zips")
 	ZipSync         = pctx.HostTool("zipsync")
 	CpIfChanged     = pctx.HostTool("cp_if_changed")
+
+	Awk = pctx.HostToolFunc(func(ctx PathContext) blueprint.HostToolParams {
+		symlink := filepath.Join("prebuilts/build-tools/path", ctx.Config().PrebuiltOS(), "awk")
+		realBin := ctx.Config().PrebuiltBuildTool(ctx, "one-true-awk").String()
+		return blueprint.HostToolParams{
+			Value: symlink,
+			Deps:  []string{symlink, realBin},
+		}
+	})
 )
 
 var commonToyboxSymlinks = map[string]struct{}{

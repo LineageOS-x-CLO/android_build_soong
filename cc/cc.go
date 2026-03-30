@@ -1132,6 +1132,17 @@ func IsStaticDepTag(depTag blueprint.DependencyTag) bool {
 	return ok && ccLibDepTag.static()
 }
 
+// IsWholeStaticDepTag returns true if the depTag is a libraryDependencyTag with wholeStatic set to true.
+func IsWholeStaticDepTag(depTag blueprint.DependencyTag) bool {
+	ccLibDepTag, ok := depTag.(libraryDependencyTag)
+	return ok && ccLibDepTag.static() && ccLibDepTag.wholeStatic
+}
+
+// IsCrtDepTag returns true if the depTag is CrtBeginDepTag or CrtEndDepTag.
+func IsCrtDepTag(depTag blueprint.DependencyTag) bool {
+	return depTag == CrtBeginDepTag || depTag == CrtEndDepTag
+}
+
 func IsHeaderDepTag(depTag blueprint.DependencyTag) bool {
 	ccLibDepTag, ok := depTag.(libraryDependencyTag)
 	return ok && ccLibDepTag.header()
@@ -1619,6 +1630,16 @@ func (c *Module) IsLlndk() bool {
 func (m *Module) NeedsLlndkVariants() bool {
 	lib := moduleVersionedInterface(m)
 	return lib != nil && (lib.HasLLNDKStubs() || lib.HasLLNDKHeaders())
+}
+
+func (m *Module) SplitAllImageVariants() bool {
+	// llndk_libraries.txt is created by a singleton that collates all the
+	// llndk libraries using VisitAllModules in GenerateAndroidBuildActions.
+	//
+	// When only the primary "core" variants are created, the "vendor" variants
+	// of llndk libraries are not available in VisitAllModules.
+	// Keep the frontloaded variant creation for llndk libraries.
+	return m.NeedsLlndkVariants()
 }
 
 func (m *Module) NeedsVendorPublicLibraryVariants() bool {
