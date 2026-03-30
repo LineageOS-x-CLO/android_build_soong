@@ -149,3 +149,13 @@ func (g *GoBinary) AndroidMkEntries() []android.AndroidMkEntries {
 		},
 	}
 }
+
+// TODO (b/448182248)
+func (g *GoBinary) SplitAllVariants() bool {
+	return true
+}
+
+// TODO (b/448182248)
+func (g *GoPackage) SplitAllVariants() bool {
+	return true
+}
