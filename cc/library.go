@@ -326,7 +326,6 @@ type bundleLibraryDecorator struct {
 // whole_static_libs to include all their symbols in the final bundle shared library.
 func (bundle *bundleLibraryDecorator) linkerDeps(ctx DepsContext, deps Deps) Deps {
 	deps.WholeStaticLibs = append(deps.WholeStaticLibs, bundle.BundleProperties.Bundled_libs...)
-	deps.ReexportStaticLibHeaders = append(deps.ReexportStaticLibHeaders, bundle.BundleProperties.Bundled_libs...)
 	return bundle.libraryDecorator.linkerDeps(ctx, deps)
 }
 
@@ -337,6 +336,7 @@ func (bundle *bundleLibraryDecorator) linkerDeps(ctx DepsContext, deps Deps) Dep
 func bundleLibraryFactory() android.Module {
 	module, library := NewLibrary(android.DeviceSupported)
 	library.BuildOnlyShared()
+	library.skipFlagExporter = true
 	bundle := &bundleLibraryDecorator{
 		libraryDecorator: library,
 	}
@@ -585,6 +585,7 @@ type libraryDecorator struct {
 	flagExporter
 	flagExporterInfo *FlagExporterInfo
 	stripper         Stripper
+	skipFlagExporter bool
 
 	// For whole_static_libs
 	objects                      Objects
@@ -2056,7 +2057,9 @@ func (library *libraryDecorator) link(ctx ModuleContext,
 	library.exportVersioningMacroIfNeeded(ctx)
 
 	// Propagate a Provider containing information about exported flags, deps, and include paths.
-	library.flagExporter.setProvider(ctx)
+	if !library.skipFlagExporter {
+		library.flagExporter.setProvider(ctx)
+	}
 
 	return out
 }

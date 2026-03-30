@@ -3950,6 +3950,13 @@ func (c *Module) depsToPaths(ctx ModuleContext) PathDeps {
 				// Skip if the dep is replaced by a bundle.
 				// Bundle replacement works with only platform/core variant.
 				if apexInfo.IsForPlatform() && getBundleReplacement(ctx, dep) != "" {
+					// While skipping the dep, use its include_dirs and re-export them.
+					// Note that the bundle library can't export include_dirs. Otherwise, clients
+					// would get the include_dirs from all of bundled libraries.
+					depPaths.IncludeDirs = append(depPaths.IncludeDirs, depExporterInfo.IncludeDirs...)
+					if libDepTag.reexportFlags {
+						reexportExporter(depExporterInfo)
+					}
 					return
 				}
 

@@ -15,6 +15,7 @@
 package cc
 
 import (
+	"android/soong/android"
 	"strings"
 	"testing"
 )
@@ -346,4 +347,112 @@ func TestBundleLibrary(t *testing.T) {
 			split_all_variants: true,
 		}`)
 	})
+}
+
+func TestBundleLibrary_IncludeDir(t *testing.T) {
+	t.Parallel()
+	ctx := android.GroupFixturePreparers(
+		prepareForCcTest,
+		android.MockFS{
+			"user/Android.bp": []byte(`
+				cc_binary {
+					name: "user",
+					srcs: ["user.c"],
+					shared_libs: ["libfoo"],
+					system_shared_libs: [],
+				}
+			`),
+			"bundle/Android.bp": []byte(`
+				cc_library_bundle {
+					name: "libbundle",
+					bundled_libs: ["libfoo", "libbar"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+			"foo/Android.bp": []byte(`
+				cc_library {
+					name: "libfoo",
+					target_bundle: "libbundle",
+					export_include_dirs: ["inc"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+			"bar/Android.bp": []byte(`
+				cc_library {
+					name: "libbar",
+					target_bundle: "libbundle",
+					export_include_dirs: ["inc"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+		}.AddToFixture(),
+	).RunTest(t).TestContext
+
+	user := ctx.ModuleForTests(t, "user", "android_arm64_armv8-a")
+	userCcRule := user.Rule("cc")
+	userCcFlags := userCcRule.Args["cFlags"]
+	android.AssertStringDoesContain(t, "should include foo/inc", userCcFlags, "-Ifoo/inc")
+	android.AssertStringDoesNotContain(t, "should not include bar/inc", userCcFlags, "-Ibar/inc")
+}
+
+func TestBundleLibrary_ReExportFromBundledLibs(t *testing.T) {
+	t.Parallel()
+	ctx := android.GroupFixturePreparers(
+		prepareForCcTest,
+		android.MockFS{
+			"user/Android.bp": []byte(`
+				cc_binary {
+					name: "user",
+					srcs: ["user.c"],
+					shared_libs: ["libfoo"],
+					system_shared_libs: [],
+				}
+			`),
+			"bundle/Android.bp": []byte(`
+				cc_library_bundle {
+					name: "libbundle",
+					bundled_libs: ["libbar"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+			"foo/Android.bp": []byte(`
+				cc_library {
+					name: "libfoo",
+					srcs: ["foo.c"],
+					export_include_dirs: ["inc"],
+					shared_libs: ["libbar"],
+					export_shared_lib_headers: ["libbar"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+			"bar/Android.bp": []byte(`
+				cc_library {
+					name: "libbar",
+					srcs: ["bar.c"],
+					target_bundle: "libbundle",
+					export_include_dirs: ["inc"],
+					system_shared_libs: [],
+					split_all_variants: true,
+				}
+			`),
+		}.AddToFixture(),
+	).RunTest(t).TestContext
+
+	// user should get libbar via libfoo:
+	//
+	// user --> libfoo ----------> libbar
+	//                 shared_libs
+	//                  re-export
+	//
+	// libfoo should re-export the libbar's include_dirs even when it's replaced
+	// with a bundle.
+	user := ctx.ModuleForTests(t, "user", "android_arm64_armv8-a")
+	userCcRule := user.Rule("cc")
+	userCcFlags := userCcRule.Args["cFlags"]
+	android.AssertStringDoesContain(t, "should include bar/inc", userCcFlags, "-Ibar/inc")
 }
