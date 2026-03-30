@@ -110,7 +110,6 @@ var prepareForTestWithFrameworkDeps = android.GroupFixturePreparers(
 		"build/make/core/proguard/enumvalues.flags":  nil,
 		"build/make/core/proguard/kotlin.flags":      nil,
 		"prebuilts/cmdline-tools/shrinker.xml":       nil,
-		defaultJavaDir + "/framework-private.flags":  nil,
 	}.AddToFixture(),
 )
 
@@ -570,13 +569,7 @@ func gatherRequiredDepsForTest() string {
 		android_app {
 			name: "framework-res",
 			sdk_version: "core_platform",
-		}
-
-		filegroup {
-			name: "framework-private-proguard",
-			srcs: ["framework-private.flags"],
-		}
-		`
+		}`
 
 	systemModules := []string{
 		"core-public-stubs-system-modules",

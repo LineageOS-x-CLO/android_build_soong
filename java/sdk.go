@@ -193,7 +193,6 @@ func decodeSdkDep(ctx android.EarlyModuleContext, sdkContext SdkVersionContext) 
 			bootclasspath:      corePlatformBootclasspathLibraries(ctx),
 			classpath:          classpath,
 			frameworkResModule: "framework-res",
-			proguardFlags:      []string{"framework-private-proguard"},
 		}
 	case android.SdkNone:
 		systemModules := sdkContext.SystemModules()
