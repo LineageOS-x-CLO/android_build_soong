@@ -42,7 +42,6 @@ var (
 		return bindgenClangVersion
 	})
 
-	//TODO(b/160803703) Use a prebuilt bindgen instead of the built bindgen.
 	_ = pctx.HostBinToolVariable("bindgenCmd", "bindgen")
 	_ = pctx.VariableFunc("bindgenHostPrebuiltTag", func(ctx android.PackageVarContext) string {
 		if ctx.Config().UseHostMusl() {
