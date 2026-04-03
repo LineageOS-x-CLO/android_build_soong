@@ -390,6 +390,10 @@ func (mod *Module) Xom() *bool {
 	return mod.compiler.Xom()
 }
 
+func (mod *Module) TargetBundle() string {
+	return ""
+}
+
 func (mod *Module) ApexExclude() bool {
 	if mod.compiler != nil {
 		if library, ok := mod.compiler.(libraryInterface); ok {

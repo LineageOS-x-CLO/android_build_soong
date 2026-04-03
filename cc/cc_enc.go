@@ -4700,12 +4700,16 @@ func (r FdoProfileInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error
 	if err = gobtools.EncodeInterface(ctx, buf, r.Path); err != nil {
 		return err
 	}
+
+	if err = gobtools.EncodeBool(buf, r.IncompleteCoverage); err != nil {
+		return err
+	}
 	return err
 }
 
 func (r FdoProfileInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":cc.FdoProfileInfo")
-	hasher.WriteInt(1)
+	hasher.WriteInt(2)
 	hasher.WriteString(":cc.android.Path")
 	val1 := r.Path == nil
 	if val1 {
@@ -4729,6 +4733,12 @@ func (r FdoProfileInfo) CustomHash(hasher *proptools.Hasher) error {
 			r.Path.(proptools.CustomHash).CustomHash(hasher)
 		}
 	}
+	hasher.WriteString(":.bool")
+	if r.IncompleteCoverage {
+		hasher.WriteByte(1)
+	} else {
+		hasher.WriteByte(0)
+	}
 	return nil
 }
 
@@ -4741,6 +4751,11 @@ func (r *FdoProfileInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) erro
 		r.Path = nil
 	} else {
 		r.Path = val2.(android.Path)
+	}
+
+	err = gobtools.DecodeBool(buf, &r.IncompleteCoverage)
+	if err != nil {
+		return err
 	}
 
 	return err
@@ -5083,6 +5098,83 @@ func (r lfiInfo) GetTypeId() int16 {
 }
 
 // end of lfi.go
+
+// begin of library.go
+func init() {
+	TargetBundleInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(TargetBundleInfo) })
+}
+
+func (r TargetBundleInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
+	var err error
+
+	if err = gobtools.EncodeString(buf, r.BundleName); err != nil {
+		return err
+	}
+
+	if r.BundledLibs == nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
+			return err
+		}
+	} else {
+		if err = gobtools.EncodeInt(buf, len(r.BundledLibs)); err != nil {
+			return err
+		}
+		for val1 := 0; val1 < len(r.BundledLibs); val1++ {
+			if err = gobtools.EncodeString(buf, r.BundledLibs[val1]); err != nil {
+				return err
+			}
+		}
+	}
+	return err
+}
+
+func (r TargetBundleInfo) CustomHash(hasher *proptools.Hasher) error {
+	hasher.WriteString(":cc.TargetBundleInfo")
+	hasher.WriteInt(2)
+	hasher.WriteString(":.string")
+	hasher.WriteString(r.BundleName)
+	hasher.WriteString(":.[]string")
+	hasher.WriteInt(len(r.BundledLibs))
+	for val1 := 0; val1 < len(r.BundledLibs); val1++ {
+		hasher.WriteString(":.string")
+		hasher.WriteString(r.BundledLibs[val1])
+	}
+	return nil
+}
+
+func (r *TargetBundleInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
+	var err error
+
+	err = gobtools.DecodeString(buf, &r.BundleName)
+	if err != nil {
+		return err
+	}
+
+	var val3 int
+	err = gobtools.DecodeInt(buf, &val3)
+	if err != nil {
+		return err
+	}
+	if val3 != -1 {
+		r.BundledLibs = make([]string, val3)
+		for val4 := 0; val4 < int(val3); val4++ {
+			err = gobtools.DecodeString(buf, &r.BundledLibs[val4])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return err
+}
+
+var TargetBundleInfoGobRegId int16
+
+func (r TargetBundleInfo) GetTypeId() int16 {
+	return TargetBundleInfoGobRegId
+}
+
+// end of library.go
 
 // begin of library_sdk_member.go
 func init() {

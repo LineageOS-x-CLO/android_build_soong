@@ -276,6 +276,9 @@ type bootImageConfig struct {
 	// Path of the preloaded classes file.
 	preloadedClassesFile string
 
+	// Path of the preloaded classes denylist file.
+	noPreloadClassesFile string
+
 	// The "--compiler-filter" argument.
 	compilerFilter string
 
@@ -1425,7 +1428,8 @@ Rebuild with ART_BOOT_IMAGE_EXTRA_ARGS="--runtime-arg -verbose:verifier" to see 
 // the platform and the Mainline modules when building from source.
 // Building from prebuilts is not handled here. Instead, the profile is extracted from the prebuilt
 // Mainline modules.
-func bootImageProfileRuleCommon(ctx android.ModuleContext, name string, dexFiles android.Paths, dexLocations []string, bootProfilePathsInHRF android.Paths) android.WritablePath {
+func bootImageProfileRuleCommon(ctx android.ModuleContext, name string, dexFiles android.Paths,
+	dexLocations []string, bootProfilePathsInHRF android.Paths, noPreloadClassesFile string) android.WritablePath {
 	globalSoong := dexpreopt.GetGlobalSoongConfig(ctx)
 	global := dexpreopt.GetGlobalConfig(ctx)
 
@@ -1456,13 +1460,8 @@ func bootImageProfileRuleCommon(ctx android.ModuleContext, name string, dexFiles
 		FlagForEachArg("--dex-location=", dexLocations).
 		FlagWithOutput("--reference-profile-file=", profile)
 
-	if ctx.Config().GetBuildFlagBool("RELEASE_ART_NOPRELOAD_CLASSES_IN_PROFILE") {
-		// The same preloaded-classes-denylist is used for all profiles, and we always expect to find it.
-		noPreloadClassesPath := android.ExistentPathForSource(ctx, "frameworks/base/config/preloaded-classes-denylist")
-		if !noPreloadClassesPath.Valid() {
-			ctx.ModuleErrorf("cannot find preloaded-classes-denylist file")
-		}
-		cmd.FlagWithInput("--preloaded-classes-denylist=", noPreloadClassesPath.Path()).
+	if ctx.Config().GetBuildFlagBool("RELEASE_ART_NOPRELOAD_CLASSES_IN_PROFILE") && len(noPreloadClassesFile) > 0 {
+		cmd.FlagWithInput("--preloaded-classes-denylist=", android.PathForSource(ctx, noPreloadClassesFile)).
 			Flag("--record-preloaded-classes-denylist")
 	}
 
@@ -1497,7 +1496,8 @@ func bootImageProfileRuleForFramework(ctx android.ModuleContext, image *bootImag
 	if path := android.ExistentPathForSource(ctx, extraProfile); path.Valid() {
 		profiles = append(profiles, path.Path())
 	}
-	profile := bootImageProfileRuleCommon(ctx, image.name, image.dexPathsDeps.Paths(), image.getAnyAndroidVariant().dexLocationsDeps, profiles)
+	profile := bootImageProfileRuleCommon(ctx, image.name, image.dexPathsDeps.Paths(),
+		image.getAnyAndroidVariant().dexLocationsDeps, profiles, image.noPreloadClassesFile)
 
 	if profile != nil {
 		rule := android.NewRuleBuilder(pctx, ctx).SandboxDisabled()

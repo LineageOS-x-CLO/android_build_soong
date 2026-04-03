@@ -330,7 +330,8 @@ func Build(ctx Context, config Config) {
 			}()
 			startRBEproxy(ctx, config)
 		}()
-		defer DumpRBEMetrics(ctx, config, filepath.Join(config.LogsDir(), "rbe_metrics.pb"))
+		// Siso does not need to run DumpRBEMetrics() since Siso itself generates
+		// the metrics file under config.LogsDir() rather than the proxy does.
 	} else {
 		close(rbeCh)
 	}
