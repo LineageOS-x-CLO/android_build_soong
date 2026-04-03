@@ -3738,6 +3738,15 @@ type IdeInfo struct {
 	Javacflags                 []string        `json:"javacflags,omitempty"`
 	Annotation_processor_flags []string        `json:"annotation_processor_flags,omitempty"`
 	Plugins                    []string        `json:"plugins,omitempty"`
+
+	// Ravenwood specific fields below. Not useful for other module types (for now),
+	// so only write them for Ravenwood to avoid bloating the file.
+	// Some of the fields (such as Data and TargetSdkVersion) are used by
+	// other module types too, but for now, no one needs them.
+	RavenTargetSdkVersion    string   `json:"raven_target_sdk,omitempty"`
+	RavenTargetSdkVersionInt *int64   `json:"raven_target_sdk_int,omitempty"`
+	RavenData                []string `json:"raven_data,omitempty"`
+	RavenTargetPackageName   string   `json:"raven_target_package_name,omitempty"`
 }
 
 // @auto-generate: gob
@@ -3791,6 +3800,10 @@ func (i IdeInfo) Merge(other *IdeInfo) IdeInfo {
 		Javacflags:                 mergeStringLists(i.Javacflags, other.Javacflags),
 		Annotation_processor_flags: mergeStringLists(i.Annotation_processor_flags, other.Annotation_processor_flags),
 		Plugins:                    mergeStringLists(i.Plugins, other.Plugins),
+		RavenTargetSdkVersion:      mergeString(i.RavenTargetSdkVersion, other.RavenTargetSdkVersion),
+		RavenTargetSdkVersionInt:   mergeInt64Ptr(i.RavenTargetSdkVersionInt, other.RavenTargetSdkVersionInt),
+		RavenData:                  mergeStringLists(i.RavenData, other.RavenData),
+		RavenTargetPackageName:     mergeString(i.RavenTargetPackageName, other.RavenTargetPackageName),
 	}
 }
 
@@ -3850,6 +3863,14 @@ func mergeString(a, b string) string {
 
 // mergeBool returns the first non-nil *bool.
 func mergeBool(a, b *bool) *bool {
+	if a != nil {
+		return a
+	}
+	return b
+}
+
+// mergeInt returns the first non-nil *int64.
+func mergeInt64Ptr(a, b *int64) *int64 {
 	if a != nil {
 		return a
 	}

@@ -2734,8 +2734,7 @@ func (c *config) UseDebugArt() bool {
 		return Bool(c.productVariables.ArtTargetIncludeDebugBuild)
 	}
 
-	// Default to the debug apex for eng builds.
-	return Bool(c.productVariables.Eng)
+	return false
 }
 
 func (c *config) DisableSoongConfigTrace() bool {

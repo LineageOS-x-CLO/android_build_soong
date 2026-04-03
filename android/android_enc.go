@@ -9794,12 +9794,45 @@ func (r IdeInfo) Encode(ctx gobtools.EncContext, buf *bytes.Buffer) error {
 			}
 		}
 	}
+
+	if err = gobtools.EncodeString(buf, r.RavenTargetSdkVersion); err != nil {
+		return err
+	}
+
+	val24 := r.RavenTargetSdkVersionInt == nil
+	if err = gobtools.EncodeBool(buf, val24); err != nil {
+		return err
+	}
+	if !val24 {
+		if err = gobtools.EncodeInt64(buf, (*r.RavenTargetSdkVersionInt)); err != nil {
+			return err
+		}
+	}
+
+	if r.RavenData == nil {
+		if err = gobtools.EncodeInt(buf, -1); err != nil {
+			return err
+		}
+	} else {
+		if err = gobtools.EncodeInt(buf, len(r.RavenData)); err != nil {
+			return err
+		}
+		for val25 := 0; val25 < len(r.RavenData); val25++ {
+			if err = gobtools.EncodeString(buf, r.RavenData[val25]); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err = gobtools.EncodeString(buf, r.RavenTargetPackageName); err != nil {
+		return err
+	}
 	return err
 }
 
 func (r IdeInfo) CustomHash(hasher *proptools.Hasher) error {
 	hasher.WriteString(":android.IdeInfo")
-	hasher.WriteInt(27)
+	hasher.WriteInt(31)
 	hasher.WriteString(":.string")
 	hasher.WriteString(r.BaseModuleName)
 	hasher.WriteString(":.string")
@@ -9973,6 +10006,30 @@ func (r IdeInfo) CustomHash(hasher *proptools.Hasher) error {
 		hasher.WriteString(":.string")
 		hasher.WriteString(r.Plugins[val26])
 	}
+	hasher.WriteString(":.string")
+	hasher.WriteString(r.RavenTargetSdkVersion)
+	hasher.WriteString(":.*int64")
+	val27 := r.RavenTargetSdkVersionInt == nil
+	if val27 {
+		hasher.WriteByte(0)
+	} else {
+		val28 := func(hasher *proptools.Hasher) error {
+			hasher.WriteString(":.int64")
+			hasher.WriteUint64(uint64((*r.RavenTargetSdkVersionInt)))
+			return nil
+		}
+		if err := proptools.HashReference(hasher, uintptr(unsafe.Pointer(r.RavenTargetSdkVersionInt)), val28); err != nil {
+			return err
+		}
+	}
+	hasher.WriteString(":.[]string")
+	hasher.WriteInt(len(r.RavenData))
+	for val29 := 0; val29 < len(r.RavenData); val29++ {
+		hasher.WriteString(":.string")
+		hasher.WriteString(r.RavenData[val29])
+	}
+	hasher.WriteString(":.string")
+	hasher.WriteString(r.RavenTargetPackageName)
 	return nil
 }
 
@@ -10333,6 +10390,44 @@ func (r *IdeInfo) Decode(ctx gobtools.EncContext, buf *bytes.Reader) error {
 				return err
 			}
 		}
+	}
+
+	err = gobtools.DecodeString(buf, &r.RavenTargetSdkVersion)
+	if err != nil {
+		return err
+	}
+
+	var val96 bool
+	if err = gobtools.DecodeBool(buf, &val96); err != nil {
+		return err
+	}
+	if !val96 {
+		var val95 int64
+		err = gobtools.DecodeInt64(buf, &val95)
+		if err != nil {
+			return err
+		}
+		r.RavenTargetSdkVersionInt = &val95
+	}
+
+	var val99 int
+	err = gobtools.DecodeInt(buf, &val99)
+	if err != nil {
+		return err
+	}
+	if val99 != -1 {
+		r.RavenData = make([]string, val99)
+		for val100 := 0; val100 < int(val99); val100++ {
+			err = gobtools.DecodeString(buf, &r.RavenData[val100])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	err = gobtools.DecodeString(buf, &r.RavenTargetPackageName)
+	if err != nil {
+		return err
 	}
 
 	return err

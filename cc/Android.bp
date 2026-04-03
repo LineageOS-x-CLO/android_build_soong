@@ -103,6 +103,7 @@ bootstrap_go_package {
         "afdo_test.go",
         "artless_denylist_test.go",
         "binary_test.go",
+        "bundle_test.go",
         "cc_preprocess_no_configuration_test.go",
         "cc_test.go",
         "cc_test_only_property_test.go",

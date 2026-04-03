@@ -309,6 +309,8 @@ func RegisterCCBuildComponents(ctx android.RegistrationContext) {
 		ctx.Transition("link", &linkageTransitionMutator{})
 		ctx.Transition("version", &versionTransitionMutator{})
 		ctx.BottomUp("begin", BeginMutator)
+		ctx.BottomUp("bundle", bundleMutator)
+		ctx.BottomUp("bundle_mark", bundleMarkMutator)
 	})
 
 	ctx.PostDepsMutators(func(ctx android.RegisterMutatorsContext) {
@@ -3243,10 +3245,30 @@ func AddSharedLibDependenciesWithVersions(ctx android.BottomUpMutatorContext, mo
 		}
 	}
 
+	var modules []android.ModuleProxy
 	if far {
-		ctx.AddFarVariationDependencies(variations, depTag, name)
+		modules = ctx.AddFarVariationDependencies(variations, depTag, name)
 	} else {
-		ctx.AddVariationDependencies(variations, depTag, name)
+		modules = ctx.AddVariationDependencies(variations, depTag, name)
+	}
+
+	// If the dep is bundled and should be replaced by the bundle, add the bundle
+	// library as well. The actual replacement will happen in depsToPaths() by
+	// skipping the bundled libraries.
+	if len(modules) > 0 && !modules[0].IsNil() {
+		if bundle := getBundleReplacement(ctx, modules[0]); bundle != "" {
+			// Bundle replacement works with only platform/core variant.
+			if tag, ok := depTag.(libraryDependencyTag); ok {
+				tag.excludeInApex = true
+				if far {
+					ctx.AddFarVariationDependencies(variations, tag, bundle)
+				} else {
+					ctx.AddVariationDependencies(variations, tag, bundle)
+				}
+			} else {
+				panic(fmt.Errorf("Unexpected dependency tag: %T", depTag))
+			}
+		}
 	}
 }
 
@@ -3939,6 +3961,19 @@ func (c *Module) depsToPaths(ctx ModuleContext) PathDeps {
 					return
 				}
 
+				// Skip if the dep is replaced by a bundle.
+				// Bundle replacement works with only platform/core variant.
+				if apexInfo.IsForPlatform() && getBundleReplacement(ctx, dep) != "" {
+					// While skipping the dep, use its include_dirs and re-export them.
+					// Note that the bundle library can't export include_dirs. Otherwise, clients
+					// would get the include_dirs from all of bundled libraries.
+					depPaths.IncludeDirs = append(depPaths.IncludeDirs, depExporterInfo.IncludeDirs...)
+					if libDepTag.reexportFlags {
+						reexportExporter(depExporterInfo)
+					}
+					return
+				}
+
 				sharedLibraryInfo, returnedDepExporterInfo := ChooseStubOrImpl(ctx, dep)
 				depExporterInfo = returnedDepExporterInfo
 
@@ -4491,6 +4526,13 @@ func (c *Module) Xom() *bool {
 		return c.linker.Xom()
 	}
 	return nil
+}
+
+func (c *Module) TargetBundle() string {
+	if library, ok := c.linker.(libraryInterface); ok {
+		return library.targetBundle()
+	}
+	return ""
 }
 
 func (c *Module) Object() bool {
