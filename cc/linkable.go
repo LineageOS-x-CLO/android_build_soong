@@ -278,8 +278,6 @@ type LinkableInterface interface {
 
 	// Xom returns the Xom *bool property value, nil if not explicitly set.
 	Xom() *bool
-
-	TargetBundle() string
 }
 
 var (

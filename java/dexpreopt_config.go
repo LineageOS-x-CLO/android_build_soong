@@ -76,7 +76,6 @@ func genBootImageConfigRaw(ctx android.PathContext) map[string]*bootImageConfig 
 			installDir:           "apex/art_boot_images/javalib",
 			modules:              global.TestOnlyArtBootImageJars,
 			preloadedClassesFile: "art/build/boot/preloaded-classes",
-			noPreloadClassesFile: "art/build/boot/nopreload-classes",
 			compilerFilter:       "speed-profile",
 			singleImage:          false,
 		}
@@ -89,7 +88,6 @@ func genBootImageConfigRaw(ctx android.PathContext) map[string]*bootImageConfig 
 			installDir:           frameworkSubdir,
 			modules:              frameworkModules,
 			preloadedClassesFile: "frameworks/base/config/preloaded-classes",
-			noPreloadClassesFile: "frameworks/base/config/preloaded-classes-denylist",
 			compilerFilter:       "speed-profile",
 			singleImage:          false,
 		}

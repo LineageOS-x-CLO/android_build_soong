@@ -118,10 +118,6 @@ type LibraryProperties struct {
 
 	// If this is a vendor public library, properties to describe the vendor public library stubs.
 	Vendor_public_library vendorPublicLibraryProperties
-
-	// Name of a cc_library_bundle module that bundles this. Clients will use the bundle library
-	// instead of this.
-	Target_bundle *string
 }
 
 type StubsProperties struct {
@@ -235,7 +231,6 @@ func RegisterLibraryBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("cc_library", LibraryFactory)
 	ctx.RegisterModuleType("cc_library_host_static", LibraryHostStaticFactory)
 	ctx.RegisterModuleType("cc_library_host_shared", LibraryHostSharedFactory)
-	ctx.RegisterModuleType("cc_library_bundle", bundleLibraryFactory)
 }
 
 // cc_library creates both static and/or shared libraries for a device and/or
@@ -297,173 +292,6 @@ func LibraryHostSharedFactory() android.Module {
 	library.BuildOnlyShared()
 	module.sdkMemberTypes = []android.SdkMemberType{sharedLibrarySdkMemberType}
 	return module.Init()
-}
-
-// TargetBundleInfo contains information about the bundle that contains this library.
-// @auto-generate: gob
-type TargetBundleInfo struct {
-	BundleName  string
-	BundledLibs []string
-}
-
-// TargetBundleProvider provides TargetBundleInfo for libraries that are bundled.
-var TargetBundleProvider = blueprint.NewMutatorProvider[TargetBundleInfo]("bundle_mark")
-
-type BundleProperties struct {
-	// Bundled_libs is a list of individual libraries that should be aggregated into this bundle.
-	// For core platform variants, dependencies on these libraries will be redirected to this bundle.
-	Bundled_libs []string
-}
-
-// bundleLibraryDecorator is a decorator for cc_library that supports bundling multiple libraries
-// into a single shared library to reduce ELF overhead and maximize ICF folding.
-type bundleLibraryDecorator struct {
-	*libraryDecorator
-	BundleProperties BundleProperties
-}
-
-// linkerDeps for bundleLibraryDecorator ensures that all bundled libraries are linked as
-// whole_static_libs to include all their symbols in the final bundle shared library.
-func (bundle *bundleLibraryDecorator) linkerDeps(ctx DepsContext, deps Deps) Deps {
-	deps.WholeStaticLibs = append(deps.WholeStaticLibs, bundle.BundleProperties.Bundled_libs...)
-	return bundle.libraryDecorator.linkerDeps(ctx, deps)
-}
-
-// bundleLibraryFactory creates a cc_library_bundle module.
-// A cc_library_bundle is a specialized shared library that aggregates multiple libraries
-// (specified in bundled_libs) for the core platform image. Consumers of the bundled
-// libraries will automatically be redirected to link against the bundle instead.
-func bundleLibraryFactory() android.Module {
-	module, library := NewLibrary(android.DeviceSupported)
-	library.BuildOnlyShared()
-	library.skipFlagExporter = true
-	bundle := &bundleLibraryDecorator{
-		libraryDecorator: library,
-	}
-	module.linker = bundle
-	module.AddProperties(&bundle.BundleProperties)
-
-	// Creates a module that holds bundling information. This is to avoid cyclic dependency between
-	// bundle and bundled libraries: a bundle library depends on bundled libraries to bundle them
-	// while bundled libraries needs to know the bundle information.
-	module.SetDefaultableHook(func(ctx android.DefaultableHookContext) {
-		if ctx.Module().Enabled(ctx) {
-			ctx.CreateModule(bundleInfoFactory, &struct {
-				Name         *string
-				Bundle_name  string
-				Bundled_libs []string
-			}{
-				Name:         proptools.StringPtr(ctx.ModuleName() + ".info"),
-				Bundle_name:  ctx.ModuleName(),
-				Bundled_libs: bundle.BundleProperties.Bundled_libs,
-			})
-		}
-	})
-	return module.Init()
-}
-
-func getBundleReplacement(ctx android.BaseModuleContext, dep android.ModuleProxy) string {
-	info, isBundled := android.OtherModuleProvider(ctx, dep, TargetBundleProvider)
-	if isBundled && !android.InList(ctx.ModuleName(), info.BundledLibs) {
-		return info.BundleName
-	}
-	return ""
-}
-
-// Created per cc_library_bundle to break the cycle between a bundle module
-// and bundled modules. Bundled modules will depend on this to get the bundle
-// information.
-type bundleInfo struct {
-	android.ModuleBase
-	Properties struct {
-		Bundle_name  string
-		Bundled_libs []string
-	}
-}
-
-func bundleInfoFactory() android.Module {
-	module := &bundleInfo{}
-	module.AddProperties(&module.Properties)
-	android.InitAndroidModule(module)
-	return module
-}
-
-func (bundle *bundleInfo) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-}
-
-var bundleDepTag = struct {
-	blueprint.BaseDependencyTag
-}{}
-
-// bundleMutator is a BottomUp mutator that adds the dependency
-// - from a bundle lib to bundled libs
-// - from a bundled lib to bundle info
-func bundleMutator(ctx android.BottomUpMutatorContext) {
-	if c, ok := ctx.Module().(*Module); ok {
-		if b, ok := c.linker.(*bundleLibraryDecorator); ok {
-			if ctx.Device() && c.Shared() && c.ImageVariation().Variation == android.CoreVariation {
-				ctx.AddDependency(ctx.Module(), bundleDepTag, b.BundleProperties.Bundled_libs...)
-			}
-			return
-		}
-	}
-
-	if c, ok := ctx.Module().(LinkableInterface); ok && c.CcLibrary() {
-		if ctx.Device() && c.Shared() && c.ImageVariation().Variation == android.CoreVariation {
-			bundleName := c.TargetBundle()
-			if bundleName != "" && ctx.OtherModuleExists(bundleName+".info") {
-				ctx.AddFarVariationDependencies(nil, bundleDepTag, bundleName+".info")
-			}
-		}
-		return
-	}
-}
-
-// bundleMarkMutator is a BottomUp mutator that sets TargetBundleProvider with bundle name and bundled libraries.
-func bundleMarkMutator(ctx android.BottomUpMutatorContext) {
-	if bundle, ok := ctx.Module().(*bundleInfo); ok {
-		android.SetProvider(ctx, TargetBundleProvider, TargetBundleInfo{
-			BundleName:  bundle.Properties.Bundle_name,
-			BundledLibs: bundle.Properties.Bundled_libs,
-		})
-		return
-	}
-
-	if c, ok := ctx.Module().(LinkableInterface); ok && c.CcLibrary() {
-		if ctx.Device() && c.Shared() && c.ImageVariation().Variation == android.CoreVariation {
-			ctx.VisitDirectDepsProxyWithTag(bundleDepTag, func(m android.ModuleProxy) {
-				info, _ := android.OtherModuleProvider(ctx, m, TargetBundleProvider)
-				// Check if bundled_libs contains the bundled library.
-				// If not, this module is not bundled. (e.g. multi-version AIDL libs)
-				if !android.InList(ctx.ModuleName(), info.BundledLibs) {
-					return
-				}
-				// Bundled library is replaced with a bundle
-				c.SetPreventInstall()
-				android.SetProvider(ctx, TargetBundleProvider, info)
-			})
-		}
-		return
-	}
-
-	if c, ok := ctx.Module().(*Module); ok {
-		if _, ok := c.linker.(*bundleLibraryDecorator); ok {
-			if ctx.Device() && c.Shared() && c.ImageVariation().Variation == android.CoreVariation {
-				ctx.VisitDirectDepsProxyWithTag(bundleDepTag, func(m android.ModuleProxy) {
-					info, isBundledIn := android.OtherModuleProvider(ctx, m, TargetBundleProvider)
-					// Check if a bundled library sets target_bundle correctly.
-					if !isBundledIn {
-						ctx.OtherModuleErrorf(m, "`target_bundle: %q` is missing", ctx.ModuleName())
-					} else if info.BundleName != ctx.ModuleName() {
-						ctx.PropertyErrorf("bundled_libs", "bundling a module(%q) that's bundled in a different module: %q", ctx.OtherModuleName(m), info.BundleName)
-					}
-
-				})
-			}
-			return
-		}
-	}
-
 }
 
 // flagExporter is a separated portion of libraryDecorator pertaining to exported
@@ -585,7 +413,6 @@ type libraryDecorator struct {
 	flagExporter
 	flagExporterInfo *FlagExporterInfo
 	stripper         Stripper
-	skipFlagExporter bool
 
 	// For whole_static_libs
 	objects                      Objects
@@ -1014,8 +841,6 @@ type libraryInterface interface {
 	setVersionScriptPath(path android.OptionalPath)
 
 	installable() *bool
-
-	targetBundle() string
 }
 
 func (library *libraryDecorator) symbolsFile() *string {
@@ -1028,10 +853,6 @@ func (library *libraryDecorator) setSymbolFilePath(path android.Path) {
 
 func (library *libraryDecorator) setVersionScriptPath(path android.OptionalPath) {
 	library.versionScriptPath = path
-}
-
-func (library *libraryDecorator) targetBundle() string {
-	return String(library.Properties.Target_bundle)
 }
 
 type VersionedInterface interface {
@@ -2072,9 +1893,7 @@ func (library *libraryDecorator) link(ctx ModuleContext,
 	library.exportVersioningMacroIfNeeded(ctx)
 
 	// Propagate a Provider containing information about exported flags, deps, and include paths.
-	if !library.skipFlagExporter {
-		library.flagExporter.setProvider(ctx)
-	}
+	library.flagExporter.setProvider(ctx)
 
 	return out
 }

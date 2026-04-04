@@ -16,7 +16,6 @@ package java
 
 import (
 	"android/soong/aconfig"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -289,14 +288,6 @@ func TestRavenwoodTest(t *testing.T) {
 	module.Output(installPathPrefix + "/ravenwood-test/data/file1.txt")
 	module.Output(installPathPrefix + "/ravenwood-test/data2/sub/file2")
 
-	// Check the IDE info
-	dpInfo := getIdeInfo(ctx, module.Module())
-	checkString(t, "dpInfo.RavenTargetSdkVersion", dpInfo.RavenTargetSdkVersion, "34")
-	checkString(t, "dpInfo.RavenTargetPackageName", dpInfo.RavenTargetPackageName, "x.y.z")
-	checkStrings(t, "dpInfo.RavenData", dpInfo.RavenData, []string{"data/file1.txt", "data2/sub/file2"})
-	checkInt64Ptr(t, "dpInfo.RavenTargetSdkVersionInt", dpInfo.RavenTargetSdkVersionInt, 34)
-
-	// Now check the "ravenwood-test-empty" module
 	module = ctx.ModuleForTests(t, "ravenwood-test-empty", "android_common")
 	module.Output(installPathPrefix + "/ravenwood-test-empty/ravenwood.properties")
 
@@ -324,24 +315,4 @@ func TestRavenwoodTest(t *testing.T) {
 		"ravenwood-test-empty",
 	}
 	assertTestOnlyAndTopLevel(t, ctx, expectedTestOnlyModules, expectedTopLevelTests)
-}
-
-func checkString(t *testing.T, msg string, a, b string) {
-	if a != b {
-		t.Errorf("%s = %v, want %v", msg, a, b)
-	}
-}
-
-func checkStrings(t *testing.T, msg string, a, b []string) {
-	if !reflect.DeepEqual(a, b) {
-		t.Errorf("%s = %v, want %v", msg, a, b)
-	}
-}
-
-func checkInt64Ptr(t *testing.T, msg string, a *int64, b int64) {
-	if a == nil {
-		t.Errorf("%s = %v, want %v", msg, a, b)
-	} else if *a != b {
-		t.Errorf("%s = %v, want %v", msg, *a, b)
-	}
 }

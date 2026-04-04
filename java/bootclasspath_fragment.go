@@ -148,9 +148,6 @@ type bootclasspathFragmentProperties struct {
 	Dex_preopt struct {
 		// If set, provides the path to boot image profile.
 		Profile proptools.Configurable[string] `android:"path,replace_instead_of_append"`
-
-		// If set, provides the path to no-preload classes file.
-		Nopreload_classes proptools.Configurable[string] `android:"path,replace_instead_of_append"`
 	}
 
 	// Properties whose values need to differ with and without coverage.
@@ -658,11 +655,6 @@ func (b *BootclasspathFragmentModule) getProfileProviderApexFromSource(ctx andro
 	return "", nil
 }
 
-// getNoPreloadClassesFile returns the filename of no-preload classes list for this fragment or an empty string, if there's none.
-func (b *BootclasspathFragmentModule) getNoPreloadClassesFile(ctx android.BaseModuleContext) string {
-	return b.properties.Dex_preopt.Nopreload_classes.GetOrDefault(ctx, "")
-}
-
 // provideApexContentInfo creates, initializes and stores the apex content info for use by other
 // modules.
 func (b *BootclasspathFragmentModule) provideApexContentInfo(ctx android.ModuleContext, hiddenAPIOutput *HiddenAPIOutput, profile android.WritablePath) {
@@ -953,8 +945,7 @@ func (b *BootclasspathFragmentModule) produceBootImageProfileFromSource(ctx andr
 	if bootProfilePath != nil {
 		bootProfilePaths = append(bootProfilePaths, bootProfilePath)
 	}
-	noPreloadClassesFile := b.getNoPreloadClassesFile(ctx)
-	return bootImageProfileRuleCommon(ctx, b.Name(), dexPaths, dexLocations, bootProfilePaths, noPreloadClassesFile)
+	return bootImageProfileRuleCommon(ctx, b.Name(), dexPaths, dexLocations, bootProfilePaths)
 }
 
 func (b *BootclasspathFragmentModule) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {

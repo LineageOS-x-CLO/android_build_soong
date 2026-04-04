@@ -834,12 +834,6 @@ func (a *archTransitionMutator) splitAll(ctx BaseModuleContext) bool {
 	if splitAllOsArchCommon(ctx) {
 		return true
 	}
-	if ctx.Module().base().IsNativeBridgeSupported() {
-		// TODO (b/448182248): Without this special-case, the native bridge
-		// libraries are not packaged correctly in the soong-only generated
-		// system.img of native bridge supported devices (e.g. cf_x86_64_phone)
-		return true
-	}
 	// Soong benchmark builds
 	if ctx.Config().IsEnvTrue("SOONG_SPLIT_OPT_IN_VARIANTS_ON_DEMAND") {
 		return false

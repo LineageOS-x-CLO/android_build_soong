@@ -347,10 +347,6 @@ targetResourceApk=%s
 func (r *ravenwoodTest) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	r.Library.IDEInfo(ctx, dpInfo)
 	r.aapt.IDEInfo(ctx, dpInfo)
-	dpInfo.RavenTargetSdkVersion = proptools.String(r.deviceProperties.Target_sdk_version)
-	dpInfo.RavenTargetSdkVersionInt = proptools.Int64Ptr(int64(r.TargetSdkVersion(ctx).FinalOrFutureInt()))
-	dpInfo.RavenTargetPackageName = proptools.String(r.ravenwoodTestProperties.Target_package_name)
-	dpInfo.RavenData = append(dpInfo.RavenData, r.data.Strings()...)
 }
 
 // This method is adapted from AndroidApp.aaptBuildActions() in app.go, with changes
