@@ -60,12 +60,6 @@ var (
 		"-Wl,-z,separate-loadable-segments",
 	}
 
-	arm64ArchFeatureLdflags = map[string][]string{
-		"branchprot": {
-			"-Wl,-z,bti-report=warning",
-		},
-	}
-
 	arm64Cppflags = []string{}
 
 	arm64CpuVariantCflags = map[string][]string{
@@ -226,13 +220,8 @@ func arm64ToolchainFlags(arch android.Arch) (string, string) {
 		toolchainCflags = append(toolchainCflags, arm64ArchFeatureCflags[feature]...)
 	}
 
-	extraLdflags := []string{"${config.Arm64Ldflags}"}
-	extraLdflags = append(extraLdflags,
-		variantOrDefault(arm64CpuVariantLdflags, arch.CpuVariant))
-	for _, feature := range arch.ArchFeatures {
-		extraLdflags = append(extraLdflags, arm64ArchFeatureLdflags[feature]...)
-	}
-	return strings.Join(toolchainCflags, " "), strings.Join(extraLdflags, " ")
+	extraLdflags := variantOrDefault(arm64CpuVariantLdflags, arch.CpuVariant)
+	return strings.Join(toolchainCflags, " "), extraLdflags
 }
 
 func init() {
